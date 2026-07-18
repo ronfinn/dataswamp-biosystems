@@ -1,317 +1,690 @@
 # Data Swamp Biosystems
 
-> **A deterministic synthetic scientific data platform for generating governed organisations, metadata, scientific datasets, lineage and controlled data-quality defects for developing and testing modern data platforms, governance systems and AI-powered tooling.**
+> **A deterministic synthetic biotech data estate for testing data catalogues, governance controls, lineage systems and AI agents—without proprietary, confidential or patient data.**
 
-![Project Status](https://img.shields.io/badge/status-active-success)
-![Python](https://img.shields.io/badge/python-3.13+-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-
----
-
-## 🚧 Project Status
-
-**Data Swamp Biosystems** is an active and evolving open-source project.
-
-The architecture and capabilities will continue to expand as additional scientific workflows, metadata standards, governance models and integrations are developed.
-
-Contributions, discussions, feature requests and constructive feedback are all welcomed.
+[![CI](https://github.com/ronfinn/dataswamp-biosystems/actions/workflows/ci.yml/badge.svg)](https://github.com/ronfinn/dataswamp-biosystems/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![Project status](https://img.shields.io/badge/status-pre--alpha-orange)
 
 ---
 
-## 📦 Current Version
+## Overview
 
-**Current Version:** **v0.1.0**
+Scientific organisations generate interconnected data spanning programmes, studies, experiments, samples, assays, sequencing, imaging, analytical pipelines, metadata, lineage, ownership and governance controls.
 
-| Version | Status | Description |
-|----------|--------|-------------|
-| v0.1.0 | Current | Canonical company model, deterministic truth graph, scientific file estate and observed-state defect engine |
+Developing software against these environments is difficult because realistic scientific data is often:
 
-A detailed history of changes can be found in the GitHub Releases and CHANGELOG (coming soon).
+* Proprietary or commercially sensitive
+* Confidential or contractually restricted
+* Distributed across multiple systems
+* Inconsistently documented
+* Difficult to reproduce outside production
+* Associated with privacy or regulatory constraints
+
+**Data Swamp Biosystems** is an open-source project for generating a completely fictional but structurally realistic biotech data estate.
+
+The project is designed to provide a safe and reproducible development environment for testing:
+
+* Scientific data catalogues
+* Metadata ingestion pipelines
+* Data-governance controls
+* Data-quality validation
+* Lineage systems
+* Data-product frameworks
+* AI metadata agents
+* Governance and remediation agents
+* Scientific software integrations
+
+No real patients, employees, organisations, studies or proprietary datasets are represented.
 
 ---
 
-# Overview
+## Project Status
 
-Modern scientific organisations generate highly interconnected data spanning experiments, samples, sequencing, imaging, analysis pipelines, metadata, governance records and derived datasets. Access to realistic development data is often limited by confidentiality, privacy, intellectual property or regulatory constraints.
+> [!IMPORTANT]
+> Data Swamp Biosystems is currently **pre-alpha** and under active development.
 
-**Data Swamp Biosystems** provides a fully synthetic yet realistic environment for developing and validating scientific software without relying on proprietary or sensitive data.
+The current repository provides the initial Python package, command-line interface, automated testing, linting, type checking and continuous-integration foundation.
 
-Every dataset, organisation and generated file is deterministic and reproducible from a single random seed, enabling repeatable testing across development, continuous integration and benchmarking.
+The deterministic organisation generator, scientific file-estate generator, defect-injection engine and benchmark reports described below represent the target capabilities for the first public releases and are being developed incrementally.
 
-## Who is this for?
+| Item                              | Status           |
+| --------------------------------- | ---------------- |
+| Python package foundation         | Available        |
+| Command-line application          | Available        |
+| Automated CI checks               | Available        |
+| Strict static type checking       | Available        |
+| Canonical organisation model      | In development   |
+| Truth graph generation            | In development   |
+| Scientific file-estate generation | Planned for v0.1 |
+| Controlled defect injection       | Planned for v0.1 |
+| Truth-versus-observed reports     | Planned for v0.1 |
+| DataHub integration               | Planned          |
+| OpenMetadata integration          | Planned          |
+| OpenLineage export                | Planned          |
+| AI-agent benchmark harness        | Planned          |
+
+**Source package version:** `0.1.0`
+
+An official GitHub release will be published when the first end-to-end benchmark workflow is complete.
+
+---
+
+## The Core Concept
+
+Data Swamp Biosystems models a fictional scientific organisation in two connected states.
+
+### 1. Truth State
+
+The truth state represents the authoritative and internally consistent version of the organisation.
+
+It is intended to describe:
+
+* Organisational structures
+* Research teams
+* Scientific programmes
+* Studies and experiments
+* Samples and biospecimens
+* Scientific datasets
+* Files and storage locations
+* Data owners and stewards
+* Governance classifications
+* Metadata relationships
+* Analytical workflows
+* Data lineage
+
+### 2. Observed State
+
+The observed state represents the imperfect version of the organisation that a catalogue, governance platform, validator or AI agent might encounter.
+
+Controlled defects may include:
+
+* Missing ownership
+* Incomplete metadata
+* Invalid identifiers
+* Broken lineage
+* Orphaned datasets
+* Inconsistent classifications
+* Incorrect sensitivity labels
+* Duplicate assets
+* Unexpected file locations
+* Schema violations
+* Naming-standard violations
+* Unregistered derived datasets
+
+Every defect will be generated from a known truth state and recorded in a machine-readable defect manifest.
+
+### 3. Benchmark Results
+
+Because the authoritative truth and injected defects are known, tools can be evaluated against measurable expected results.
+
+Potential measures include:
+
+* Defect-detection precision
+* Defect-detection recall
+* Metadata completeness
+* Ownership coverage
+* Lineage reconstruction accuracy
+* Classification accuracy
+* Data-product readiness
+* Remediation success
+* Reproducibility across runs
+
+---
+
+## Why Deterministic Generation Matters
+
+Every generated organisation, asset, relationship and defect is intended to be reproducible from a defined configuration and random seed.
+
+The same configuration and seed should produce an equivalent synthetic environment.
+
+This supports:
+
+* Repeatable development
+* Regression testing
+* Continuous integration
+* Integration testing
+* Platform comparisons
+* AI-agent evaluation
+* Reproducible demonstrations
+* Controlled benchmark scenarios
+
+A platform can therefore be tested against the same data estate before and after a change, or compared with another platform using an equivalent input.
+
+---
+
+## Intended Users
 
 Data Swamp Biosystems is designed for:
 
-- Scientific software engineers
-- Data engineers
-- Data governance teams
-- Platform engineers
-- AI/ML engineers
-- Bioinformaticians
-- DataHub and OpenMetadata users
-- Tool developers building against realistic scientific metadata
-
-Whether you are developing metadata pipelines, testing governance rules, validating AI agents or experimenting with data catalogues, Data Swamp Biosystems provides a deterministic synthetic environment without relying on proprietary scientific data.
-
----
-
-# Why this project exists
-
-Building software for scientific organisations is difficult because realistic data is rarely available outside production environments.
-
-This project aims to provide an open, reproducible platform for developing and testing:
-
-- Data catalogues
-- Metadata management platforms
-- Governance frameworks
-- Lineage systems
-- Validation pipelines
-- AI agents
-- Scientific software
-- Data ingestion pipelines
-- Data quality monitoring
-- Synthetic benchmarking datasets
-
-without exposing any proprietary, confidential or patient data.
+* Scientific software engineers
+* Data engineers
+* Data-platform engineers
+* Data-governance teams
+* Metadata and ontology engineers
+* AI and machine-learning engineers
+* Bioinformaticians
+* Research informatics teams
+* DataHub users
+* OpenMetadata users
+* OpenLineage users
+* Developers building scientific AI agents
+* Developers testing data-ingestion and validation systems
 
 ---
 
-# Features
+## Potential Use Cases
 
-Current capabilities include:
+### Test a scientific data catalogue
 
-- Deterministic synthetic company generation
-- Canonical organisational model
-- Synthetic programmes and studies
-- Deterministic truth graph generation
-- Scientific file generation
-- Metadata validation
-- Controlled defect injection
-- Truth vs observed state comparison
-- Reproducible random seeds
-- Comprehensive automated test suite
+Generate a fictional organisation containing programmes, studies, datasets, owners, classifications and lineage, and then ingest that metadata into a catalogue.
 
----
+### Evaluate governance controls
 
-# Architecture
+Introduce known governance defects and measure whether a platform identifies missing ownership, incorrect classifications or incomplete metadata.
 
-```text
-                         Configuration
-                                │
-                                ▼
-                     Canonical Company
-                                │
-                                ▼
-                         Truth Graph
-                                │
-                                ▼
-                  Scientific File Estate
-                                │
-                                ▼
-                       Observed State
-                                │
-                                ▼
-                  Validation & Governance
-```
+### Benchmark AI agents
 
-## Component Overview
+Provide an AI agent with an imperfect observed state and evaluate whether it can identify, explain and propose remediation for known defects.
 
-### Configuration
+### Test ingestion pipelines
 
-Version-controlled YAML configuration defining the synthetic organisation.
+Generate predictable directory structures, manifests and metadata records for repeatable ingestion testing.
 
-↓
+### Validate lineage systems
 
-### Canonical Company
+Create a known lineage graph and test whether an external system preserves or reconstructs its relationships correctly.
 
-Creates organisational structures, teams, programmes, studies, governance metadata and ownership.
+### Demonstrate data products
 
-↓
+Model governed data products with defined owners, inputs, outputs, quality expectations and readiness states.
 
-### Truth Graph
+### Develop scientific software safely
 
-Produces the authoritative representation of the synthetic organisation.
-
-↓
-
-### Scientific File Estate
-
-Generates realistic scientific files and metadata derived from the truth graph.
-
-↓
-
-### Observed State
-
-Introduces deterministic defects and inconsistencies that mimic real operational environments.
-
-↓
-
-### Validation & Governance
-
-Validates generated data and compares observed state against the intended truth.
+Build and demonstrate software against realistic scientific structures without using production or partner data.
 
 ---
 
-# Quick Start
+## Current Quick Start
 
-Clone the repository
+### Prerequisites
+
+* Python 3.12 or later
+* [`uv`](https://docs.astral.sh/uv/)
+* Git
+
+### Clone the repository
 
 ```bash
 git clone https://github.com/ronfinn/dataswamp-biosystems.git
-
 cd dataswamp-biosystems
 ```
 
-Install dependencies
+### Install the project
 
 ```bash
 uv sync
 ```
 
-View available commands
+To install all development dependency groups:
+
+```bash
+uv sync --locked --all-groups
+```
+
+### View the command-line interface
 
 ```bash
 uv run dataswamp --help
 ```
 
-Generate a deterministic truth graph
+### Display the installed version
 
 ```bash
-uv run dataswamp generate-truth
-```
-
-Generate representative scientific files
-
-```bash
-uv run dataswamp generate-files
-```
-
-Inject controlled defects
-
-```bash
-uv run dataswamp inject-defects
-```
-
-Validate the generated observed state
-
-```bash
-uv run dataswamp validate-observed
+uv run dataswamp version
 ```
 
 ---
 
-# Example Outputs
+## Development
 
-Data Swamp Biosystems can generate:
+### Run the test suite
 
-- Organisational hierarchies
-- Programmes
-- Studies
-- Samples
-- Synthetic datasets
-- Scientific file estates
-- Metadata
-- Lineage
-- Governance information
-- Controlled defects
-- Validation reports
+```bash
+uv run pytest
+```
 
-> Screenshots and example datasets will be added in future releases.
+### Run the linter
+
+```bash
+uv run ruff check .
+```
+
+### Check formatting
+
+```bash
+uv run ruff format --check .
+```
+
+### Apply formatting
+
+```bash
+uv run ruff format .
+```
+
+### Run static type checking
+
+```bash
+uv run mypy src
+```
+
+### Run all pre-commit checks
+
+```bash
+uv run pre-commit run --all-files
+```
 
 ---
 
-# Command Line Interface
+## Target Architecture
 
-```
-validate-config
-
-generate-truth
-validate-truth
-
-generate-files
-validate-files
-
-list-defects
-validate-defects
-
-inject-defects
-validate-observed
-```
-
----
-
-# Project Structure
+The target architecture separates authoritative synthetic truth from the imperfect state presented to external tools.
 
 ```text
-config/
-docs/
-examples/
-src/
-tests/
-
-company/
-truth/
-estate/
-observed/
+                         Versioned Configuration
+                                   │
+                                   ▼
+                         Canonical Organisation
+                                   │
+                                   ▼
+                              Truth Graph
+                                   │
+                    ┌──────────────┴──────────────┐
+                    │                             │
+                    ▼                             ▼
+           Scientific File Estate         Governance Metadata
+                    │                             │
+                    └──────────────┬──────────────┘
+                                   │
+                                   ▼
+                          Controlled Defects
+                                   │
+                                   ▼
+                            Observed State
+                                   │
+             ┌─────────────────────┼─────────────────────┐
+             │                     │                     │
+             ▼                     ▼                     ▼
+        Data Catalogue       Validation Tool         AI Agent
+             │                     │                     │
+             └─────────────────────┼─────────────────────┘
+                                   │
+                                   ▼
+                      Truth Comparison and Scoring
+                                   │
+                                   ▼
+                           Benchmark Reports
 ```
 
 ---
 
-# Roadmap
+## Target Components
 
-Planned areas of development include:
+### Configuration
 
-- DataHub metadata emitter
-- OpenMetadata integration
-- OpenLineage export
-- Neo4j graph export
-- Interactive visualisations
-- Synthetic Benchling exports
-- Synthetic Nextflow outputs
-- Cloud object storage generation
-- Data Product generation
-- AI metadata generation
-- Web interface
-- Plugin architecture
+Version-controlled configuration defining the fictional organisation, scientific scope, scale, random seed and enabled defect scenarios.
 
----
+### Canonical Organisation
 
-# Vision
+A structured representation of teams, programmes, studies, experiments, responsibilities and governance roles.
 
-Data Swamp Biosystems aims to become an open platform for generating realistic synthetic scientific organisations and governed data ecosystems.
+### Truth Graph
 
-Rather than producing isolated example datasets, the goal is to model complete scientific environments—including organisational structures, metadata, lineage, governance, scientific file systems and controlled defects—that can be used to develop, benchmark and validate the next generation of scientific data platforms, AI systems and governance tooling.
+The authoritative graph of scientific assets and their relationships.
 
-The project is intended to evolve alongside the scientific data ecosystem, with community feedback and contributions helping guide future capabilities.
+The truth graph provides the expected state against which external systems can be evaluated.
 
----
+### Scientific File Estate
 
-# Contributing
+A generated directory and object hierarchy representing scientific data stored across realistic projects, studies and analytical workflows.
 
-Contributions, discussions, feature requests and constructive feedback are very welcome.
+### Governance Metadata
 
-This project is intentionally designed as an evolving platform rather than a finished product.
+Ownership, stewardship, classifications, domains, policies, glossary terms, retention requirements and data-product metadata.
 
-Whether you:
+### Defect Registry
 
-- discover a bug
-- have an idea for a feature
-- want to improve documentation
-- would like to contribute code
-- have suggestions for new scientific workflows
-- want to improve governance models
+A versioned catalogue of supported defects, their expected effects and their detection criteria.
 
-please feel free to:
+### Defect-Injection Engine
 
-- Open an Issue
-- Start a Discussion
-- Submit a Pull Request
-- Share ideas and suggestions
+A deterministic mechanism for transforming the truth state into an imperfect observed state.
 
-Community feedback will help shape the future direction of Data Swamp Biosystems.
+### Validation and Benchmarking
+
+Comparison of detected findings with the known defect manifest and authoritative truth graph.
+
+### Integration Emitters
+
+Adapters that translate the generated estate into platform-specific metadata formats or APIs.
 
 ---
 
-# License
+## Intended v0.1 Output Contract
 
-This project is released under the MIT License.
+The first end-to-end release is intended to generate a structure similar to the following:
+
+```text
+dataswamp-output/
+├── configuration/
+│   └── scenario.yaml
+├── truth/
+│   ├── organisation.json
+│   ├── programmes.jsonl
+│   ├── studies.jsonl
+│   ├── assets.jsonl
+│   ├── governance.jsonl
+│   └── lineage.jsonl
+├── estate/
+│   ├── programmes/
+│   ├── studies/
+│   └── shared/
+├── observed/
+│   ├── programmes/
+│   ├── studies/
+│   └── shared/
+├── defects/
+│   └── injected-defects.json
+├── manifests/
+│   └── run-manifest.json
+└── reports/
+    ├── benchmark.json
+    └── benchmark.md
+```
+
+This structure remains subject to change while the v0.1 benchmark contract is developed.
+
+---
+
+## Example Defect Model
+
+A future defect record may contain information such as:
+
+```json
+{
+  "defect_id": "missing-owner-001",
+  "defect_type": "missing_owner",
+  "asset_id": "dataset:osteomics:study-0042:expression-matrix",
+  "expected_owner": "team:computational-biology",
+  "observed_owner": null,
+  "severity": "high",
+  "deterministic_seed": 42
+}
+```
+
+The final schema will be versioned and documented before the first stable benchmark release.
+
+---
+
+## Scientific Scope
+
+The project is intended to support modular scientific-domain packs rather than hard-coding a single workflow.
+
+Potential packs include:
+
+### Organisational and governance metadata
+
+* Teams
+* Programmes
+* Studies
+* Data owners
+* Data stewards
+* Domains
+* Classifications
+* Policies
+* Data products
+
+### Sequencing and genomics
+
+* FASTQ files
+* BAM and CRAM files
+* VCF and gVCF files
+* Sample sheets
+* Demultiplexing reports
+* Pipeline manifests
+* Quality-control reports
+
+### Single-cell and spatial data
+
+* AnnData and H5AD files
+* Zarr stores
+* Count matrices
+* Cell-level metadata
+* Spatial coordinates
+* Image associations
+* Differential-expression results
+
+### Imaging and phenomics
+
+* Microscopy images
+* Cell-painting outputs
+* Digital pathology images
+* Segmentation masks
+* Image-derived features
+* Imaging quality-control results
+
+### Analytical workflows
+
+* Nextflow execution metadata
+* Pipeline inputs and outputs
+* Software environments
+* Parameters
+* Execution reports
+* Derived datasets
+* Lineage relationships
+
+These domain packs are roadmap items and are not all implemented in the current release.
+
+---
+
+## Design Principles
+
+### Entirely fictional
+
+The generated organisation and data estate must not reproduce a real company, patient, study, partner or proprietary dataset.
+
+### Deterministic
+
+Equivalent configuration and seeds should produce equivalent results.
+
+### Auditable
+
+Every generated asset, relationship and defect should be traceable to its configuration and generation process.
+
+### Measurable
+
+Defects should have defined expected findings so that tools and agents can be scored.
+
+### Vendor-neutral
+
+The core data model should remain independent of any individual catalogue, governance platform or cloud provider.
+
+### Extensible
+
+Scientific domains, asset types, defect types and integrations should be implementable as modular extensions.
+
+### Safe by design
+
+The project must not require real patient data, personal data or confidential scientific information.
+
+### Honest about maturity
+
+Documentation should distinguish implemented functionality from experimental and planned capabilities.
+
+---
+
+## Roadmap
+
+### v0.1 — Deterministic Benchmark Core
+
+* Versioned configuration schema
+* Canonical fictional biotech organisation
+* Authoritative truth graph
+* Representative scientific file estate
+* Versioned defect registry
+* Deterministic defect injection
+* Truth-versus-observed comparison
+* Machine-readable benchmark reports
+* Human-readable benchmark reports
+* End-to-end demonstration
+* Reproducibility and snapshot tests
+* First official GitHub release
+
+### v0.2 — Metadata and Lineage Integrations
+
+* DataHub metadata emitter
+* OpenMetadata integration
+* OpenLineage event export
+* Neo4j graph export
+* Integration examples
+* Integration-specific validation reports
+
+### v0.3 — Scientific Domain Packs
+
+* Sequencing and genomics pack
+* Single-cell and AnnData pack
+* Spatial data pack
+* Imaging and cell-painting pack
+* Digital pathology pack
+* Synthetic Nextflow outputs
+* Synthetic research-system exports
+
+### v0.4 — AI-Agent Evaluation
+
+* Agent-accessible benchmark interface
+* Metadata-enrichment scenarios
+* Defect-detection tasks
+* Governance-remediation tasks
+* Expected-answer datasets
+* Agent scoring and comparison reports
+* Reproducible evaluation suites
+
+### Longer-Term Possibilities
+
+* Cloud object-storage generation
+* Data-product modelling
+* Interactive visualisations
+* Web interface
+* Plugin architecture
+* Large-scale benchmark profiles
+* Community-contributed domain packs
+* Community-contributed defect catalogues
+
+The roadmap may change in response to implementation experience and community feedback.
+
+---
+
+## Non-Goals
+
+Data Swamp Biosystems is not intended to be:
+
+* A source of real patient or clinical data
+* A production laboratory information-management system
+* A production electronic laboratory notebook
+* A substitute for formal compliance validation
+* A certification that a platform is regulatorily compliant
+* An exact representation of any existing biotechnology company
+* A replacement for domain-specific scientific simulators
+* A security-testing environment for offensive activity
+
+The benchmark may help test individual controls, but passing a benchmark does not establish regulatory or legal compliance.
+
+---
+
+## Contributing
+
+Contributions, discussions, bug reports and feature proposals are welcome.
+
+Useful contribution areas include:
+
+* Scientific data models
+* Metadata schemas
+* Governance scenarios
+* Defect definitions
+* Validation rules
+* Platform integrations
+* Documentation
+* Example configurations
+* Reproducibility testing
+* Scientific-domain packs
+
+Before beginning a substantial change, please open a GitHub issue describing:
+
+1. The problem or use case
+2. The proposed behaviour
+3. The expected output
+4. Relevant scientific or metadata standards
+5. How the change could be tested
+
+Browse or open an issue through the repository’s [GitHub Issues](https://github.com/ronfinn/dataswamp-biosystems/issues).
+
+---
+
+## Feedback Requested
+
+The project would particularly benefit from feedback on:
+
+* The minimum useful fictional biotech organisation
+* High-value scientific metadata relationships
+* Common catalogue-ingestion failure modes
+* Realistic governance and data-quality defects
+* Useful benchmark measures
+* DataHub and OpenMetadata mappings
+* OpenLineage scenarios
+* AI-agent evaluation tasks
+* Scientific workflow priorities
+
+---
+
+## Independence and Data Statement
+
+Data Swamp Biosystems is an independent open-source project.
+
+It does not contain or reproduce:
+
+* Patient data
+* Personal data
+* Employer data
+* Partner data
+* Proprietary datasets
+* Confidential scientific information
+* Production schemas copied from a real organisation
+
+Any similarity between generated entities and real organisations, people, programmes or studies is unintended.
+
+---
+
+## Security
+
+Please do not use public issues to report a vulnerability that could place users or their systems at risk.
+
+A formal security-reporting process will be documented in `SECURITY.md` as the project approaches its first public release.
+
+---
+
+## License
+
+Data Swamp Biosystems is released under the [MIT License](LICENSE).
+
+---
+
+## Author
+
+Created and maintained by [Ron Finn](https://github.com/ronfinn).
+
+---
+
+## Acknowledgements
+
+Data Swamp Biosystems is inspired by the challenges involved in developing scientific data platforms, catalogues, governance systems and AI-powered tooling when safe and realistic development data is unavailable.
