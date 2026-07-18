@@ -38,6 +38,21 @@ Modern scientific organisations generate highly interconnected data spanning exp
 
 Every dataset, organisation and generated file is deterministic and reproducible from a single random seed, enabling repeatable testing across development, continuous integration and benchmarking.
 
+## Who is this for?
+
+Data Swamp Biosystems is designed for:
+
+- Scientific software engineers
+- Data engineers
+- Data governance teams
+- Platform engineers
+- AI/ML engineers
+- Bioinformaticians
+- DataHub and OpenMetadata users
+- Tool developers building against realistic scientific metadata
+
+Whether you are developing metadata pipelines, testing governance rules, validating AI agents or experimenting with data catalogues, Data Swamp Biosystems provides a deterministic synthetic environment without relying on proprietary scientific data.
+
 ---
 
 # Why this project exists
