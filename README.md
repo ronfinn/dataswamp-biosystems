@@ -11,7 +11,7 @@ estate and governance benchmark. It exists to exercise and demonstrate data
 governance, cataloguing, and quality patterns against a realistic-looking but
 wholly invented oncology research data landscape.
 
-## Current milestone: deterministic truth graph
+## Current milestone: scientific-file estate
 
 This repository contains packaging, tooling, a CLI, the **canonical company
 model** — a fictional oncology company (programmes, studies, teams, people,
@@ -23,10 +23,15 @@ contracts, quality, governance, and lineage) generated from that model. See
 [docs/domain-model.md](docs/domain-model.md) and
 [docs/truth-graph-schema.md](docs/truth-graph-schema.md).
 
-Both layers are deliberately catalogue-independent: they know nothing about
-DataHub or any downstream consumer. The scientific-file estate, the imperfection
-engine / observed state, and DataHub integration are future milestones — see
-Roadmap below.
+A downstream **scientific-file estate** materializes small, genuinely-readable
+example files (H5AD, Parquet, OME-TIFF, PNG, VCF, BED, GeoJSON, Matrix Market,
+CSV/TSV/JSON/YAML/JSONL, gzip, FASTQ) for the truth graph's assets, with
+explicitly-declared placeholders for heavy binaries (BAM, CRAM, DICOM, SVS,
+Zarr). See [docs/file-generation.md](docs/file-generation.md).
+
+All three layers are deliberately catalogue-independent: they know nothing about
+DataHub or any downstream consumer. The imperfection engine / observed state and
+DataHub integration are future milestones — see Roadmap below.
 
 ## Installation
 
@@ -87,6 +92,47 @@ determinism/integrity check against a regeneration from the recorded seed:
 uv run dataswamp validate-truth
 ```
 
+## Generating the scientific-file estate
+
+Materialize representative example files for the truth graph's assets into the
+git-ignored `generated/estate/`:
+
+```bash
+uv run dataswamp generate-files --seed 20260717 --profile tiny
+uv run dataswamp generate-files --seed 20260717 --profile demo
+uv run dataswamp generate-files --seed 20260717 --profile stress
+```
+
+The truth graph is regenerated in memory from the same seed (consumed, never
+re-invented) and a per-asset file set is written under `files/`, alongside a
+`file-manifest.jsonl`, a machine-readable `generation-summary.json`, and a
+`summary.md`. Profiles trade off scale against disk:
+
+| Profile | Files | Disk | Purpose |
+| --- | --- | --- | --- |
+| `tiny` (default) | ~100 | <50 MB | tests and rapid demos; covers every format |
+| `demo` | ~1,000–2,000 | <500 MB | DataHub / agent demonstrations |
+| `stress` | ~10k records | minimal content | catalogue-scale testing |
+
+Each profile carries a **hard byte budget**; generation aborts before exceeding
+it rather than filling the disk. The same truth graph, profile, generator
+version, and seed produce byte-identical files and manifest. Override with
+`--seed`, `--profile`, `--output-dir`, and `--force`.
+
+**Supported formats.** Genuine, re-readable: H5AD (AnnData), Parquet, OME-TIFF,
+PNG, GeoJSON, VCF, BED, Matrix Market, CSV, TSV, JSON, YAML, JSONL, gzip text,
+and tiny FASTQ. **Declared placeholders** (never faked as valid binaries): BAM,
+CRAM, DICOM, SVS, and large Zarr — each a tiny stub with a `.placeholder.json`
+sidecar recording the intended format, represented logical size, and
+limitations. Files carry no scientific claims beyond structural validity.
+
+Validate an existing estate — checksums, path safety, asset references,
+placeholder sidecars, and a byte-for-byte manifest match:
+
+```bash
+uv run dataswamp validate-files
+```
+
 ## Tests and quality checks
 
 ```bash
@@ -101,8 +147,6 @@ uv run pre-commit run --all-files
 
 Future milestones (not yet implemented):
 
-- A **scientific-file estate**: small, genuinely-readable example files
-  materialized for the truth graph's assets.
 - An **imperfection engine**: a deliberately-imperfect observed state derived
   from the truth graph, with a machine-readable ledger of every injected defect.
 - Scenario packs and assessment agents scored against expected findings.

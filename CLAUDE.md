@@ -28,15 +28,21 @@ tooling, minimal CLI), the **canonical company model** (the fictional company,
 programmes, studies, teams, people, ownership/stewardship, and controlled
 vocabularies in `config/`, with Pydantic models and validation in
 `src/dataswamp_biosystems/company/` and a `dataswamp validate-config` command),
-and the **deterministic truth graph** (the complete, correct synthetic
+the **deterministic truth graph** (the complete, correct synthetic
 scientific/governance state generated from that model by
 `src/dataswamp_biosystems/truth/`, emitted under git-ignored `generated/truth/`
-via `dataswamp generate-truth` and checked by `dataswamp validate-truth`). See
-`docs/domain-model.md` and `docs/truth-graph-schema.md`.
+via `dataswamp generate-truth` and checked by `dataswamp validate-truth`), and
+the **scientific-file estate** (small, genuinely-readable example files
+materialized for the truth graph's assets by
+`src/dataswamp_biosystems/estate/`, emitted under git-ignored
+`generated/estate/` via `dataswamp generate-files` and checked by `dataswamp
+validate-files`, with explicitly-declared placeholders for heavy binaries). See
+`docs/domain-model.md`, `docs/truth-graph-schema.md`, and
+`docs/file-generation.md`.
 
-Both layers are deliberately catalogue-independent. There is no scientific-file
-estate, no imperfection engine / observed state, no scenario-pack layer, no
-assessment agents, and no DataHub integration yet.
+All three layers are deliberately catalogue-independent. There is no imperfection
+engine / observed state, no scenario-pack layer, no assessment agents, and no
+DataHub integration yet.
 
 Do not implement future-milestone capabilities (below) speculatively. Add
 them only when a task explicitly scopes them, and do not create placeholder
@@ -50,6 +56,8 @@ uv run dataswamp version       # run the CLI
 uv run dataswamp validate-config  # validate the canonical config in config/
 uv run dataswamp generate-truth --seed 20260717  # generate the truth graph
 uv run dataswamp validate-truth   # validate a generated truth graph
+uv run dataswamp generate-files --seed 20260717 --profile tiny  # generate the file estate
+uv run dataswamp validate-files   # validate a generated file estate
 uv run pytest                  # run tests
 uv run ruff check .            # lint
 uv run ruff format --check .   # format check
@@ -72,11 +80,17 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     allocation, the generator pipeline, canonical serializer, writer, and
     invariant validator. Depends only on `company/`, never on DataHub. See
     `docs/truth-graph-schema.md`.
+  - `estate/` — the deterministic scientific-file generator: manifest/sidecar
+    entities, generation profiles, per-format content writers + registry, the
+    truth-consuming generator, atomic writer (path-safe, budget-capped), and
+    validator. Depends only on `company/` and `truth/`, never on DataHub. See
+    `docs/file-generation.md`.
 - `config/` — hand-authored canonical business configuration (YAML) plus
   `config/vocabularies/` and `config/truth/generation-plan.yaml`. Tracked;
   distinct from the git-ignored `generated/`.
-- `tests/` — mirrors the package for test discovery; `tests/company/` and
-  `tests/truth/` cover the model, generator, invariants, and CLI commands.
+- `tests/` — mirrors the package for test discovery; `tests/company/`,
+  `tests/truth/`, and `tests/estate/` cover the model, generators, invariants,
+  file contents, and CLI commands.
 
 ### Architectural independence from DataHub
 

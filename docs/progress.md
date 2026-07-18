@@ -2,6 +2,42 @@
 
 A running log of completed milestones. Newest first.
 
+## Scientific-file estate — 2026-07-18
+
+Implemented the deterministic, lightweight scientific-file generation layer: a
+downstream consumer that materializes small, genuinely-readable example files
+for the truth graph's assets.
+
+- **Package (`src/dataswamp_biosystems/estate/`):** manifest/sidecar Pydantic
+  models, three generation profiles, per-format content writers with a registry,
+  a truth-consuming generator, an atomic path-safe budget-capped writer, and a
+  validator. Depends only on `company/` and `truth/`.
+- **Formats:** genuine and re-readable — H5AD (AnnData), Parquet (pyarrow),
+  OME-TIFF (tifffile, reads back as OME), PNG (Pillow), GeoJSON, VCF, BED, Matrix
+  Market, CSV, TSV, JSON, YAML, JSONL, gzip text, and tiny FASTQ. Declared
+  placeholders (never faked as valid binaries) for BAM, CRAM, DICOM, SVS, and
+  large Zarr — each a stub plus a `.placeholder.json` sidecar recording intended
+  format, represented logical size, and limitations.
+- **Profiles:** `tiny` (~100 files, <50 MB, full format coverage), `demo`
+  (~1,175 files, <500 MB), `stress` (~10,800 catalogue-shard records, minimal
+  physical content). Each carries a hard byte budget enforced mid-generation;
+  content sizes are decoupled from the truth graph's represented sizes.
+- **Determinism:** structural — sorted iteration, per-file seeded RNG keyed by
+  stable id, no wall-clock. gzip `mtime=0`, fixed OME-TIFF UUID, timestamp-free
+  HDF5/Parquet. Byte-identical across processes and `PYTHONHASHSEED` values.
+- **Integrity/safety:** SHA-256 per file computed after writing; represented
+  logical size recorded separately from physical size; path-containment checks;
+  atomic staged output; `validate-files` regenerates and byte-compares the
+  manifest, then verifies checksums, asset references, and placeholder sidecars.
+- **Output (git-ignored `generated/estate/`):** `files/` tree,
+  `file-manifest.jsonl`, `generation-summary.json`, `summary.md`.
+- **CLI:** `dataswamp generate-files` (`--profile`, `--seed`, `--output-dir`,
+  `--force`) and `dataswamp validate-files`.
+- **Dependencies:** added `numpy`, `pyarrow`, `Pillow`, `tifffile`, `anndata`.
+- **Docs:** [file-generation.md](file-generation.md), README, CLAUDE.md.
+- **Deliberately excluded:** injected defects, observed state, DataHub, agents;
+  genuine DICOM/Zarr (declared placeholders per scope).
+
 ## Deterministic truth graph — 2026-07-18
 
 Implemented the deterministic truth-graph generator: the complete, correct
