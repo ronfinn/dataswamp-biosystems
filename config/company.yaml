@@ -1,0 +1,11 @@
+schema_version: 1
+company:
+  id: dsb
+  legal_name: "Data Swamp Biosystems, Inc."
+  display_name: "Data Swamp Biosystems"
+  domain: dataswamp.example
+  description: >-
+    A wholly fictional oncology biotechnology company, used as an open
+    synthetic data estate and governance benchmark. No real organisation,
+    person, study, or dataset is represented.
+  headquarters: "1 Marsh Way, Fenwick Basin, dataswamp.example"

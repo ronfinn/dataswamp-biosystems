@@ -11,13 +11,17 @@ estate and governance benchmark. It exists to exercise and demonstrate data
 governance, cataloguing, and quality patterns against a realistic-looking but
 wholly invented oncology research data landscape.
 
-## Current milestone: repository foundation
+## Current milestone: canonical company model
 
-This repository currently contains **only packaging, tooling, and CLI
-scaffolding**. There is no synthetic data generation, no company/programme
-model, no truth-graph or lineage generator, no scientific file generation,
-and no DataHub integration yet. Those are future milestones — see Roadmap
-below.
+This repository contains packaging, tooling, a CLI, and the **canonical company
+model** — a fictional oncology company (programmes, studies, teams, people,
+ownership/stewardship, and controlled vocabularies) defined in YAML under
+`config/` and validated by typed Pydantic models. See
+[docs/domain-model.md](docs/domain-model.md).
+
+The company model is deliberately catalogue-independent: it knows nothing about
+DataHub, any truth graph, or any downstream consumer. Those are future
+milestones — see Roadmap below.
 
 ## Installation
 
@@ -35,6 +39,27 @@ uv run dataswamp version
 
 Prints the installed package version and exits successfully.
 
+## Validating the canonical configuration
+
+The canonical company model lives in `config/`. Validate it with:
+
+```bash
+uv run dataswamp validate-config
+```
+
+On success it prints entity counts (programmes, studies, teams, people,
+ownership and stewardship assignments, and vocabulary terms) and exits 0. It
+exits non-zero with actionable messages when the configuration is invalid:
+
+- exit code `1` — validation failures (duplicate IDs, duplicate emails,
+  non-`dataswamp.example` email/company domains, unresolved
+  programme/team/person references, invalid controlled-vocabulary values,
+  and owners/stewards pointing at nonexistent assets or units);
+- exit code `2` — the configuration could not be loaded (a file is missing
+  or the YAML is malformed).
+
+Point it at an alternative directory with `--config-dir PATH`.
+
 ## Tests and quality checks
 
 ```bash
@@ -49,15 +74,15 @@ uv run pre-commit run --all-files
 
 Future milestones (not yet implemented):
 
-- A canonical company configuration: research programmes, studies, teams,
-  fictional people and roles, ownership/stewardship, access classifications,
-  retention classes, and a controlled modality vocabulary.
-- A deterministic truth-graph generator for synthetic subjects, datasets,
-  lineage, quality, and governance manifests.
-- A lightweight scientific file-generation layer producing readable example
-  files across common bioinformatics and imaging formats.
+- A deterministic **truth graph**: the complete, correct synthetic scientific
+  and governance state generated from the canonical model.
+- A **scientific-file estate**: small, genuinely-readable example files
+  materialized for the truth graph's assets.
+- An **imperfection engine**: a deliberately-imperfect observed state derived
+  from the truth graph, with a machine-readable ledger of every injected defect.
+- Scenario packs and assessment agents scored against expected findings.
 - Optional integration with DataHub for catalog/governance, kept
-  architecturally independent of the core generators.
+  architecturally independent of the core model.
 
 Do not assume any of the above exists until it has been implemented and
 documented here.

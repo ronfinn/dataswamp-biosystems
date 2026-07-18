@@ -1,0 +1,26 @@
+schema_version: 1
+programmes:
+  - id: prog-nsclc
+    display_name: "NSCLC Translational Programme"
+    indication: "non-small-cell lung cancer"
+    description: >-
+      Translational research across non-small-cell lung cancer, from
+      early-stage tumour genomics to immunotherapy response.
+    default_access_classification: confidential
+    default_retention_class: retention-7y
+  - id: prog-tnbc
+    display_name: "TNBC Translational Programme"
+    indication: "triple-negative breast cancer"
+    description: >-
+      Multi-omic and liquid-biopsy research in triple-negative breast cancer,
+      spanning neoadjuvant response and minimal-residual-disease monitoring.
+    default_access_classification: restricted
+    default_retention_class: retention-7y
+  - id: prog-crc
+    display_name: "Colorectal Cancer Translational Programme"
+    indication: "colorectal cancer"
+    description: >-
+      Colorectal cancer research covering microsatellite-instability screening
+      and metastatic transcriptomics.
+    default_access_classification: confidential
+    default_retention_class: retention-7y

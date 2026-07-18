@@ -23,10 +23,16 @@ cataloguing, lineage, and quality patterns.
 
 ## Current status
 
-This repository currently contains **repository foundation only**: Python
-packaging, dev tooling, and a minimal CLI. There is no company/programme
-model, no truth-graph generator, no scientific file generation, and no
-DataHub integration yet.
+This repository contains the **repository foundation** (Python packaging, dev
+tooling, minimal CLI) and the **canonical company model** (the fictional
+company, programmes, studies, teams, people, ownership/stewardship, and
+controlled vocabularies in `config/`, with Pydantic models and validation in
+`src/dataswamp_biosystems/company/` and a `dataswamp validate-config` command).
+See `docs/domain-model.md`.
+
+The company model is deliberately catalogue-independent. There is no truth
+graph, no scientific-file estate, no imperfection engine / observed state, no
+scenario-pack layer, no assessment agents, and no DataHub integration yet.
 
 Do not implement future-milestone capabilities (below) speculatively. Add
 them only when a task explicitly scopes them, and do not create placeholder
@@ -37,6 +43,7 @@ modules or packages "to anticipate" that future work.
 ```bash
 uv sync                        # install/sync the environment
 uv run dataswamp version       # run the CLI
+uv run dataswamp validate-config  # validate the canonical config in config/
 uv run pytest                  # run tests
 uv run ruff check .            # lint
 uv run ruff format --check .   # format check
@@ -50,9 +57,14 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
 
 - `src/dataswamp_biosystems/` — the single top-level package (src-layout).
   - `cli.py` — Typer-based CLI, exposed as the `dataswamp` console script.
-  - No internal subpackages exist yet; future milestones will add them once
-    their designs are settled, rather than being pre-guessed here.
-- `tests/` — mirrors the package for test discovery.
+  - `company/` — the canonical company model: identifiers, controlled
+    vocabularies, entities, relationships, generation config, the assembled
+    `CanonicalConfig`, the YAML loader, and project-specific errors. Independent
+    of DataHub.
+- `config/` — hand-authored canonical business configuration (YAML) plus
+  `config/vocabularies/`. Tracked; distinct from the git-ignored `generated/`.
+- `tests/` — mirrors the package for test discovery; `tests/company/` covers
+  the model, loader, and `validate-config` CLI using compact fixtures.
 
 ### Architectural independence from DataHub
 
@@ -107,10 +119,6 @@ referential integrity, not just happy-path execution.
 - **Never create a Git commit automatically.** Leave staged/unstaged changes
   for the user to review and commit themselves, unless a task explicitly
   asks for a commit.
-- **Never silently remediate injected defects.** Once a future milestone
-  introduces intentional defects/drift for benchmark purposes, do not "fix"
-  them as a side effect of unrelated work — defects are test fixtures, not
-  bugs.
 - Never add DataHub as a dependency or import until a task explicitly scopes
   DataHub integration.
 - Never generate scientific/synthetic datasets until a task explicitly

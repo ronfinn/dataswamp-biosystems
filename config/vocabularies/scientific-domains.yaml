@@ -1,0 +1,32 @@
+schema_version: 1
+terms:
+  - id: genomics
+    label: "Genomics"
+    description: "DNA sequencing and variant analysis."
+  - id: transcriptomics
+    label: "Transcriptomics"
+    description: "RNA expression and isoform analysis."
+  - id: proteomics
+    label: "Proteomics"
+    description: "Protein abundance and cellular phenotyping."
+  - id: epigenomics
+    label: "Epigenomics"
+    description: "DNA methylation and chromatin state."
+  - id: radiology-imaging
+    label: "Radiology Imaging"
+    description: "Cross-sectional and functional medical imaging."
+  - id: digital-pathology
+    label: "Digital Pathology"
+    description: "Whole-slide imaging and immunohistochemistry."
+  - id: clinical
+    label: "Clinical"
+    description: "Clinical, demographic, and outcome data."
+  - id: pharmacology
+    label: "Pharmacology"
+    description: "Pharmacokinetic and pharmacodynamic data."
+  - id: spatial-transcriptomics
+    label: "Spatial Transcriptomics"
+    description: "Spatially resolved gene-expression profiling of tissue."
+  - id: functional-genomics
+    label: "Functional Genomics"
+    description: "Perturbation and screen-based interrogation of gene function."

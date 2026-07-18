@@ -1,0 +1,50 @@
+schema_version: 1
+ownership:
+  - id: own-prog-nsclc
+    subject_type: programme
+    subject_id: prog-nsclc
+    owner_type: team
+    owner_id: team-nsclc-science
+    description: "NSCLC programme owned by its science team."
+  - id: own-prog-tnbc
+    subject_type: programme
+    subject_id: prog-tnbc
+    owner_type: team
+    owner_id: team-tnbc-science
+    description: "TNBC programme owned by its science team."
+  - id: own-prog-crc
+    subject_type: programme
+    subject_id: prog-crc
+    owner_type: team
+    owner_id: team-crc-science
+    description: "Colorectal programme owned by its science team."
+  - id: own-study-nsclc-01
+    subject_type: study
+    subject_id: study-nsclc-01
+    owner_type: person
+    owner_id: person-owen-castellano
+  - id: own-study-nsclc-02
+    subject_type: study
+    subject_id: study-nsclc-02
+    owner_type: person
+    owner_id: person-nadia-farouk
+  - id: own-study-tnbc-01
+    subject_type: study
+    subject_id: study-tnbc-01
+    owner_type: person
+    owner_id: person-jonas-adeyemi
+  - id: own-study-tnbc-02
+    subject_type: study
+    subject_id: study-tnbc-02
+    owner_type: person
+    owner_id: person-ruth-mbeki
+  - id: own-study-crc-01
+    subject_type: study
+    subject_id: study-crc-01
+    owner_type: person
+    owner_id: person-derek-oyelaran
+  - id: own-study-crc-02
+    subject_type: study
+    subject_id: study-crc-02
+    owner_type: person
+    owner_id: person-clara-veiga

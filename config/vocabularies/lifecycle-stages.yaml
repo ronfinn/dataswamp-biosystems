@@ -1,0 +1,34 @@
+schema_version: 1
+terms:
+  - id: raw
+    label: "Raw"
+    description: "As received from the source instrument or system."
+    order: 0
+  - id: ingested
+    label: "Ingested"
+    description: "Landed in managed storage; not yet processed."
+    order: 1
+  - id: processed
+    label: "Processed"
+    description: "Run through primary processing pipelines."
+    order: 2
+  - id: curated
+    label: "Curated"
+    description: "Cleaned, annotated, and quality-checked."
+    order: 3
+  - id: analysis-ready
+    label: "Analysis Ready"
+    description: "Prepared for downstream analysis."
+    order: 4
+  - id: published
+    label: "Published"
+    description: "Released to its intended consumers."
+    order: 5
+  - id: archived
+    label: "Archived"
+    description: "Moved to long-term archival storage."
+    order: 6
+  - id: retired
+    label: "Retired"
+    description: "Withdrawn from active use; pending disposal."
+    order: 7

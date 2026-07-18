@@ -1,0 +1,33 @@
+schema_version: 1
+teams:
+  - id: team-nsclc-science
+    display_name: "NSCLC Science Team"
+    team_type: scientific
+    programme_id: prog-nsclc
+    description: "Translational scientists for the NSCLC programme."
+  - id: team-tnbc-science
+    display_name: "TNBC Science Team"
+    team_type: scientific
+    programme_id: prog-tnbc
+    description: "Translational scientists for the TNBC programme."
+  - id: team-crc-science
+    display_name: "Colorectal Science Team"
+    team_type: scientific
+    programme_id: prog-crc
+    description: "Translational scientists for the colorectal programme."
+  - id: team-bioinformatics-core
+    display_name: "Bioinformatics Core"
+    team_type: platform
+    description: "Shared bioinformatics analysis and pipeline support."
+  - id: team-data-platform
+    display_name: "Data Platform Team"
+    team_type: platform
+    description: "Data ingestion, storage, and platform engineering."
+  - id: team-data-governance
+    display_name: "Data Governance Team"
+    team_type: governance
+    description: "Cataloguing, stewardship coordination, and governance policy."
+  - id: team-privacy-compliance
+    display_name: "Privacy & Compliance Team"
+    team_type: governance
+    description: "Data protection, access control, and regulatory compliance."

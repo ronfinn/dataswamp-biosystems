@@ -1,0 +1,37 @@
+schema_version: 1
+stewardship:
+  - id: stew-nsclc-01-data
+    subject_type: study
+    subject_id: study-nsclc-01
+    steward_id: person-vikram-shah
+    stewardship_type: data-steward
+  - id: stew-nsclc-02-quality
+    subject_type: study
+    subject_id: study-nsclc-02
+    steward_id: person-samuel-agboola
+    stewardship_type: quality-steward
+  - id: stew-tnbc-01-data
+    subject_type: study
+    subject_id: study-tnbc-01
+    steward_id: person-vikram-shah
+    stewardship_type: data-steward
+  - id: stew-tnbc-02-access
+    subject_type: study
+    subject_id: study-tnbc-02
+    steward_id: person-elena-briggs
+    stewardship_type: access-steward
+  - id: stew-crc-01-data
+    subject_type: study
+    subject_id: study-crc-01
+    steward_id: person-vikram-shah
+    stewardship_type: data-steward
+  - id: stew-crc-02-quality
+    subject_type: study
+    subject_id: study-crc-02
+    steward_id: person-hana-kimura
+    stewardship_type: quality-steward
+  - id: stew-prog-crc-data
+    subject_type: programme
+    subject_id: prog-crc
+    steward_id: person-vikram-shah
+    stewardship_type: data-steward

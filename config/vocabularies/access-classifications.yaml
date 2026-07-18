@@ -1,0 +1,22 @@
+schema_version: 1
+terms:
+  - id: public
+    label: "Public"
+    description: "Openly shareable; no access restrictions."
+    sensitivity_level: 0
+  - id: internal
+    label: "Internal"
+    description: "For staff use across the organisation."
+    sensitivity_level: 1
+  - id: confidential
+    label: "Confidential"
+    description: "Restricted to associated programmes and named teams."
+    sensitivity_level: 2
+  - id: restricted
+    label: "Restricted"
+    description: "Access granted only on documented need-to-know."
+    sensitivity_level: 3
+  - id: highly-restricted
+    label: "Highly Restricted"
+    description: "Tightest controls; access individually authorised and logged."
+    sensitivity_level: 4

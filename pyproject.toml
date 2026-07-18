@@ -21,6 +21,8 @@ classifiers = [
 ]
 dependencies = [
     "typer>=0.15",
+    "pydantic[email]>=2.7",
+    "pyyaml>=6",
 ]
 
 [project.scripts]
@@ -32,6 +34,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "pre-commit>=4",
+    "types-pyyaml>=6",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -47,6 +50,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
+plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

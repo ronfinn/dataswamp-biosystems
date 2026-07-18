@@ -1,0 +1,69 @@
+schema_version: 1
+studies:
+  - id: study-nsclc-01
+    programme_id: prog-nsclc
+    display_name: "AURORA"
+    description: "Early-stage NSCLC tumour/normal whole-genome and exome study."
+    scientific_domains: [genomics, clinical, digital-pathology, radiology-imaging]
+    modalities: [wgs, wes, digital-pathology-wsi, ct-imaging, mri-imaging]
+    access_classification: restricted
+    retention_class: retention-7y
+    lifecycle_stage: analysis-ready
+    intended_uses: [research-only, internal-analytics]
+    model_training_approval: model-training-not-approved
+  - id: study-nsclc-02
+    programme_id: prog-nsclc
+    display_name: "SUMMIT"
+    description: "Advanced NSCLC immunotherapy transcriptomic response study."
+    scientific_domains: [transcriptomics, clinical, spatial-transcriptomics, functional-genomics]
+    modalities: [rna-seq, clinical-ehr, scrna-seq, visium-hd, perturb-seq]
+    access_classification: confidential
+    retention_class: retention-7y
+    lifecycle_stage: curated
+    intended_uses: [research-only]
+    model_training_approval: model-training-under-review
+  - id: study-tnbc-01
+    programme_id: prog-tnbc
+    display_name: "EMBER"
+    description: "TNBC neoadjuvant multi-omic characterisation study."
+    scientific_domains:
+      [genomics, transcriptomics, digital-pathology, spatial-transcriptomics, functional-genomics]
+    modalities: [wgs, rna-seq, digital-pathology-wsi, scrna-seq, visium-hd, crispr-screen]
+    access_classification: restricted
+    retention_class: retention-7y
+    lifecycle_stage: processed
+    intended_uses: [research-only, internal-analytics]
+    model_training_approval: model-training-conditionally-approved
+  - id: study-tnbc-02
+    programme_id: prog-tnbc
+    display_name: "BEACON"
+    description: "TNBC circulating-tumour-DNA minimal-residual-disease study."
+    scientific_domains: [genomics, clinical, radiology-imaging]
+    modalities: [wgs, clinical-ehr, ct-imaging, mri-imaging]
+    access_classification: highly-restricted
+    retention_class: retention-regulatory-25y
+    lifecycle_stage: ingested
+    intended_uses: [research-only, regulatory-submission]
+    model_training_approval: model-training-prohibited
+  - id: study-crc-01
+    programme_id: prog-crc
+    display_name: "MERIDIAN"
+    description: "Colorectal microsatellite-instability and mismatch-repair screening cohort."
+    scientific_domains: [genomics, clinical, functional-genomics, radiology-imaging]
+    modalities: [wes, clinical-ehr, crispr-screen, ct-imaging]
+    access_classification: confidential
+    retention_class: retention-7y
+    lifecycle_stage: analysis-ready
+    intended_uses: [research-only, internal-analytics]
+    model_training_approval: model-training-approved
+  - id: study-crc-02
+    programme_id: prog-crc
+    display_name: "DELTA"
+    description: "Colorectal liver-metastasis transcriptomic and pathology study."
+    scientific_domains: [transcriptomics, digital-pathology, spatial-transcriptomics]
+    modalities: [rna-seq, digital-pathology-wsi, scrna-seq, visium-hd]
+    access_classification: restricted
+    retention_class: retention-7y
+    lifecycle_stage: curated
+    intended_uses: [research-only]
+    model_training_approval: model-training-under-review
