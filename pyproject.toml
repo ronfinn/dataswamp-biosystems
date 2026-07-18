@@ -23,6 +23,11 @@ dependencies = [
     "typer>=0.15",
     "pydantic[email]>=2.7",
     "pyyaml>=6",
+    "numpy>=2.0",
+    "pyarrow>=17.0",
+    "pillow>=10.4",
+    "tifffile>=2024.8.30",
+    "anndata>=0.11",
 ]
 
 [project.scripts]
@@ -52,5 +57,13 @@ python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 
+# Scientific-file writer dependencies ship without type stubs / py.typed markers.
+[[tool.mypy.overrides]]
+module = ["pyarrow.*", "tifffile.*", "anndata.*", "PIL.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: marks slower tests (e.g. full demo-profile generation); deselect with -m 'not slow'",
+]
