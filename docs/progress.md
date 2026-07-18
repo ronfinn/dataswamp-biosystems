@@ -2,6 +2,45 @@
 
 A running log of completed milestones. Newest first.
 
+## Deterministic truth graph — 2026-07-18
+
+Implemented the deterministic truth-graph generator: the complete, correct
+synthetic scientific/governance state generated from the canonical model.
+
+- **Package (`src/dataswamp_biosystems/truth/`):** entity models (14 scientific
+  and governance entities, all `synthetic=true`, frozen + `extra="forbid"`), a
+  seeded generator, plan loader/allocation, invariant validator, canonical
+  serializer, and writer — all catalogue-independent (depend only on `company/`).
+  Each catalogue asset is self-describing (title, description, programme, study,
+  domain, modality, lifecycle, version, owner, stewards, classification,
+  retention, intended uses, training status, contract ref, quality status,
+  provenance run, generator version, seed), with governance evidence also held as
+  separate records.
+- **Validation (pre-write):** unique ids, complete references, valid controlled
+  vocabularies, programme–study and subject–biospecimen–assay relationships,
+  lifecycle transitions, exact counts, acyclic lineage with no self-lineage,
+  per-asset governance/quality/contract completeness, denormalised-vs-record
+  consistency, supported modality metadata, temporal monotonicity, and the
+  synthetic/domain locks. Output is staged and swapped in atomically, so a failed
+  run never leaves a partial directory and prior output is restored.
+- **Config:** a new `config/truth/generation-plan.yaml` fixing exact target
+  counts, consuming the company model's vocabularies and study modality lists.
+- **Output (git-ignored `generated/truth/`):** JSONL shards, a `truth-graph.json`
+  manifest with per-shard SHA-256 digests, and `summary.md`. For any seed: 60
+  subjects, 165 datasets (155 modality + 10 reference), 15 data products = 180
+  catalogue assets.
+- **Determinism:** structural — sorted iteration, per-entity seeded RNG keyed by
+  stable id, fixed epoch anchor (no wall-clock), integer byte sizes, single
+  canonical serializer. Byte-identical across processes and `PYTHONHASHSEED`
+  values, verified by tests.
+- **CLI:** `dataswamp generate-truth` (writes + validates the graph) and
+  `dataswamp validate-truth` (invariants + byte-for-byte regeneration check).
+- **Tests (`tests/truth/`):** counts, allocation, referential integrity, DAG
+  acyclicity, completeness, in-process and cross-process determinism, and CLI
+  behaviour.
+- **Deliberately excluded:** injected defects, observed state, scientific file
+  contents, scenarios, DataHub, and agents.
+
 ## Canonical company model — 2026-07-18
 
 Implemented the canonical, catalogue-independent company model.

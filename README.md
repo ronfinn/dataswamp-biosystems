@@ -11,17 +11,22 @@ estate and governance benchmark. It exists to exercise and demonstrate data
 governance, cataloguing, and quality patterns against a realistic-looking but
 wholly invented oncology research data landscape.
 
-## Current milestone: canonical company model
+## Current milestone: deterministic truth graph
 
-This repository contains packaging, tooling, a CLI, and the **canonical company
+This repository contains packaging, tooling, a CLI, the **canonical company
 model** — a fictional oncology company (programmes, studies, teams, people,
 ownership/stewardship, and controlled vocabularies) defined in YAML under
-`config/` and validated by typed Pydantic models. See
-[docs/domain-model.md](docs/domain-model.md).
+`config/` and validated by typed Pydantic models — and a **deterministic truth
+graph**: the complete, correct synthetic scientific and governance state
+(subjects, biospecimens, assays, runs, files, datasets, data products,
+contracts, quality, governance, and lineage) generated from that model. See
+[docs/domain-model.md](docs/domain-model.md) and
+[docs/truth-graph-schema.md](docs/truth-graph-schema.md).
 
-The company model is deliberately catalogue-independent: it knows nothing about
-DataHub, any truth graph, or any downstream consumer. Those are future
-milestones — see Roadmap below.
+Both layers are deliberately catalogue-independent: they know nothing about
+DataHub or any downstream consumer. The scientific-file estate, the imperfection
+engine / observed state, and DataHub integration are future milestones — see
+Roadmap below.
 
 ## Installation
 
@@ -60,6 +65,28 @@ exits non-zero with actionable messages when the configuration is invalid:
 
 Point it at an alternative directory with `--config-dir PATH`.
 
+## Generating the truth graph
+
+Generate the deterministic truth graph into the git-ignored `generated/truth/`:
+
+```bash
+uv run dataswamp generate-truth --seed 20260717
+```
+
+The same seed, configuration, and generator version always produce
+byte-identical output. It writes JSONL shards (subjects, biospecimens, assays,
+runs, files, assets, contracts, quality, governance, lineage), a
+`truth-graph.json` manifest (provenance, counts, and per-shard SHA-256
+digests), and a `summary.md`. Override the seed with `--seed`, the destination
+with `--output-dir`, and overwrite a non-empty directory with `--force`.
+
+Validate an existing generated graph — invariants plus a byte-for-byte
+determinism/integrity check against a regeneration from the recorded seed:
+
+```bash
+uv run dataswamp validate-truth
+```
+
 ## Tests and quality checks
 
 ```bash
@@ -74,8 +101,6 @@ uv run pre-commit run --all-files
 
 Future milestones (not yet implemented):
 
-- A deterministic **truth graph**: the complete, correct synthetic scientific
-  and governance state generated from the canonical model.
 - A **scientific-file estate**: small, genuinely-readable example files
   materialized for the truth graph's assets.
 - An **imperfection engine**: a deliberately-imperfect observed state derived

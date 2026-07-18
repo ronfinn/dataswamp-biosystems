@@ -24,15 +24,19 @@ cataloguing, lineage, and quality patterns.
 ## Current status
 
 This repository contains the **repository foundation** (Python packaging, dev
-tooling, minimal CLI) and the **canonical company model** (the fictional
-company, programmes, studies, teams, people, ownership/stewardship, and
-controlled vocabularies in `config/`, with Pydantic models and validation in
-`src/dataswamp_biosystems/company/` and a `dataswamp validate-config` command).
-See `docs/domain-model.md`.
+tooling, minimal CLI), the **canonical company model** (the fictional company,
+programmes, studies, teams, people, ownership/stewardship, and controlled
+vocabularies in `config/`, with Pydantic models and validation in
+`src/dataswamp_biosystems/company/` and a `dataswamp validate-config` command),
+and the **deterministic truth graph** (the complete, correct synthetic
+scientific/governance state generated from that model by
+`src/dataswamp_biosystems/truth/`, emitted under git-ignored `generated/truth/`
+via `dataswamp generate-truth` and checked by `dataswamp validate-truth`). See
+`docs/domain-model.md` and `docs/truth-graph-schema.md`.
 
-The company model is deliberately catalogue-independent. There is no truth
-graph, no scientific-file estate, no imperfection engine / observed state, no
-scenario-pack layer, no assessment agents, and no DataHub integration yet.
+Both layers are deliberately catalogue-independent. There is no scientific-file
+estate, no imperfection engine / observed state, no scenario-pack layer, no
+assessment agents, and no DataHub integration yet.
 
 Do not implement future-milestone capabilities (below) speculatively. Add
 them only when a task explicitly scopes them, and do not create placeholder
@@ -44,6 +48,8 @@ modules or packages "to anticipate" that future work.
 uv sync                        # install/sync the environment
 uv run dataswamp version       # run the CLI
 uv run dataswamp validate-config  # validate the canonical config in config/
+uv run dataswamp generate-truth --seed 20260717  # generate the truth graph
+uv run dataswamp validate-truth   # validate a generated truth graph
 uv run pytest                  # run tests
 uv run ruff check .            # lint
 uv run ruff format --check .   # format check
@@ -61,10 +67,16 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     vocabularies, entities, relationships, generation config, the assembled
     `CanonicalConfig`, the YAML loader, and project-specific errors. Independent
     of DataHub.
+  - `truth/` — the deterministic truth-graph generator: scientific/governance
+    entities, seeded RNG and date helpers, the generation-plan loader and
+    allocation, the generator pipeline, canonical serializer, writer, and
+    invariant validator. Depends only on `company/`, never on DataHub. See
+    `docs/truth-graph-schema.md`.
 - `config/` — hand-authored canonical business configuration (YAML) plus
-  `config/vocabularies/`. Tracked; distinct from the git-ignored `generated/`.
-- `tests/` — mirrors the package for test discovery; `tests/company/` covers
-  the model, loader, and `validate-config` CLI using compact fixtures.
+  `config/vocabularies/` and `config/truth/generation-plan.yaml`. Tracked;
+  distinct from the git-ignored `generated/`.
+- `tests/` — mirrors the package for test discovery; `tests/company/` and
+  `tests/truth/` cover the model, generator, invariants, and CLI commands.
 
 ### Architectural independence from DataHub
 
@@ -73,20 +85,23 @@ governance logic must never depend on DataHub types, clients, or schemas.
 Any future DataHub integration should be an adapter layer that consumes this
 project's own manifests/APIs — not the other way around.
 
-### Separation of truth and observed state (forthcoming principle)
+### Separation of truth and observed state
 
-Future milestones will introduce a deterministic "truth graph" (what is
-correct and complete) separate from "observed state" (what a catalog or
-governance tool reports after defects, drift, or partial ingestion are
-introduced). When that work begins, keep these two representations distinct
-in code and on disk — do not conflate a generator's ground truth with a
-consumer's view of it.
+The deterministic "truth graph" (what is correct and complete) is implemented in
+`src/dataswamp_biosystems/truth/`. A future "observed state" (what a catalog or
+governance tool reports after defects, drift, or partial ingestion) will be a
+*separate* representation derived from the truth graph, not the truth graph
+itself. Keep these two distinct in code and on disk — do not conflate a
+generator's ground truth with a consumer's view of it, and never let defect or
+observed-state concerns leak into the truth generator. See
+`docs/adr/0002-truth-vs-observed-state.md`.
 
-### Deterministic generation (forthcoming requirement)
+### Deterministic generation (requirement)
 
-Any future generator (truth graph, scientific files, defects, etc.) must be
-seeded and deterministic: the same seed must produce byte-identical
-structured outputs (JSON/JSONL manifests) across runs. Do not introduce
+The truth-graph generator is seeded and deterministic: the same config,
+generator version, and seed produce byte-identical structured output (JSONL
+shards + a manifest with per-shard digests). Any future generator (scientific
+files, defects, etc.) must uphold the same guarantee. Do not introduce
 non-deterministic sources (wall-clock time, unseeded randomness, unordered
 set/dict iteration relied upon for output order) into generator code.
 
