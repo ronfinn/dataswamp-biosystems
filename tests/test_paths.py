@@ -182,3 +182,127 @@ def test_guard_does_not_create_or_remove_anything(
     _reject(fake_repo / "config", protected)
     ensure_safe_output_dir(fake_repo / "generated" / "estate", protected_paths=protected)
     assert sorted(p.relative_to(fake_repo) for p in fake_repo.rglob("*")) == before
+
+
+# --- case canonicalisation --------------------------------------------------
+#
+# On a case-insensitive filesystem (macOS/APFS by default, Windows), ``CONFIG``
+# and ``config`` name one directory while ``Path.resolve()`` preserves whichever
+# spelling was typed. Without canonicalisation a case variant slipped past the
+# guard entirely, so ``--output-dir CONFIG --force`` destroyed the configuration
+# it was supposed to protect. These tests pin that regression.
+
+
+def _case_insensitive(tmp_path: Path) -> bool:
+    """Whether *this* temporary filesystem treats case-varied names as one entry."""
+    probe = tmp_path / "case-probe-dir"
+    probe.mkdir()
+    try:
+        return (tmp_path / "CASE-PROBE-DIR").is_dir()
+    finally:
+        probe.rmdir()
+
+
+def _require_case_insensitive(tmp_path: Path) -> None:
+    if not _case_insensitive(tmp_path):
+        pytest.skip("filesystem is case-sensitive; a case alias is a genuinely distinct path")
+
+
+@pytest.mark.parametrize("alias", ["CONFIG", "Config", "cOnFiG"])
+def test_case_varied_alias_of_config_is_rejected(
+    fake_repo: Path, protected: dict[str, Path], alias: str
+) -> None:
+    _require_case_insensitive(fake_repo)
+    error = _reject(fake_repo / alias, protected)
+    assert error.relation == "is"
+    assert error.protected_label == CONFIG_INPUT_LABEL
+
+
+def test_case_varied_alias_of_truth_is_rejected(
+    fake_repo: Path, protected: dict[str, Path]
+) -> None:
+    _require_case_insensitive(fake_repo)
+    error = _reject(fake_repo / "generated" / "TRUTH", protected)
+    assert error.relation == "is"
+    assert error.protected_label == TRUTH_INPUT_LABEL
+
+
+def test_case_varied_descendant_is_rejected(fake_repo: Path, protected: dict[str, Path]) -> None:
+    (fake_repo / "config" / "vocabularies").mkdir()
+    _require_case_insensitive(fake_repo)
+    error = _reject(fake_repo / "CONFIG" / "vocabularies", protected)
+    assert error.relation == "is-inside"
+    assert error.protected_label == CONFIG_INPUT_LABEL
+
+
+def test_case_varied_ancestor_is_rejected(fake_repo: Path, protected: dict[str, Path]) -> None:
+    _require_case_insensitive(fake_repo)
+    error = _reject(fake_repo / "GENERATED", protected)
+    assert error.relation == "contains"
+    assert error.protected_label == TRUTH_INPUT_LABEL
+
+
+def test_case_varied_sibling_is_still_accepted(fake_repo: Path, protected: dict[str, Path]) -> None:
+    """Canonicalising case must not make an unrelated sibling look protected."""
+    ensure_safe_output_dir(fake_repo / "GENERATED" / "estate", protected_paths=protected)
+
+
+# The following exercise the canonicalisation helper itself, so they assert
+# meaningful behaviour on case-sensitive CI as well as case-insensitive laptops.
+
+
+def test_resolve_path_canonicalises_existing_component_case(fake_repo: Path) -> None:
+    _require_case_insensitive(fake_repo)
+    assert resolve_path(fake_repo / "CONFIG") == resolve_path(fake_repo / "config")
+    assert resolve_path(fake_repo / "CONFIG").name == "config"
+
+
+def test_resolve_path_preserves_an_exact_match(fake_repo: Path) -> None:
+    """An exactly-spelled entry always wins, so case-sensitive layouts are safe."""
+    assert resolve_path(fake_repo / "config").name == "config"
+    assert resolve_path(fake_repo / "generated" / "truth").name == "truth"
+
+
+def test_resolve_path_keeps_nonexistent_tail_verbatim(fake_repo: Path) -> None:
+    target = fake_repo / "generated" / "BrandNew" / "Nested"
+    resolved = resolve_path(target)
+    assert resolved.name == "Nested"
+    assert resolved.parent.name == "BrandNew"
+
+
+def test_resolve_path_is_idempotent(fake_repo: Path) -> None:
+    once = resolve_path(fake_repo / "CONFIG")
+    assert resolve_path(once) == once
+
+
+def test_ambiguous_case_matches_do_not_collapse(fake_repo: Path) -> None:
+    """Where case *is* significant, distinct entries must stay distinct.
+
+    Only reachable on a case-sensitive filesystem, where ``config`` and
+    ``CONFIG`` are two directories: canonicalisation must not fold one onto the
+    other, which would wrongly reject a legitimate output.
+    """
+    if _case_insensitive(fake_repo):
+        pytest.skip("filesystem is case-insensitive; both spellings cannot coexist")
+    upper = fake_repo / "CONFIG"
+    upper.mkdir()
+    assert resolve_path(upper) != resolve_path(fake_repo / "config")
+    # A distinct directory that merely case-matches a protected one is allowed.
+    ensure_safe_output_dir(upper, protected_paths={CONFIG_INPUT_LABEL: fake_repo / "config"})
+
+
+def test_unreadable_parent_falls_back_to_requested_spelling(
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A listing failure must degrade to plain resolve, never crash the guard."""
+
+    def _boom(_path: object) -> object:
+        raise PermissionError("listing refused")
+
+    monkeypatch.setattr("dataswamp_biosystems.paths.os.scandir", _boom)
+    assert resolve_path(fake_repo / "config").name == "config"
+    # The guard still functions on exactly-spelled paths.
+    with pytest.raises(UnsafeOutputDirectoryError):
+        ensure_safe_output_dir(
+            fake_repo / "config", protected_paths={CONFIG_INPUT_LABEL: fake_repo / "config"}
+        )

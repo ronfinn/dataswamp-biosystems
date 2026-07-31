@@ -86,8 +86,10 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     replaces a whole directory, so every command that writes one must call
     `ensure_safe_output_dir` before staging: it refuses an output that is,
     contains, or sits inside a protected input (config dir, truth dir — and so
-    the repository root), comparing resolved paths so symlinks and `..` cannot
-    bypass it. Dependency-free (no Typer, no layer imports); the CLI maps
+    the repository root). Comparison uses `resolve_path`, which resolves
+    symlinks and `..` *and* canonicalises each existing component's on-disk
+    case, so a case-varied alias cannot bypass it on a case-insensitive
+    filesystem. Dependency-free (no Typer, no layer imports); the CLI maps
     `UnsafeOutputDirectoryError` to exit code 2. Do not add a second path-safety
     implementation.
   - `company/` — the canonical company model: identifiers, controlled

@@ -140,10 +140,21 @@ or **sits inside** the configuration directory or the default truth directory
 rules out the repository root and any parent of it — no separate repository
 detection is involved.
 
-Comparisons use fully resolved paths, so `..` segments and symlink aliases
-cannot slip past the check: a symlink pointing at `config/` is rejected exactly
-as `config/` itself is. Unsafe usage exits with code **2** and names both the
-proposed output and the protected path it overlaps.
+Comparisons use fully canonicalised paths. `..` segments and symlink aliases
+cannot slip past the check — a symlink pointing at `config/` is rejected exactly
+as `config/` itself is — and each component that exists on disk is rewritten to
+its real spelling, so on a case-insensitive filesystem (macOS and Windows by
+default) `CONFIG` and `Config` are rejected exactly as `config` is. Where the
+filesystem does distinguish case, an exactly-spelled entry always wins and two
+genuinely distinct directories are never folded together. Unsafe usage exits
+with code **2** and names both the proposed output and the protected path it
+overlaps.
+
+`generate-files` protects `generated/truth` **by convention**: it has no
+`--truth-dir` input (it regenerates the truth graph in memory from the same
+config and seed), so the path guarded is the default location, resolved against
+the working directory. A truth graph kept somewhere else is not protected from
+`generate-files`.
 
 Sibling outputs are unaffected — the canonical `generated/truth`,
 `generated/estate` and `generated/observed` layout remains valid, because

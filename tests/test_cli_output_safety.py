@@ -122,6 +122,43 @@ def test_generate_truth_rejects_symlink_alias_to_config(fake_repo: Path) -> None
     assert alias.is_symlink()
 
 
+def _case_insensitive(tmp_path: Path) -> bool:
+    probe = tmp_path / "case-probe-dir"
+    probe.mkdir()
+    try:
+        return (tmp_path / "CASE-PROBE-DIR").is_dir()
+    finally:
+        probe.rmdir()
+
+
+@pytest.mark.parametrize("alias", ["CONFIG", "Config"])
+def test_generate_truth_rejects_case_varied_alias_to_config(fake_repo: Path, alias: str) -> None:
+    """Regression: a case variant named the same directory and slipped the guard.
+
+    Before canonicalisation this exited 0 and replaced every configuration file
+    with truth-graph output — the exact loss issue #3 exists to prevent.
+    """
+    if not _case_insensitive(fake_repo):
+        pytest.skip("filesystem is case-sensitive; a case alias is a genuinely distinct path")
+
+    config_dir = fake_repo / "config"
+    protected_before = _snapshot(config_dir)
+    assert protected_before, "fixture must have configuration files to protect"
+
+    result = _generate_truth(fake_repo, fake_repo / alias, "--force")
+
+    assert result.exit_code == 2, result.output
+    assert "Refusing to generate into" in result.output
+    assert "canonical configuration directory" in result.output
+    # Every configuration file is byte-for-byte intact.
+    assert _snapshot(config_dir) == protected_before
+    # No truth output landed on top of the configuration.
+    assert not (config_dir / MANIFEST_NAME).exists()
+    assert not (fake_repo / alias / MANIFEST_NAME).exists()
+    # The guard ran before any staging, rename or backup.
+    assert _staging_leftovers(fake_repo) == []
+
+
 def test_generate_files_rejects_unsafe_output(fake_repo: Path) -> None:
     protected_before = _snapshot(fake_repo / "config")
     result = runner.invoke(

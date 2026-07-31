@@ -25,9 +25,10 @@ Three overlaps are rejected, for each protected path:
     The output is a *descendant* of a protected input, so generating into it
     would write inside a directory that must stay intact.
 
-Paths are compared after :meth:`~pathlib.Path.resolve`, so ``..`` segments,
-redundant separators and symlink aliases cannot smuggle an unsafe path past the
-check. Siblings are unaffected: with truth at ``generated/truth``, an estate at
+Paths are compared after :func:`resolve_path`, so ``..`` segments, redundant
+separators, symlink aliases and — on a case-insensitive filesystem — differently
+cased spellings of the same directory all reduce to one form before comparison.
+Siblings are unaffected: with truth at ``generated/truth``, an estate at
 ``generated/estate`` shares no ancestor/descendant relationship with it and
 remains valid. The rule protects the specific inputs a command needs, not every
 path that happens to look related.
@@ -35,6 +36,7 @@ path that happens to look related.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -81,13 +83,53 @@ class UnsafeOutputDirectoryError(PathSafetyError):
         )
 
 
-def resolve_path(path: Path | str) -> Path:
-    """Resolve ``path`` for comparison, expanding ``~`` and following symlinks.
+def _canonical_component(parent: Path, part: str) -> str:
+    """Return ``part`` as it is actually spelled inside ``parent``.
 
-    Non-destructive and safe for a path that does not exist yet: the existing
-    prefix is resolved and the remainder normalised lexically.
+    :meth:`~pathlib.Path.resolve` follows symlinks but preserves whatever case
+    the caller typed, so on a case-insensitive filesystem ``CONFIG`` and
+    ``config`` name one directory yet compare unequal — which would let a case
+    variant slip past the containment check. Consulting the directory *listing*
+    (never :meth:`~pathlib.Path.exists`, which answers ``True`` for the wrong
+    case on such a filesystem) recovers the real spelling.
+
+    The lookup is filesystem-agnostic rather than platform-gated:
+
+    * an exact entry always wins, so a case-sensitive filesystem is unaffected;
+    * exactly one case-insensitive match is canonicalised to that entry;
+    * several matches (possible only where case is significant) are genuinely
+      distinct directories, so the requested spelling is kept rather than
+      collapsing them onto an arbitrary one;
+    * an unreadable or non-directory parent falls back to the requested
+      spelling, leaving the comparison no weaker than a plain ``resolve``.
     """
-    return Path(path).expanduser().resolve()
+    try:
+        entries = sorted(entry.name for entry in os.scandir(parent))
+    except OSError:
+        return part
+    if part in entries:
+        return part
+    folded = part.casefold()
+    matches = [entry for entry in entries if entry.casefold() == folded]
+    return matches[0] if len(matches) == 1 else part
+
+
+def resolve_path(path: Path | str) -> Path:
+    """Resolve ``path`` to the single canonical form used for every comparison.
+
+    Expands ``~``, resolves symlinks and ``..`` via
+    :meth:`~pathlib.Path.resolve`, then rewrites each component that exists on
+    disk to its real spelling (see :func:`_canonical_component`), so equivalent
+    paths compare equal and genuinely distinct ones stay distinct.
+
+    Non-destructive and safe for a path that does not exist yet: components past
+    the existing prefix are kept verbatim.
+    """
+    resolved = Path(path).expanduser().resolve()
+    current = Path(resolved.anchor)
+    for part in resolved.relative_to(resolved.anchor).parts:
+        current = current / (_canonical_component(current, part) if current.is_dir() else part)
+    return current
 
 
 def ensure_safe_output_dir(
