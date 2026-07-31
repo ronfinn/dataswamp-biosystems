@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dataswamp_biosystems.observed.defects import registry_rows
 from dataswamp_biosystems.observed.writer import OBSERVED_GRAPH_NAME, TRUTH_INPUTS_NAME
 from dataswamp_biosystems.truth.writer import MANIFEST_NAME
 from tests.observed.conftest import TEST_SEED
@@ -51,6 +52,42 @@ def test_list_defects_exits_zero() -> None:
     result = _run(["list-defects"])
     assert result.returncode == 0, result.stderr
     assert "defect rule" in result.stdout
+
+
+def test_list_defects_reports_counts_by_category() -> None:
+    result = _run(["list-defects"])
+    assert result.returncode == 0, result.stderr
+
+    rows = registry_rows()
+    expected: dict[str, int] = {}
+    for row in rows:
+        expected[row["category"]] = expected.get(row["category"], 0) + 1
+
+    assert f"{len(rows)} defect rule(s) across {len(expected)} categories:" in result.stdout
+    assert "Rules by category:" in result.stdout
+    for category, count in expected.items():
+        assert f"  {category}: {count}" in result.stdout
+
+
+def test_list_defects_reports_severity_fixability_and_approval() -> None:
+    result = _run(["list-defects"])
+    assert result.returncode == 0, result.stderr
+
+    lines = {
+        line.strip().split(" ", 1)[0]: line
+        for line in result.stdout.splitlines()
+        if line.startswith("  ")
+    }
+    checked_auto = checked_approval = False
+    for row in registry_rows():
+        line = lines[row["rule_id"]]
+        assert f"[{row['category']}/{row['severity']}]" in line
+        assert ("auto-fixable" in line) is bool(row["auto_fixable"])
+        assert ("needs-approval" in line) is bool(row["requires_human_approval"])
+        checked_auto = checked_auto or bool(row["auto_fixable"])
+        checked_approval = checked_approval or bool(row["requires_human_approval"])
+    assert checked_auto, "registry has no auto-fixable rule to assert on"
+    assert checked_approval, "registry has no approval-requiring rule to assert on"
 
 
 def test_validate_defects_exits_zero() -> None:
