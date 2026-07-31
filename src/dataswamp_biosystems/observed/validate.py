@@ -5,11 +5,18 @@ and defect seed and confirms it is byte-identical to what is on disk (a
 determinism/integrity tripwire), then checks the ledgers hold together:
 structural completeness and referential integrity across the four streams,
 fidelity of every mutation's ``before`` to the truth graph, and the absence of
-contradictory or control-touching mutations.
+contradictory mutations — two mutations writing the same
+``(shard, entity, field)`` path, or one entity carrying two mutually
+incompatible rules.
 
 It deliberately does **not** enforce the truth-graph invariants on the observed
 graph — the observed graph is *supposed* to be broken. It validates the
 bookkeeping, not the correctness of the estate.
+
+It also does **not** currently re-check the control partition: the engine
+excludes control assets from every rule's eligible population at selection time,
+but this validator does not reconstruct that partition to confirm no injected
+defect targets a control asset. Control-partition validation is future work.
 """
 
 from __future__ import annotations

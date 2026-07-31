@@ -179,14 +179,24 @@ population of assets untouched.
 confirms a **byte-for-byte** match against disk, then checks the ledgers hold
 together: structural completeness and referential integrity across the four
 streams, fidelity of every mutation's `before` to the truth graph, and the
-absence of contradictory or control-touching mutations. It deliberately does
-**not** enforce the truth-graph invariants on the observed graph — the observed
-graph is *supposed* to be broken.
+absence of contradictory mutations — two mutations writing the same
+`(shard, entity, field)` path, or one entity carrying two mutually incompatible
+rules. It deliberately does **not** enforce the truth-graph invariants on the
+observed graph — the observed graph is *supposed* to be broken.
+
+The control partition is enforced by the **engine**, which excludes control
+assets from every rule's eligible population at selection time. `validate-observed`
+does not currently reconstruct that partition to re-check it independently;
+control-partition validation is future work (see Limitations).
 
 ## Limitations
 
 - Physical file integrity is represented in the observed graph only; the
   materialized estate is not corrupted this milestone.
+- `validate-observed` does not independently re-check the control partition.
+  Controls are excluded at selection time by the engine, but the validator does
+  not reconstruct them, and the reserved control asset ids are reported only as
+  a count in `profile-summary.json`, not emitted as data.
 - Byte-for-byte determinism is defined within a fixed environment (pinned
   dependency versions), as with the truth graph and estate.
 - There are no scenario packs, no assessment agents, no automatic remediation,
