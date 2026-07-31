@@ -130,6 +130,27 @@ placeholder has a complete, consistent sidecar. Output is staged in a temporary
 directory and swapped into place atomically, so a failed or over-budget run never
 leaves a seemingly-complete estate.
 
+### Output-directory safety
+
+Generation *replaces the whole output directory*, so `--output-dir` is checked
+against the command's protected inputs before anything is staged, renamed or
+removed. `generate-files` refuses an output directory that **is**, **contains**,
+or **sits inside** the configuration directory or the default truth directory
+(`generated/truth`). Because the repository root contains `config/`, this also
+rules out the repository root and any parent of it — no separate repository
+detection is involved.
+
+Comparisons use fully resolved paths, so `..` segments and symlink aliases
+cannot slip past the check: a symlink pointing at `config/` is rejected exactly
+as `config/` itself is. Unsafe usage exits with code **2** and names both the
+proposed output and the protected path it overlaps.
+
+Sibling outputs are unaffected — the canonical `generated/truth`,
+`generated/estate` and `generated/observed` layout remains valid, because
+siblings are neither ancestors nor descendants of one another. `--force`
+permits replacing a non-empty *safe* directory only; it never overrides this
+containment check.
+
 ## Limitations
 
 - Content is structurally valid but scientifically meaningless (random values,

@@ -319,6 +319,15 @@ runs, files, assets, contracts, quality, governance, lineage), a
 digests), and a `summary.md`. Override the seed with `--seed`, the destination
 with `--output-dir`, and overwrite a non-empty directory with `--force`.
 
+> [!IMPORTANT]
+> Generation **replaces the entire output directory**. Every generation command
+> therefore refuses an `--output-dir` that is, contains, or sits inside its
+> protected inputs — the configuration directory, the truth directory it reads,
+> and by extension the repository root. Paths are compared after resolution, so
+> symlink aliases and `..` segments cannot bypass the check, and `--force` never
+> overrides it. Unsafe usage exits with code `2` without touching anything. See
+> [docs/file-generation.md](docs/file-generation.md#output-directory-safety).
+
 Validate an existing generated graph — invariants plus a byte-for-byte
 determinism/integrity check against a regeneration from the recorded seed:
 
