@@ -2,6 +2,66 @@
 
 A running log of completed milestones. Newest first.
 
+## Imperfection engine (observed state) — 2026-07-18
+
+Implemented the deterministic imperfection engine: a downstream consumer that
+derives a deliberately-imperfect *observed* state from the truth graph, with a
+full, machine-readable ledger of every injected defect for agent benchmarking.
+
+- **Package (`src/dataswamp_biosystems/observed/`):** taxonomy/record models
+  (defect instance, mutation, expected finding, expected remediation, observed
+  meta), an in-code defect-definition registry (41 rules across all 12
+  categories) with a registry validator, six maturity profiles, a truth-graph
+  index with a mutable JSON working copy, the deterministic engine, an on-disk
+  injection orchestrator (checksums + path safety), an atomic writer, and an
+  output validator. Depends only on `company/` and `truth/`.
+- **Reads truth from disk, never mutates it:** `inject-defects` reads the truth
+  graph via its manifest, reconstructs the typed graph from the seed and verifies
+  it byte-for-byte against the on-disk shards, checksums every truth input before
+  processing, and verifies the checksums unchanged after generation and writing —
+  recording them in `truth-inputs.json`. Output may not resolve inside the truth
+  directory. Mutations apply to independent JSON copies; a guard test proves both
+  the truth files and the truth object are unchanged. The observed graph is
+  relaxed JSON so defects can express states the strict truth models forbid.
+- **Ledgers:** every applied defect yields one `DefectInstance`, one+
+  `MutationRecord` (truth `before`/observed `after`, plus severity, seed, profile,
+  selection rationale, fix eligibility, approval requirement, and metadata-vs-
+  physical manifestation), exactly one `ExpectedFinding` (with `match_fields` for
+  prose-independent evaluation, message semantics, and a remediation link), and
+  one+ `ExpectedRemediation` (with a `truth_reference`) — all referentially
+  intact. The observed graph itself carries no defect annotations.
+- **Taxonomy:** metadata completeness, semantic quality, ownership/stewardship,
+  naming/versioning, governance/classification, licensing/intended-use,
+  lineage/provenance, schema/structural, modality-specific scientific metadata,
+  AI/training readiness, lifecycle/staleness, and physical file integrity
+  (observed-graph-only). Includes every mandated example (missing/wrong owner,
+  generic description, missing genome build, mixed gene ids, H5AD counts layer,
+  spatial coords OOB, VCF index, pathology source-slide, stale review,
+  restricted-as-internal, absent training approval, cross-study edge, duplicate
+  final versions, QC-contradicted certification, checksum mismatch, missing file).
+- **Profiles:** `gold` (0 defects) → `mostly-good` → `typical` → `poor` →
+  `catastrophic`, plus `demo` (~100–200 defects across all 12 categories with a
+  healthy control population). Rates are the only knob; a control partition,
+  per-entity cap, conflict ledger, and hard global cap keep runs reproducible and
+  non-contradictory.
+- **Determinism/safety:** structural — sorted rule/entity iteration, per-selection
+  seeded RNG, single canonical serializer. `validate-observed` regenerates and
+  byte-compares all seven outputs, then checks structural, fidelity, and
+  non-contamination invariants (but not truth invariants — the observed graph is
+  meant to be broken).
+- **Output (git-ignored `generated/observed/`):** `observed-graph.json`, the four
+  ledger `.jsonl` files, `profile-summary.json` (with category/severity/rule/
+  modality distributions), `truth-inputs.json`, and `summary.md`.
+- **CLI:** `dataswamp list-defects`, `dataswamp validate-defects`, `dataswamp
+  inject-defects --truth generated/truth/truth-graph.json` (`--seed`, `--profile`,
+  `--config-dir`, `--output-dir`, `--force`), and `dataswamp validate-observed`.
+- **Tests (`tests/observed/`):** registry, engine, injection, validation, and CLI
+  behaviour.
+- **Docs:** [observed-state.md](observed-state.md),
+  [ADR 0003](adr/0003-imperfection-engine.md), README, CLAUDE.md.
+- **Deliberately excluded:** scenario packs, DataHub, LLMs, assessment agents,
+  automatic remediation, write-back, and estate byte corruption.
+
 ## Scientific-file estate — 2026-07-18
 
 Implemented the deterministic, lightweight scientific-file generation layer: a

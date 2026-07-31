@@ -36,13 +36,20 @@ the **scientific-file estate** (small, genuinely-readable example files
 materialized for the truth graph's assets by
 `src/dataswamp_biosystems/estate/`, emitted under git-ignored
 `generated/estate/` via `dataswamp generate-files` and checked by `dataswamp
-validate-files`, with explicitly-declared placeholders for heavy binaries). See
-`docs/domain-model.md`, `docs/truth-graph-schema.md`, and
-`docs/file-generation.md`.
+validate-files`, with explicitly-declared placeholders for heavy binaries), and
+the **imperfection engine** (a deliberately-imperfect *observed state* derived
+from the truth graph by `src/dataswamp_biosystems/observed/`, with a full
+machine-readable ledger of every injected defect and its expected finding and
+remediation, emitted under git-ignored `generated/observed/` via `dataswamp
+inject-defects` — which reads the truth graph from disk, checksums it, and
+verifies it is unmodified — with `dataswamp list-defects`/`validate-defects` for
+the registry and `dataswamp validate-observed` to re-check output). See
+`docs/domain-model.md`, `docs/truth-graph-schema.md`,
+`docs/file-generation.md`, and `docs/observed-state.md`.
 
-All three layers are deliberately catalogue-independent. There is no imperfection
-engine / observed state, no scenario-pack layer, no assessment agents, and no
-DataHub integration yet.
+All four layers are deliberately catalogue-independent. The observed layer never
+mutates the truth graph. There is no scenario-pack layer, no assessment agents,
+and no DataHub integration yet.
 
 Do not implement future-milestone capabilities (below) speculatively. Add
 them only when a task explicitly scopes them, and do not create placeholder
@@ -58,6 +65,10 @@ uv run dataswamp generate-truth --seed 20260717  # generate the truth graph
 uv run dataswamp validate-truth   # validate a generated truth graph
 uv run dataswamp generate-files --seed 20260717 --profile tiny  # generate the file estate
 uv run dataswamp validate-files   # validate a generated file estate
+uv run dataswamp list-defects      # list the defect registry
+uv run dataswamp validate-defects  # validate the defect registry
+uv run dataswamp inject-defects --truth generated/truth/truth-graph.json --seed 20260717 --profile demo  # derive observed state
+uv run dataswamp validate-observed  # validate a generated observed state
 uv run pytest                  # run tests
 uv run ruff check .            # lint
 uv run ruff format --check .   # format check
@@ -85,12 +96,21 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     truth-consuming generator, atomic writer (path-safe, budget-capped), and
     validator. Depends only on `company/` and `truth/`, never on DataHub. See
     `docs/file-generation.md`.
+  - `observed/` — the deterministic imperfection engine: taxonomy/ledger entity
+    models, the in-code defect-definition registry (41 rules across 12
+    categories), six maturity profiles, a truth-graph index with a mutable JSON
+    working copy, the selection/mutation engine, an on-disk injection
+    orchestrator (checksums + path safety), atomic writer, and validator.
+    Mutates only JSON copies of the truth graph (never the truth entities) and
+    depends only on `company/` and `truth/`, never on DataHub. See
+    `docs/observed-state.md`.
 - `config/` — hand-authored canonical business configuration (YAML) plus
   `config/vocabularies/` and `config/truth/generation-plan.yaml`. Tracked;
   distinct from the git-ignored `generated/`.
 - `tests/` — mirrors the package for test discovery; `tests/company/`,
-  `tests/truth/`, and `tests/estate/` cover the model, generators, invariants,
-  file contents, and CLI commands.
+  `tests/truth/`, `tests/estate/`, and `tests/observed/` cover the model,
+  generators, the defect registry and engine, invariants, file contents, and CLI
+  commands.
 
 ### Architectural independence from DataHub
 
@@ -102,10 +122,11 @@ project's own manifests/APIs — not the other way around.
 ### Separation of truth and observed state
 
 The deterministic "truth graph" (what is correct and complete) is implemented in
-`src/dataswamp_biosystems/truth/`. A future "observed state" (what a catalog or
-governance tool reports after defects, drift, or partial ingestion) will be a
-*separate* representation derived from the truth graph, not the truth graph
-itself. Keep these two distinct in code and on disk — do not conflate a
+`src/dataswamp_biosystems/truth/`. The "observed state" (what a catalog or
+governance tool reports after defects, drift, or partial ingestion) is a
+*separate* representation in `src/dataswamp_biosystems/observed/`, derived from
+the truth graph rather than being the truth graph itself. Keep these two
+distinct in code and on disk — do not conflate a
 generator's ground truth with a consumer's view of it, and never let defect or
 observed-state concerns leak into the truth generator. See
 `docs/adr/0002-truth-vs-observed-state.md`.
@@ -148,6 +169,11 @@ referential integrity, not just happy-path execution.
 - **Never create a Git commit automatically.** Leave staged/unstaged changes
   for the user to review and commit themselves, unless a task explicitly
   asks for a commit.
+- **Never silently remediate injected defects.** The imperfection engine
+  introduces intentional defects/drift for benchmark purposes; do not "fix"
+  them as a side effect of unrelated work — defects are test fixtures, not bugs.
+- **Never let observed-state concerns leak into the truth generator**, and never
+  mutate the truth graph from the observed layer.
 - Never add DataHub as a dependency or import until a task explicitly scopes
   DataHub integration.
 - Never generate scientific/synthetic datasets until a task explicitly
