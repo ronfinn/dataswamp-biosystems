@@ -1,0 +1,17 @@
+schema_version: 1
+terms:
+  - id: model-training-approved
+    label: "Approved"
+    description: "Approved for use in model training."
+  - id: model-training-conditionally-approved
+    label: "Conditionally Approved"
+    description: "Approved subject to documented conditions."
+  - id: model-training-under-review
+    label: "Under Review"
+    description: "Approval request under review; not yet decided."
+  - id: model-training-not-approved
+    label: "Not Approved"
+    description: "Not currently approved for model training."
+  - id: model-training-prohibited
+    label: "Prohibited"
+    description: "Explicitly prohibited from use in model training."

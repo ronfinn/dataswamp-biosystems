@@ -7,9 +7,40 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![Project status](https://img.shields.io/badge/status-pre--alpha-orange)
 
+## Current milestone: imperfection engine (observed state)
+
+This repository contains packaging, tooling, a CLI, the **canonical company
+model** — a fictional oncology company (programmes, studies, teams, people,
+ownership/stewardship, and controlled vocabularies) defined in YAML under
+`config/` and validated by typed Pydantic models — and a **deterministic truth
+graph**: the complete, correct synthetic scientific and governance state
+(subjects, biospecimens, assays, runs, files, datasets, data products,
+contracts, quality, governance, and lineage) generated from that model. See
+[docs/domain-model.md](docs/domain-model.md) and
+[docs/truth-graph-schema.md](docs/truth-graph-schema.md).
+
+A downstream **scientific-file estate** materializes small, genuinely-readable
+example files (H5AD, Parquet, OME-TIFF, PNG, VCF, BED, GeoJSON, Matrix Market,
+CSV/TSV/JSON/YAML/JSONL, gzip, FASTQ) for the truth graph's assets, with
+explicitly-declared placeholders for heavy binaries (BAM, CRAM, DICOM, SVS,
+Zarr). See [docs/file-generation.md](docs/file-generation.md).
+
+An **imperfection engine** derives a deliberately-imperfect **observed state**
+from the truth graph — what a catalogue might report after defects and drift —
+alongside a full, machine-readable ledger of every injected defect and its
+expected finding and remediation, with a healthy population of untouched
+controls. It never mutates the truth graph. See
+[docs/observed-state.md](docs/observed-state.md).
+
+All four layers are deliberately catalogue-independent: they know nothing about
+DataHub or any downstream consumer. The truth graph remains the ground truth for
+benchmarks. Scenario packs, assessment agents and DataHub integration are future
+milestones — see Roadmap below.
+
 ---
 
 ## Overview
+
 
 Scientific organisations generate interconnected data spanning programmes, studies, experiments, samples, assays, sequencing, imaging, analytical pipelines, metadata, lineage, ownership and governance controls.
 
@@ -45,9 +76,14 @@ No real patients, employees, organisations, studies or proprietary datasets are 
 > [!IMPORTANT]
 > Data Swamp Biosystems is currently **pre-alpha** and under active development.
 
-The current repository provides the initial Python package, command-line interface, automated testing, linting, type checking and continuous-integration foundation.
+The current repository provides the Python package, command-line interface,
+automated testing, linting, type checking and continuous-integration foundation,
+together with the canonical organisation model, the deterministic truth graph,
+the scientific file-estate generator and the deterministic defect-injection
+(imperfection) engine.
 
-The deterministic organisation generator, scientific file-estate generator, defect-injection engine and benchmark reports described below represent the target capabilities for the first public releases and are being developed incrementally.
+The benchmark reports described below represent the remaining target capabilities
+for the first public release and are being developed incrementally.
 
 | Item                              | Status           |
 | --------------------------------- | ---------------- |
@@ -55,10 +91,10 @@ The deterministic organisation generator, scientific file-estate generator, defe
 | Command-line application          | Available        |
 | Automated CI checks               | Available        |
 | Strict static type checking       | Available        |
-| Canonical organisation model      | In development   |
-| Truth graph generation            | In development   |
-| Scientific file-estate generation | Planned for v0.1 |
-| Controlled defect injection       | Planned for v0.1 |
+| Canonical organisation model      | Available        |
+| Truth graph generation            | Available        |
+| Scientific file-estate generation | Available        |
+| Controlled defect injection       | Available        |
 | Truth-versus-observed reports     | Planned for v0.1 |
 | DataHub integration               | Planned          |
 | OpenMetadata integration          | Planned          |
@@ -96,9 +132,9 @@ It is intended to describe:
 
 ### 2. Observed State
 
-The observed state represents the imperfect version of the organisation that a catalogue, governance platform, validator or AI agent might encounter.
+The observed state represents the imperfect version of the organisation that a catalogue, governance platform, validator or AI agent might encounter. It is implemented by the imperfection engine (`dataswamp inject-defects`), which derives it from the truth graph without ever modifying that graph.
 
-Controlled defects may include:
+The defect registry covers twelve categories, including:
 
 * Missing ownership
 * Incomplete metadata
@@ -113,7 +149,7 @@ Controlled defects may include:
 * Naming-standard violations
 * Unregistered derived datasets
 
-Every defect will be generated from a known truth state and recorded in a machine-readable defect manifest.
+Every defect is generated from a known truth state and recorded in machine-readable ledgers, together with its expected finding and expected remediation.
 
 ### 3. Benchmark Results
 
@@ -247,6 +283,133 @@ uv run dataswamp version
 
 ---
 
+## Validating the canonical configuration
+
+The canonical company model lives in `config/`. Validate it with:
+
+```bash
+uv run dataswamp validate-config
+```
+
+On success it prints entity counts (programmes, studies, teams, people,
+ownership and stewardship assignments, and vocabulary terms) and exits 0. It
+exits non-zero with actionable messages when the configuration is invalid:
+
+- exit code `1` — validation failures (duplicate IDs, duplicate emails,
+  non-`dataswamp.example` email/company domains, unresolved
+  programme/team/person references, invalid controlled-vocabulary values,
+  and owners/stewards pointing at nonexistent assets or units);
+- exit code `2` — the configuration could not be loaded (a file is missing
+  or the YAML is malformed).
+
+Point it at an alternative directory with `--config-dir PATH`.
+
+## Generating the truth graph
+
+Generate the deterministic truth graph into the git-ignored `generated/truth/`:
+
+```bash
+uv run dataswamp generate-truth --seed 20260717
+```
+
+The same seed, configuration, and generator version always produce
+byte-identical output. It writes JSONL shards (subjects, biospecimens, assays,
+runs, files, assets, contracts, quality, governance, lineage), a
+`truth-graph.json` manifest (provenance, counts, and per-shard SHA-256
+digests), and a `summary.md`. Override the seed with `--seed`, the destination
+with `--output-dir`, and overwrite a non-empty directory with `--force`.
+
+Validate an existing generated graph — invariants plus a byte-for-byte
+determinism/integrity check against a regeneration from the recorded seed:
+
+```bash
+uv run dataswamp validate-truth
+```
+
+## Generating the scientific-file estate
+
+Materialize representative example files for the truth graph's assets into the
+git-ignored `generated/estate/`:
+
+```bash
+uv run dataswamp generate-files --seed 20260717 --profile tiny
+uv run dataswamp generate-files --seed 20260717 --profile demo
+uv run dataswamp generate-files --seed 20260717 --profile stress
+```
+
+The truth graph is regenerated in memory from the same seed (consumed, never
+re-invented) and a per-asset file set is written under `files/`, alongside a
+`file-manifest.jsonl`, a machine-readable `generation-summary.json`, and a
+`summary.md`. Profiles trade off scale against disk:
+
+| Profile | Files | Disk | Purpose |
+| --- | --- | --- | --- |
+| `tiny` (default) | ~100 | <50 MB | tests and rapid demos; covers every format |
+| `demo` | ~1,000–2,000 | <500 MB | DataHub / agent demonstrations |
+| `stress` | ~10k records | minimal content | catalogue-scale testing |
+
+Each profile carries a **hard byte budget**; generation aborts before exceeding
+it rather than filling the disk. The same truth graph, profile, generator
+version, and seed produce byte-identical files and manifest. Override with
+`--seed`, `--profile`, `--output-dir`, and `--force`.
+
+**Supported formats.** Genuine, re-readable: H5AD (AnnData), Parquet, OME-TIFF,
+PNG, GeoJSON, VCF, BED, Matrix Market, CSV, TSV, JSON, YAML, JSONL, gzip text,
+and tiny FASTQ. **Declared placeholders** (never faked as valid binaries): BAM,
+CRAM, DICOM, SVS, and large Zarr — each a tiny stub with a `.placeholder.json`
+sidecar recording the intended format, represented logical size, and
+limitations. Files carry no scientific claims beyond structural validity.
+
+Validate an existing estate — checksums, path safety, asset references,
+placeholder sidecars, and a byte-for-byte manifest match:
+
+```bash
+uv run dataswamp validate-files
+```
+
+## Injecting defects (the observed state)
+
+Inspect the defect registry, then derive a deliberately-imperfect observed state
+and its defect ledger from an on-disk truth graph into the git-ignored
+`generated/observed/`:
+
+```bash
+uv run dataswamp list-defects          # print every defect rule
+uv run dataswamp validate-defects      # validate the registry itself
+uv run dataswamp inject-defects --truth generated/truth/truth-graph.json --seed 20260717 --profile demo
+```
+
+The truth graph is read from disk (never modified): its inputs are checksummed
+before processing and verified unchanged afterwards, and defects are applied to
+independent JSON copies. The output may not resolve inside the truth directory.
+It writes `observed-graph.json`, four ledger files (`injected-defects.jsonl`,
+`expected-findings.jsonl`, `expected-remediations.jsonl`, `mutation-log.jsonl`),
+a `profile-summary.json`, a `truth-inputs.json` checksum manifest, and a
+`summary.md`. Profiles set how many defects are injected:
+
+| Profile | Character |
+| --- | --- |
+| `gold` | pristine — no defects |
+| `mostly-good` | a few defects, mostly clean |
+| `typical` | a moderate mix across every category |
+| `poor` | pervasive defects |
+| `catastrophic` | defects almost everywhere |
+| `demo` (default) | ~100–200 defects across all 12 categories, healthy controls |
+
+Every applied defect records a before/after mutation, an expected finding, and an
+expected remediation, so an agent's detections can be scored against known truth
+by matching structured fields (rule, entity, category, severity) rather than
+exact prose. The observed graph itself carries no defect annotations. `--seed` is
+the defect seed (the truth seed comes from the truth manifest); override
+`--profile`, `--output-dir`, and `--force` as needed.
+
+Validate an existing observed state — a byte-for-byte regeneration check plus
+ledger structural, fidelity, and non-contamination invariants:
+
+```bash
+uv run dataswamp validate-observed
+```
+
 ## Development
 
 ### Run the test suite
@@ -355,11 +518,11 @@ Ownership, stewardship, classifications, domains, policies, glossary terms, rete
 
 ### Defect Registry
 
-A versioned catalogue of supported defects, their expected effects and their detection criteria.
+A versioned catalogue of supported defects, their expected effects and their detection criteria. Implemented as an in-code registry of 41 rules spanning 12 categories, inspectable with `dataswamp list-defects`.
 
 ### Defect-Injection Engine
 
-A deterministic mechanism for transforming the truth state into an imperfect observed state.
+A deterministic mechanism for transforming the truth state into an imperfect observed state. Implemented in `src/dataswamp_biosystems/observed/`, with six maturity profiles and checksum-verified protection of the truth graph.
 
 ### Validation and Benchmarking
 
@@ -409,7 +572,7 @@ This structure remains subject to change while the v0.1 benchmark contract is de
 
 ## Example Defect Model
 
-A future defect record may contain information such as:
+Illustrative shape only — the implemented ledger records are documented in [docs/observed-state.md](docs/observed-state.md). A defect record carries information such as:
 
 ```json
 {
@@ -423,7 +586,7 @@ A future defect record may contain information such as:
 }
 ```
 
-The final schema will be versioned and documented before the first stable benchmark release.
+The schema will continue to be versioned and documented ahead of the first stable benchmark release.
 
 ---
 
@@ -528,18 +691,27 @@ Documentation should distinguish implemented functionality from experimental and
 
 ### v0.1 — Deterministic Benchmark Core
 
+Implemented:
+
 * Versioned configuration schema
 * Canonical fictional biotech organisation
 * Authoritative truth graph
 * Representative scientific file estate
 * Versioned defect registry
 * Deterministic defect injection
-* Truth-versus-observed comparison
+* Reproducibility and snapshot tests
+
+Remaining for v0.1:
+
+* Truth-versus-observed comparison reporting
 * Machine-readable benchmark reports
 * Human-readable benchmark reports
 * End-to-end demonstration
-* Reproducibility and snapshot tests
 * First official GitHub release
+
+Beyond v0.1, scenario packs composing profiles and defect sets into named
+benchmark cases, and assessment agents scored against the observed state's
+expected findings and remediations, remain future work.
 
 ### v0.2 — Metadata and Lineage Integrations
 

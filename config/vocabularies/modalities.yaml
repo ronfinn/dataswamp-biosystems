@@ -1,0 +1,58 @@
+schema_version: 1
+terms:
+  - id: wgs
+    label: "Whole-Genome Sequencing"
+    description: "Whole-genome DNA sequencing."
+    scientific_domain: genomics
+  - id: wes
+    label: "Whole-Exome Sequencing"
+    description: "Whole-exome DNA sequencing."
+    scientific_domain: genomics
+  - id: rna-seq
+    label: "Bulk RNA-Seq"
+    description: "Bulk transcriptome sequencing."
+    scientific_domain: transcriptomics
+  - id: scrna-seq
+    label: "Single-Cell RNA-Seq"
+    description: "Single-cell transcriptome sequencing."
+    scientific_domain: transcriptomics
+  - id: methylation-array
+    label: "Methylation Array"
+    description: "Array-based DNA methylation profiling."
+    scientific_domain: epigenomics
+  - id: ct-imaging
+    label: "CT Imaging"
+    description: "Computed-tomography imaging."
+    scientific_domain: radiology-imaging
+  - id: mri-imaging
+    label: "MRI Imaging"
+    description: "Magnetic-resonance imaging."
+    scientific_domain: radiology-imaging
+  - id: digital-pathology-wsi
+    label: "Whole-Slide Imaging"
+    description: "Digitised whole-slide pathology images."
+    scientific_domain: digital-pathology
+  - id: ihc
+    label: "Immunohistochemistry"
+    description: "Immunohistochemistry-stained tissue imaging."
+    scientific_domain: digital-pathology
+  - id: flow-cytometry
+    label: "Flow Cytometry"
+    description: "Cell-population immunophenotyping."
+    scientific_domain: proteomics
+  - id: clinical-ehr
+    label: "Clinical EHR Extract"
+    description: "Structured clinical record extracts."
+    scientific_domain: clinical
+  - id: visium-hd
+    label: "Visium HD Spatial Transcriptomics"
+    description: "High-definition spatially resolved transcriptome capture."
+    scientific_domain: spatial-transcriptomics
+  - id: perturb-seq
+    label: "Perturb-Seq"
+    description: "Pooled single-cell CRISPR perturbation screen with transcriptomic readout."
+    scientific_domain: functional-genomics
+  - id: crispr-screen
+    label: "CRISPR Screen"
+    description: "Pooled CRISPR knockout/activation viability or enrichment screen."
+    scientific_domain: functional-genomics

@@ -1,0 +1,55 @@
+schema_version: 1
+# Deterministic truth-graph generation plan. Consumed by `dataswamp
+# generate-truth`. Counts here are exact targets; the generator distributes each
+# modality group's dataset_count across its studies with a deterministic
+# largest-remainder split. Every modality listed must be declared by each study
+# in that group's `studies` list (validated on load).
+#
+# Count reconciliation (see docs/domain-model.md):
+#   155 modality datasets + 10 reference datasets = 165 Dataset records
+#   + 15 DataProduct records = 180 catalogue-level assets.
+generation_plan:
+  generator_version: "1.0.0"
+  # Fixed calendar anchor for all derived dates/timestamps (UTC). No wall-clock
+  # is ever read; every date is this anchor plus a deterministic integer offset.
+  epoch_anchor: "2024-01-08"
+  subjects_per_study: 10
+  reference_dataset_count: 10
+  data_product_count: 15
+  modality_groups:
+    - id: scrna-seq
+      label: "Single-Cell RNA-Seq"
+      modalities: [scrna-seq]
+      dataset_count: 35
+      subject_kind: human_subject
+      studies: [study-nsclc-02, study-tnbc-01, study-crc-02]
+    - id: visium-hd
+      label: "Visium HD Spatial Transcriptomics"
+      modalities: [visium-hd]
+      dataset_count: 25
+      subject_kind: human_subject
+      studies: [study-nsclc-02, study-tnbc-01, study-crc-02]
+    - id: wgs-wes
+      label: "WGS / WES"
+      modalities: [wgs, wes]
+      dataset_count: 25
+      subject_kind: human_subject
+      studies: [study-nsclc-01, study-tnbc-01, study-tnbc-02, study-crc-01]
+    - id: digital-pathology
+      label: "Digital Pathology"
+      modalities: [digital-pathology-wsi]
+      dataset_count: 30
+      subject_kind: human_subject
+      studies: [study-nsclc-01, study-tnbc-01, study-crc-02]
+    - id: radiology
+      label: "Radiology"
+      modalities: [ct-imaging, mri-imaging]
+      dataset_count: 20
+      subject_kind: human_subject
+      studies: [study-nsclc-01, study-tnbc-02, study-crc-01]
+    - id: functional-genomics
+      label: "Perturb-Seq / CRISPR Screen"
+      modalities: [perturb-seq, crispr-screen]
+      dataset_count: 20
+      subject_kind: experimental_model
+      studies: [study-nsclc-02, study-tnbc-01, study-crc-01]

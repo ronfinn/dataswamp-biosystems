@@ -1,0 +1,22 @@
+schema_version: 1
+terms:
+  - id: retention-transient
+    label: "Transient (30 days)"
+    description: "Short-lived working data; eligible for deletion after 30 days."
+    duration: "P30D"
+  - id: retention-1y
+    label: "Standard (1 year)"
+    description: "Routine operational data retained for one year."
+    duration: "P1Y"
+  - id: retention-7y
+    label: "Research (7 years)"
+    description: "Research data retained for seven years."
+    duration: "P7Y"
+  - id: retention-regulatory-25y
+    label: "Regulatory (25 years)"
+    description: "Data under regulatory retention obligations."
+    duration: "P25Y"
+  - id: retention-permanent
+    label: "Permanent"
+    description: "Retained indefinitely; no scheduled disposal."
+    duration: null

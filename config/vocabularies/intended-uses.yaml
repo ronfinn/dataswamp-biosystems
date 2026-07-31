@@ -1,0 +1,20 @@
+schema_version: 1
+terms:
+  - id: research-only
+    label: "Research Only"
+    description: "Exploratory and translational research use."
+  - id: internal-analytics
+    label: "Internal Analytics"
+    description: "Operational and portfolio analytics."
+  - id: regulatory-submission
+    label: "Regulatory Submission"
+    description: "Prepared to support a regulatory submission."
+  - id: external-sharing
+    label: "External Sharing"
+    description: "Approved for sharing with external collaborators."
+  - id: model-training
+    label: "Model Training"
+    description: "Eligible as input to model training."
+  - id: clinical-decision-support
+    label: "Clinical Decision Support"
+    description: "Intended to inform clinical decision support."

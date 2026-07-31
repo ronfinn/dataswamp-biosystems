@@ -1,0 +1,8 @@
+schema_version: 1
+# Placeholder for future deterministic generators. Nothing is generated at
+# this milestone; the seed and output settings are validated and version
+# controlled so later milestones can rely on them.
+generation:
+  seed: 20260718
+  output_dir: generated
+  deterministic: true

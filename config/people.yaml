@@ -1,0 +1,92 @@
+schema_version: 1
+roles:
+  - id: programme-lead
+    label: "Programme Lead"
+    description: "Accountable lead for a research programme."
+  - id: principal-investigator
+    label: "Principal Investigator"
+    description: "Scientific lead for one or more studies."
+  - id: bioinformatician
+    label: "Bioinformatician"
+    description: "Designs and runs computational analyses."
+  - id: data-engineer
+    label: "Data Engineer"
+    description: "Builds and operates data pipelines and storage."
+  - id: platform-engineer
+    label: "Platform Engineer"
+    description: "Operates the underlying data platform."
+  - id: data-steward
+    label: "Data Steward"
+    description: "Stewards data meaning, quality, and documentation."
+  - id: head-of-governance
+    label: "Head of Data Governance"
+    description: "Leads the data governance function."
+  - id: data-protection-officer
+    label: "Data Protection Officer"
+    description: "Oversees data protection and privacy compliance."
+people:
+  - id: person-mara-oduya
+    full_name: "Mara Oduya"
+    email: mara.oduya@dataswamp.example
+    role: head-of-governance
+    team_id: team-data-governance
+  - id: person-vikram-shah
+    full_name: "Vikram Shah"
+    email: vikram.shah@dataswamp.example
+    role: data-steward
+    team_id: team-data-governance
+  - id: person-elena-briggs
+    full_name: "Elena Briggs"
+    email: elena.briggs@dataswamp.example
+    role: data-protection-officer
+    team_id: team-privacy-compliance
+  - id: person-tomas-lindqvist
+    full_name: "Tomas Lindqvist"
+    email: tomas.lindqvist@dataswamp.example
+    role: platform-engineer
+    team_id: team-data-platform
+  - id: person-priya-nandakumar
+    full_name: "Priya Nandakumar"
+    email: priya.nandakumar@dataswamp.example
+    role: data-engineer
+    team_id: team-data-platform
+  - id: person-samuel-agboola
+    full_name: "Samuel Agboola"
+    email: samuel.agboola@dataswamp.example
+    role: bioinformatician
+    team_id: team-bioinformatics-core
+  - id: person-hana-kimura
+    full_name: "Hana Kimura"
+    email: hana.kimura@dataswamp.example
+    role: bioinformatician
+    team_id: team-bioinformatics-core
+  - id: person-nadia-farouk
+    full_name: "Nadia Farouk"
+    email: nadia.farouk@dataswamp.example
+    role: programme-lead
+    team_id: team-nsclc-science
+  - id: person-owen-castellano
+    full_name: "Owen Castellano"
+    email: owen.castellano@dataswamp.example
+    role: principal-investigator
+    team_id: team-nsclc-science
+  - id: person-ruth-mbeki
+    full_name: "Ruth Mbeki"
+    email: ruth.mbeki@dataswamp.example
+    role: programme-lead
+    team_id: team-tnbc-science
+  - id: person-jonas-adeyemi
+    full_name: "Jonas Adeyemi"
+    email: jonas.adeyemi@dataswamp.example
+    role: principal-investigator
+    team_id: team-tnbc-science
+  - id: person-clara-veiga
+    full_name: "Clara Veiga"
+    email: clara.veiga@dataswamp.example
+    role: programme-lead
+    team_id: team-crc-science
+  - id: person-derek-oyelaran
+    full_name: "Derek Oyelaran"
+    email: derek.oyelaran@dataswamp.example
+    role: principal-investigator
+    team_id: team-crc-science

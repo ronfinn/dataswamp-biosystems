@@ -1,0 +1,11 @@
+schema_version: 1
+terms:
+  - id: data-steward
+    label: "Data Steward"
+    description: "Accountable for the meaning, quality, and documentation of the data."
+  - id: quality-steward
+    label: "Quality Steward"
+    description: "Accountable for data-quality monitoring and remediation."
+  - id: access-steward
+    label: "Access Steward"
+    description: "Accountable for access decisions and classification handling."
