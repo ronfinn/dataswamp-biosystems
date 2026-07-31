@@ -357,15 +357,34 @@ def list_defects(
 ) -> None:
     """Print the defect-rule registry.
 
+    Each rule is annotated with whether it is automatically fixable and whether
+    remediation requires human approval, followed by rule counts per category.
+
     Exit codes: 0 = printed.
     """
     rows = registry_rows()
     if as_json:
         typer.echo(json.dumps(rows, indent=2, sort_keys=True))
         return
-    typer.echo(f"{len(rows)} defect rule(s):")
+
+    by_category: dict[str, int] = {}
     for row in rows:
-        typer.echo(f"  {row['rule_id']} [{row['category']}/{row['severity']}] {row['title']}")
+        by_category[row["category"]] = by_category.get(row["category"], 0) + 1
+
+    typer.echo(f"{len(rows)} defect rule(s) across {len(by_category)} categories:")
+    for row in rows:
+        flags = []
+        if row["auto_fixable"]:
+            flags.append("auto-fixable")
+        if row["requires_human_approval"]:
+            flags.append("needs-approval")
+        flag_text = f" [{', '.join(flags)}]" if flags else ""
+        typer.echo(
+            f"  {row['rule_id']} [{row['category']}/{row['severity']}] {row['title']}{flag_text}"
+        )
+    typer.echo("Rules by category:")
+    for category in sorted(by_category):
+        typer.echo(f"  {category}: {by_category[category]}")
 
 
 @app.command(name="validate-defects")
