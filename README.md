@@ -189,6 +189,29 @@ This supports:
 
 A platform can therefore be tested against the same data estate before and after a change, or compared with another platform using an equivalent input.
 
+### Where byte-identity is guaranteed
+
+The guarantee is stated precisely rather than broadly:
+
+* **Canonical environment** — the committed `uv.lock` on Python 3.12 or 3.13:
+  every generated artefact is byte-identical, including the binary scientific
+  files.
+* **Supported dependency range** — the declared minimums upwards: generation is
+  functionally correct and the truth-graph and observed-state artefacts are
+  byte-identical, but the materialized estate is not. Parquet, TIFF, PNG and
+  H5AD payloads are written by `pyarrow`, `Pillow`, `tifffile` and `anndata`,
+  whose encodings legitimately change between releases.
+* **Across operating systems** — not claimed; only Linux and macOS are tested.
+
+A committed golden SHA-256 contract (`tests/golden/canonical-digests.json`)
+pins a small canonical scenario, and every generated output directory carries a
+`provenance.json` recording the Python version, platform, direct dependency
+versions and an environment fingerprint. CI tests all four cells of
+locked/lowest-direct × Python 3.12/3.13.
+
+Full mechanics, the golden-update review checklist, and how to reproduce a
+canonical benchmark: [docs/reproducibility.md](docs/reproducibility.md).
+
 ---
 
 ## Intended Users

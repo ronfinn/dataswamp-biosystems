@@ -76,6 +76,14 @@ uv run mypy src                # type check
 uv run pre-commit run --all-files  # all local quality hooks
 ```
 
+Byte-determinism is guaranteed for the committed `uv.lock` on Python 3.12/3.13;
+across the wider declared dependency range only the truth and observed layers are
+byte-identical. The committed golden digests
+(`tests/golden/canonical-digests.json`) are **never** rewritten by `pytest` —
+regenerate them deliberately with
+`uv run --frozen python scripts/update_golden_digests.py --confirm --reason ... --cause ...`
+and follow the reviewer checklist in `docs/reproducibility.md`.
+
 Run a single test with `uv run pytest tests/test_cli.py::test_version_command_exits_successfully`.
 
 ## Architecture
@@ -117,6 +125,11 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     Mutates only JSON copies of the truth graph (never the truth entities) and
     depends only on `company/` and `truth/`, never on DataHub. See
     `docs/observed-state.md`.
+  - `provenance.py` — the shared environment/scenario provenance object written
+    into every generated output directory (no wall-clock values; excluded from
+    the golden digests by design).
+  - `canonical.py` — the fixed canonical benchmark scenario and the digest
+    helpers behind the golden contract. See `docs/reproducibility.md`.
 - `config/` — hand-authored canonical business configuration (YAML) plus
   `config/vocabularies/` and `config/truth/generation-plan.yaml`. Tracked;
   distinct from the git-ignored `generated/`.
