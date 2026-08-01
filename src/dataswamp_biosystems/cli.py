@@ -517,6 +517,9 @@ def inject_defects(
         f"  assets: {totals['assets']} ({totals['control_assets']} control, "
         f"{totals['affected_assets']} affected, {totals['clean_assets']} clean)"
     )
+    typer.echo(
+        f"  control records: {totals['control_records']} ({totals['reserved_controls']} reserved)"
+    )
 
 
 @app.command(name="validate-observed")
@@ -534,9 +537,11 @@ def validate_observed(
 
     Regenerates the observed state from the recorded profile and defect seed and
     confirms it is byte-identical to disk, then checks structural completeness,
-    referential integrity, mutation fidelity, and the absence of contradictory
-    mutations. Exit codes: 0 = valid, 1 = invalid or drifted, 2 = the observed
-    summary is missing or unreadable.
+    referential integrity, mutation fidelity, the absence of contradictory
+    mutations, and the integrity of the control partition — that every emitted
+    control resolves to a real entity, is untargeted by any defect or mutation,
+    and is unchanged from truth in the observed graph. Exit codes: 0 = valid,
+    1 = invalid or drifted, 2 = the observed summary is missing or unreadable.
     """
     try:
         meta = read_observed_meta(observed_dir)

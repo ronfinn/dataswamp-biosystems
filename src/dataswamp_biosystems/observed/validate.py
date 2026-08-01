@@ -13,10 +13,15 @@ It deliberately does **not** enforce the truth-graph invariants on the observed
 graph — the observed graph is *supposed* to be broken. It validates the
 bookkeeping, not the correctness of the estate.
 
-It also does **not** currently re-check the control partition: the engine
-excludes control assets from every rule's eligible population at selection time,
-but this validator does not reconstruct that partition to confirm no injected
-defect targets a control asset. Control-partition validation is future work.
+It also independently re-checks the **control partition** — the benchmark's
+negative class. The expected partition is reconstructed from the recorded
+profile and defect seed and compared against the emitted ``controls.jsonl`` and
+``rule-scope.jsonl``; the emitted defect and mutation ledgers are then read back
+*from disk* and checked to target no control entity, and every control's record
+in the observed graph is compared field-for-field against the truth graph. So a
+control that is deliberately mutated, dropped, duplicated, invented, or pointed
+at an unknown entity is reported as a specific, actionable control-partition
+issue rather than only as an opaque byte drift.
 """
 
 from __future__ import annotations
@@ -37,7 +42,12 @@ from dataswamp_biosystems.observed.errors import (
 from dataswamp_biosystems.observed.index import GraphIndex
 from dataswamp_biosystems.observed.profiles import ObservedProfile
 from dataswamp_biosystems.observed.writer import (
+    CONTROLS_NAME,
+    INJECTED_DEFECTS_NAME,
+    MUTATION_LOG_NAME,
+    OBSERVED_GRAPH_NAME,
     PROFILE_SUMMARY_NAME,
+    RULE_SCOPE_NAME,
     SUMMARY_MD_NAME,
     observed_bytes,
 )
@@ -97,8 +107,301 @@ def validate_observed(observed_dir: Path, graph: TruthGraph, config: CanonicalCo
     _check_structural(result, issues)
     _check_fidelity(result, index, issues)
     _check_contamination(result, issues)
+    _check_controls(observed_dir, result, index, issues)
 
     issues.raise_if_any()
+
+
+def _read_jsonl(
+    observed_dir: Path, name: str, issues: ObservedIssueCollector
+) -> list[dict[str, Any]] | None:
+    """Read one emitted JSONL ledger from disk, or report why it is unusable."""
+    path = observed_dir / name
+    if not path.exists():
+        issues.add(ObservedIssueKind.CONSISTENCY, f"missing {name}", entity_kind=name)
+        return None
+    rows: list[dict[str, Any]] = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            issues.add(
+                ObservedIssueKind.CONSISTENCY,
+                f"{name} line {number} is not valid JSON: {exc}",
+                entity_kind=name,
+            )
+            return None
+        if not isinstance(row, dict):
+            issues.add(
+                ObservedIssueKind.CONSISTENCY,
+                f"{name} line {number} is not a JSON object",
+                entity_kind=name,
+            )
+            return None
+        rows.append(row)
+    return rows
+
+
+def _check_controls(
+    observed_dir: Path,
+    result: ObservedResult,
+    index: GraphIndex,
+    issues: ObservedIssueCollector,
+) -> None:
+    """Re-derive the control partition and prove the emitted ledgers respect it."""
+    control_rows = _read_jsonl(observed_dir, CONTROLS_NAME, issues)
+    if control_rows is None:
+        return
+
+    known_entities = set(index.asset_ids()) | set(index.file_ids())
+    expected = {control.id: control.model_dump(mode="json") for control in result.controls}
+
+    on_disk: dict[str, dict[str, Any]] = {}
+    for row in control_rows:
+        control_id = str(row.get("id", ""))
+        if control_id in on_disk:
+            issues.add(
+                ObservedIssueKind.DUPLICATE_ID,
+                f"duplicate control id {control_id!r}",
+                entity_kind="control",
+                entity_id=control_id,
+            )
+            continue
+        on_disk[control_id] = row
+        if control_id not in known_entities:
+            issues.add(
+                ObservedIssueKind.UNRESOLVED_REFERENCE,
+                f"control {control_id!r} does not resolve to any truth asset or file",
+                entity_kind="control",
+                entity_id=control_id,
+            )
+
+    for control_id in sorted(set(expected) - set(on_disk)):
+        issues.add(
+            ObservedIssueKind.CONTROL_PARTITION,
+            "entity belongs to the expected control partition but is not emitted",
+            entity_kind="control",
+            entity_id=control_id,
+        )
+    for control_id in sorted(set(on_disk) - set(expected)):
+        issues.add(
+            ObservedIssueKind.CONTROL_PARTITION,
+            "emitted control is not in the expected control partition",
+            entity_kind="control",
+            entity_id=control_id,
+        )
+    for control_id in sorted(set(on_disk) & set(expected)):
+        # Compare every field, not a chosen subset, so no attribute of a control
+        # record can drift without being named in the report.
+        for key in sorted(set(expected[control_id]) | set(on_disk[control_id])):
+            if on_disk[control_id].get(key) != expected[control_id].get(key):
+                issues.add(
+                    ObservedIssueKind.CONTROL_PARTITION,
+                    f"control {key} is {on_disk[control_id].get(key)!r}, "
+                    f"expected {expected[control_id].get(key)!r}",
+                    entity_kind="control",
+                    entity_id=control_id,
+                    field=key,
+                )
+
+    reserved_ids = {
+        control_id for control_id, row in on_disk.items() if row.get("reserved") is True
+    }
+    _check_controls_untargeted(observed_dir, set(on_disk), issues)
+    _check_controls_unchanged(observed_dir, set(on_disk), index, issues)
+    _check_rule_scope(observed_dir, result, set(on_disk), reserved_ids, issues)
+
+
+def _check_controls_untargeted(
+    observed_dir: Path, control_ids: set[str], issues: ObservedIssueCollector
+) -> None:
+    """No emitted defect instance or mutation may target a control entity."""
+    for name, kind in ((INJECTED_DEFECTS_NAME, "instance"), (MUTATION_LOG_NAME, "mutation")):
+        rows = _read_jsonl(observed_dir, name, issues)
+        if rows is None:
+            continue
+        for row in rows:
+            entity_id = str(row.get("entity_id", ""))
+            if entity_id in control_ids:
+                issues.add(
+                    ObservedIssueKind.CONTAMINATION,
+                    f"{kind} {str(row.get('id', ''))!r} targets control entity {entity_id!r}",
+                    entity_kind=kind,
+                    entity_id=entity_id,
+                )
+
+
+def _check_controls_unchanged(
+    observed_dir: Path,
+    control_ids: set[str],
+    index: GraphIndex,
+    issues: ObservedIssueCollector,
+) -> None:
+    """Every control's observed record must equal its truth record, field for field.
+
+    The observed graph holds canonical JSON objects, so equality here is the
+    strongest available evidence that a control survived injection untouched: it
+    is the record-level equivalent of byte identity, and unlike a whole-file
+    digest it names the individual control that drifted.
+    """
+    path = observed_dir / OBSERVED_GRAPH_NAME
+    if not path.exists():
+        issues.add(ObservedIssueKind.CONSISTENCY, f"missing {OBSERVED_GRAPH_NAME}")
+        return
+    try:
+        observed_graph = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        issues.add(
+            ObservedIssueKind.CONSISTENCY,
+            f"{OBSERVED_GRAPH_NAME} is not valid JSON: {exc}",
+            entity_kind=OBSERVED_GRAPH_NAME,
+        )
+        return
+
+    by_id: dict[str, dict[str, Any]] = {}
+    for shard, records in observed_graph.items():
+        if shard == "meta" or not isinstance(records, list):
+            continue
+        for record in records:
+            if isinstance(record, dict) and "id" in record:
+                by_id[str(record["id"])] = record
+
+    for control_id in sorted(control_ids):
+        truth_record = index.truth_record("files", control_id) or index.asset(control_id)
+        if truth_record is None:
+            continue  # already reported as an unresolved control reference
+        observed_record = by_id.get(control_id)
+        if observed_record is None:
+            issues.add(
+                ObservedIssueKind.CONTROL_PARTITION,
+                "control entity is missing from the observed graph",
+                entity_kind="control",
+                entity_id=control_id,
+            )
+        elif observed_record != truth_record:
+            changed = sorted(
+                key
+                for key in set(observed_record) | set(truth_record)
+                if observed_record.get(key) != truth_record.get(key)
+            )
+            issues.add(
+                ObservedIssueKind.CONTROL_PARTITION,
+                f"control entity differs from truth in the observed graph: {changed}",
+                entity_kind="control",
+                entity_id=control_id,
+                field=changed[0] if changed else "",
+            )
+
+
+def _check_rule_scope(
+    observed_dir: Path,
+    result: ObservedResult,
+    control_ids: set[str],
+    reserved_ids: set[str],
+    issues: ObservedIssueCollector,
+) -> None:
+    """Check the per-rule selection scope against the rules and the control partition.
+
+    Note the asymmetry: a *reserved* control may never appear in a rule's
+    eligible population, but a non-reserved control legitimately may — that is
+    precisely an entity that was exposed to selection and not drawn.
+    """
+    rows = _read_jsonl(observed_dir, RULE_SCOPE_NAME, issues)
+    if rows is None:
+        return
+
+    expected = {scope.id: scope for scope in result.rule_scopes}
+    seen: set[str] = set()
+    for row in rows:
+        rule_id = str(row.get("id", ""))
+        if rule_id in seen:
+            issues.add(
+                ObservedIssueKind.DUPLICATE_ID,
+                f"duplicate rule-scope record for {rule_id!r}",
+                entity_kind="rule-scope",
+                entity_id=rule_id,
+            )
+            continue
+        seen.add(rule_id)
+        if rule_id not in DEFECTS:
+            issues.add(
+                ObservedIssueKind.UNKNOWN_RULE,
+                f"rule-scope references unknown rule {rule_id!r}",
+                entity_kind="rule-scope",
+                entity_id=rule_id,
+            )
+            continue
+
+        eligible = [str(value) for value in row.get("eligible_ids", [])]
+        excluded = [str(value) for value in row.get("control_excluded_ids", [])]
+        selected = [str(value) for value in row.get("selected_ids", [])]
+
+        for label, ids, count_key in (
+            ("eligible", eligible, "eligible_count"),
+            ("control_excluded", excluded, "control_excluded_count"),
+            ("selected", selected, "selected_count"),
+        ):
+            if row.get(count_key) != len(ids):
+                issues.add(
+                    ObservedIssueKind.CONTROL_PARTITION,
+                    f"rule-scope {count_key} is {row.get(count_key)!r} "
+                    f"but {len(ids)} {label} ids are listed",
+                    entity_kind="rule-scope",
+                    entity_id=rule_id,
+                    field=count_key,
+                )
+
+        if set(eligible) & set(excluded):
+            issues.add(
+                ObservedIssueKind.CONTROL_PARTITION,
+                f"rule-scope lists {sorted(set(eligible) & set(excluded))} as both "
+                "eligible and control-excluded",
+                entity_kind="rule-scope",
+                entity_id=rule_id,
+            )
+        reserved_eligible = sorted(set(eligible) & reserved_ids)
+        if reserved_eligible:
+            issues.add(
+                ObservedIssueKind.CONTROL_PARTITION,
+                f"rule-scope lists reserved control entities {reserved_eligible} as eligible",
+                entity_kind="rule-scope",
+                entity_id=rule_id,
+            )
+        if not set(selected) <= set(eligible):
+            issues.add(
+                ObservedIssueKind.CONTROL_PARTITION,
+                f"rule-scope selected entities {sorted(set(selected) - set(eligible))} "
+                "that are not in its eligible population",
+                entity_kind="rule-scope",
+                entity_id=rule_id,
+            )
+        if set(selected) & control_ids:
+            issues.add(
+                ObservedIssueKind.CONTAMINATION,
+                f"rule-scope selected control entities {sorted(set(selected) & control_ids)}",
+                entity_kind="rule-scope",
+                entity_id=rule_id,
+            )
+
+        scope = expected.get(rule_id)
+        if scope is not None and sorted(selected) != scope.selected_ids:
+            issues.add(
+                ObservedIssueKind.CONTROL_PARTITION,
+                "rule-scope selected ids differ from the expected selection",
+                entity_kind="rule-scope",
+                entity_id=rule_id,
+                field="selected_ids",
+            )
+
+    for rule_id in sorted(set(expected) - seen):
+        issues.add(
+            ObservedIssueKind.CONTROL_PARTITION,
+            "rule has no emitted rule-scope record",
+            entity_kind="rule-scope",
+            entity_id=rule_id,
+        )
 
 
 def _check_structural(result: ObservedResult, issues: ObservedIssueCollector) -> None:

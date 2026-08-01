@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
 from dataswamp_biosystems.observed.defects import registry_rows
-from dataswamp_biosystems.observed.writer import OBSERVED_GRAPH_NAME, TRUTH_INPUTS_NAME
+from dataswamp_biosystems.observed.writer import (
+    CONTROLS_NAME,
+    INJECTED_DEFECTS_NAME,
+    OBSERVED_GRAPH_NAME,
+    RULE_SCOPE_NAME,
+    TRUTH_INPUTS_NAME,
+)
 from dataswamp_biosystems.truth.writer import MANIFEST_NAME
 from tests.observed.conftest import TEST_SEED
 
@@ -184,4 +191,74 @@ def test_cross_process_output_is_byte_identical(config_dir: Path, tmp_path: Path
             hash_seed=hs,
         )
         assert result.returncode == 0, result.stderr
-    assert _snapshot(out_a) == _snapshot(out_b)
+    snapshot = _snapshot(out_a)
+    assert snapshot == _snapshot(out_b)
+    # The control partition is part of the byte-identical output contract.
+    assert snapshot[CONTROLS_NAME]
+    assert snapshot[RULE_SCOPE_NAME]
+
+
+def test_gold_profile_emits_a_control_only_estate(config_dir: Path, tmp_path: Path) -> None:
+    truth_dir = tmp_path / "truth"
+    out = tmp_path / "observed"
+    _make_truth(config_dir, truth_dir)
+    inject = _run(
+        [
+            "inject-defects",
+            "--truth",
+            str(truth_dir / MANIFEST_NAME),
+            "--seed",
+            str(TEST_SEED),
+            "--profile",
+            "gold",
+            "--config-dir",
+            str(config_dir),
+            "--output-dir",
+            str(out),
+        ]
+    )
+    assert inject.returncode == 0, inject.stderr
+    assert (out / INJECTED_DEFECTS_NAME).read_bytes() == b""
+
+    controls = [
+        json.loads(line)
+        for line in (out / CONTROLS_NAME).read_text(encoding="utf-8").splitlines()
+        if line
+    ]
+    assert controls
+    assert all(control["reserved"] is True for control in controls)
+
+    val = _run(["validate-observed", "--observed-dir", str(out), "--config-dir", str(config_dir)])
+    assert val.returncode == 0, val.stderr
+
+
+def test_validate_observed_reports_a_tampered_control(config_dir: Path, tmp_path: Path) -> None:
+    """A control declared clean but actually mutated must fail with exit code 1."""
+    truth_dir = tmp_path / "truth"
+    out = tmp_path / "observed"
+    _make_truth(config_dir, truth_dir)
+    inject = _run(
+        [
+            "inject-defects",
+            "--truth",
+            str(truth_dir / MANIFEST_NAME),
+            "--seed",
+            str(TEST_SEED),
+            "--profile",
+            "demo",
+            "--config-dir",
+            str(config_dir),
+            "--output-dir",
+            str(out),
+        ]
+    )
+    assert inject.returncode == 0, inject.stderr
+
+    lines = (out / CONTROLS_NAME).read_text(encoding="utf-8").splitlines()
+    control_id = json.loads(lines[0])["id"]
+    (out / CONTROLS_NAME).write_text("\n".join(lines[1:]) + "\n", encoding="utf-8")
+
+    val = _run(["validate-observed", "--observed-dir", str(out), "--config-dir", str(config_dir)])
+    assert val.returncode == 1
+    assert "control-partition" in val.stderr
+    assert control_id in val.stderr
