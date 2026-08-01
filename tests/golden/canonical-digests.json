@@ -1,0 +1,57 @@
+{
+  "canonical_environment": {
+    "direct_dependencies": {
+      "anndata": "0.13.2",
+      "numpy": "2.5.1",
+      "pillow": "12.3.0",
+      "pyarrow": "25.0.0",
+      "pydantic": "2.13.4",
+      "pyyaml": "6.0.3",
+      "tifffile": "2026.7.14",
+      "typer": "0.27.0"
+    },
+    "environment_fingerprint": "19c08c769755caf3d9765b66125a0f28e612bd5b19fd107dea95206f48066f87"
+  },
+  "config_fingerprint": "43e0689046cfd94b294fee741a8b632de02800356a44c95144dbe48fc0810820",
+  "digest_algorithm": "sha256",
+  "environment_scoped_digests": {
+    "estate/file-manifest.jsonl": "0fd93d053de2b607064a7250a389f169ceefbf450c1b21649131acf496dbe657",
+    "estate/generation-summary.json": "e4c97c7891e4b3fb2bf9333abcfbdfd296ae44d1a014c56242417641b2beb4f0",
+    "estate/summary.md": "8cf664dad46c81587c6fa39179a969d1b3dc9588515f040013072922cd23786b"
+  },
+  "fixture_version": 1,
+  "last_update": {
+    "cause": "code",
+    "reason": "initial golden contract for issue #4"
+  },
+  "portable_digests": {
+    "observed/controls.jsonl": "bb3551ac33867fddb2f777bd2db19ed1ec89f58afc510127132cddf81c800795",
+    "observed/expected-findings.jsonl": "0cf00b77128647c22e60969e1dc793236c33f7c552d61e85c22d922501671886",
+    "observed/expected-remediations.jsonl": "fe03e35c90363a615af79b60ce0f04833adc04325f8cfd397eca4e896d43ea38",
+    "observed/injected-defects.jsonl": "a6b3c99689578ffb602ed3b8e1b872476b32836d2e3d5a611c7140de2915338e",
+    "observed/mutation-log.jsonl": "3f02770daf59ef105f37da5118b9d81b035c0e8876681367e6fc3b1d01951f45",
+    "observed/observed-graph.json": "992c74e1590798aa4563c048e1ff00fba0f787895b698e6be65a528bafe74d24",
+    "observed/profile-summary.json": "2e6f1e6ca9b9969fd45766389a3f000307b1c17be68fc079117e4390133e3f28",
+    "observed/rule-scope.jsonl": "f03fac0db037b59756d4a7973b1393189b144517fd9bf54399e095ca2da107fc",
+    "observed/summary.md": "16a36541dfd7cb138a9f858fd16419dfec0a262bd60509753f75885076a20898",
+    "truth/assays.jsonl": "8fe707aa442b1dd84ca642acf5fdefb4ad7a75f9dec0bc3b9582cad3639c9790",
+    "truth/assets.jsonl": "7584267567ecacf288001dc135a63b1f1fb99ddab085a9ec918704a31710d0c0",
+    "truth/biospecimens.jsonl": "308c3ffe48908ab0dd7a137d80973f1d8f0eb35f9ce067314f84f4aa23fc566c",
+    "truth/contracts.jsonl": "f540ae9f0ad9aaeca95b11b346ea3ce778fe79e585b5c864d81b9fc17cfca845",
+    "truth/files.jsonl": "74c412b05ed9a0e3def9b508dd0a38067f731c41a99f4bb36387f7cf2f4b13e6",
+    "truth/governance.jsonl": "dec6bed9ca4d2b48aa745e3d1972740073fadd6ac732815c7cff9f8dea0c3111",
+    "truth/lineage.jsonl": "1703197212c18635a8ed18e5146771c3dc8834919a2a9deb5386136b288abf7a",
+    "truth/quality.jsonl": "2cfd3487ab805cfae5e4a8174b5db6e982c17422dbb7495ffc6019b1f650b3b4",
+    "truth/runs.jsonl": "201e732de5f77baaf6c3de186f94bd238c72688d8ecc3cc8164f642c545aa5c4",
+    "truth/subjects.jsonl": "5c316be322f4479df9c470eb01f0e0a01d8c0e0db71fe8518e1f44a98c9bfc12",
+    "truth/summary.md": "8e9ad3bc0d6e5eadfedf4620b2348a38ed61b094eb79f79e25e06d13fc58d360",
+    "truth/truth-graph.json": "e7b0f419ebce0606db878a1ae98c6baf1ae4535343886bb844d921b53840fd5c"
+  },
+  "scenario": {
+    "defect_seed": 20260717,
+    "estate_profile": "tiny",
+    "estate_seed": 20260717,
+    "observed_profile": "demo",
+    "truth_seed": 20260717
+  }
+}

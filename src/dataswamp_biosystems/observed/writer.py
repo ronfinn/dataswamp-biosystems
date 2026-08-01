@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from dataswamp_biosystems.observed.engine import ObservedResult
+from dataswamp_biosystems.provenance import PROVENANCE_NAME, provenance_bytes
 from dataswamp_biosystems.truth import serialize
 
 OBSERVED_GRAPH_NAME = "observed-graph.json"
@@ -100,7 +101,22 @@ def write_observed(
     same staged directory so the whole bundle is swapped into place atomically.
     """
     output_dir = Path(output_dir)
-    files = {**observed_bytes(result), **(extra_files or {})}
+    provenance = provenance_bytes(
+        layer="observed",
+        generator_version=result.meta.generator_version,
+        schema_version=result.meta.schema_version,
+        scenario={
+            "defect_seed": result.meta.defect_seed,
+            "profile": result.meta.profile,
+            "truth_seed": result.meta.truth_seed,
+            "truth_generator_version": result.meta.truth_generator_version,
+        },
+    )
+    files = {
+        **observed_bytes(result),
+        PROVENANCE_NAME: provenance,
+        **(extra_files or {}),
+    }
     summary_md = _render_summary_md(result)
 
     parent = output_dir.parent

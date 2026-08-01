@@ -6,8 +6,16 @@ on:
   pull_request:
 
 jobs:
-  test:
+  # The canonical environment: the committed uv.lock, on every supported Python.
+  # This is where byte-determinism is guaranteed, so it runs the complete suite
+  # including the golden digest contract in full (portable + environment-scoped).
+  canonical:
+    name: canonical (locked, py${{ matrix.python }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
@@ -17,19 +25,88 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install ${{ matrix.python }}
 
-      - name: Install dependencies
-        run: uv sync --locked --all-groups
+      - name: Install locked dependencies
+        run: uv sync --locked --all-groups --python ${{ matrix.python }}
 
-      - name: Run tests
-        run: uv run pytest
+      # `uv sync --locked` already fails on a stale lock; this names the cause.
+      - name: Check uv.lock matches pyproject.toml
+        if: matrix.python == '3.12'
+        run: uv lock --check
+
+      - name: Run the complete test suite
+        run: uv run --frozen pytest -q
 
       - name: Ruff lint
-        run: uv run ruff check .
+        if: matrix.python == '3.12'
+        run: uv run --frozen ruff check .
 
       - name: Ruff format check
-        run: uv run ruff format --check .
+        if: matrix.python == '3.12'
+        run: uv run --frozen ruff format --check .
 
       - name: Mypy
-        run: uv run mypy src
+        if: matrix.python == '3.12'
+        run: uv run --frozen mypy src
+
+  # The declared dependency range: the oldest direct dependency versions the
+  # package permits. This proves the lower bounds in pyproject.toml are real.
+  # It asserts functional correctness, schema validity and the *portable* golden
+  # digests. The estate's binary payloads are written by pyarrow/Pillow/tifffile/
+  # anndata and are not byte-identical across their releases, so the golden test
+  # skips the environment-scoped digests here by design.
+  lowest-direct:
+    name: lowest-direct (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ matrix.python }}
+
+      # Resolves the declared minimums. This rewrites uv.lock inside the
+      # ephemeral checkout; the committed lockfile is never affected.
+      - name: Install lowest direct dependencies
+        run: uv sync --resolution lowest-direct --all-groups --python ${{ matrix.python }}
+
+      - name: Report resolved versions
+        run: >
+          uv run --no-sync python -c
+          "import importlib.metadata as m;
+          print(chr(10).join(f'{n}=={m.version(n)}' for n in
+          ['typer','pydantic','pyyaml','numpy','pyarrow','pillow','tifffile','anndata']))"
+
+      # Compatibility surface: the golden portable contract, cross-process
+      # determinism, and the CLI end-to-end paths. The complete suite is not
+      # repeated here — that is the canonical jobs' responsibility.
+      - name: Compatibility and determinism tests
+        run: >
+          uv run --no-sync pytest -q
+          tests/test_golden.py
+          tests/test_package.py
+          tests/test_cli.py
+          tests/truth/test_determinism.py
+          tests/truth/test_cli_generate_truth.py
+          tests/estate/test_cli.py
+          tests/observed/test_cli.py
+
+      - name: Build the distribution
+        run: uv build
+
+      - name: Install the built wheel and smoke-test the CLI
+        run: |
+          uv venv --python ${{ matrix.python }} /tmp/wheel-env
+          VIRTUAL_ENV=/tmp/wheel-env uv pip install --resolution lowest-direct dist/*.whl
+          /tmp/wheel-env/bin/dataswamp version
+          /tmp/wheel-env/bin/dataswamp validate-config
+          /tmp/wheel-env/bin/dataswamp validate-defects

@@ -24,6 +24,7 @@ from dataswamp_biosystems.estate.entities import FileManifestRecord, Placeholder
 from dataswamp_biosystems.estate.errors import EstateIssue, EstateIssueKind, EstateValidationError
 from dataswamp_biosystems.estate.generator import build_meta, iter_records
 from dataswamp_biosystems.estate.profiles import Profile, profile_spec
+from dataswamp_biosystems.provenance import PROVENANCE_NAME, provenance_bytes
 from dataswamp_biosystems.truth import serialize
 from dataswamp_biosystems.truth.graph import TruthGraph
 
@@ -196,6 +197,20 @@ def write_estate(
         (tmp / MANIFEST_NAME).write_bytes(serialize.jsonl_bytes(acc.records))
         (tmp / SUMMARY_JSON_NAME).write_bytes(serialize.manifest_bytes(summary))
         serialize.write_text(tmp / SUMMARY_MD_NAME, _render_summary_md(summary))
+        meta = summary["meta"]
+        (tmp / PROVENANCE_NAME).write_bytes(
+            provenance_bytes(
+                layer="estate",
+                generator_version=str(meta["generator_version"]),
+                schema_version=int(meta["schema_version"]),
+                scenario={
+                    "seed": int(meta["seed"]),
+                    "profile": str(meta["profile"]),
+                    "truth_seed": int(meta["truth_seed"]),
+                    "truth_generator_version": str(meta["truth_generator_version"]),
+                },
+            )
+        )
 
         had_existing = output_dir.exists()
         if had_existing:
