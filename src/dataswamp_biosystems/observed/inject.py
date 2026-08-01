@@ -28,6 +28,11 @@ from dataswamp_biosystems.observed.engine import (
 from dataswamp_biosystems.observed.errors import ObservedConfigError, ObservedError
 from dataswamp_biosystems.observed.profiles import ObservedProfile
 from dataswamp_biosystems.observed.writer import TRUTH_INPUTS_NAME, write_observed
+from dataswamp_biosystems.paths import (
+    TRUTH_INPUT_LABEL,
+    UnsafeOutputDirectoryError,
+    ensure_safe_output_dir,
+)
 from dataswamp_biosystems.truth import (
     GenerationPlan,
     generate_truth_graph,
@@ -71,14 +76,17 @@ def compute_truth_checksums(truth_dir: Path) -> dict[str, str]:
 
 
 def ensure_output_outside_truth(output_dir: Path, truth_dir: Path) -> None:
-    """Raise if ``output_dir`` resolves to or inside ``truth_dir``."""
-    out = Path(output_dir).resolve()
-    truth = Path(truth_dir).resolve()
-    if out == truth or truth in out.parents:
-        raise ObservedConfigError(
-            f"output directory {out} resolves inside the truth directory {truth}; "
-            "refusing to write observed state into truth"
-        )
+    """Raise if ``output_dir`` overlaps ``truth_dir`` (equal, inside, or containing).
+
+    Delegates to the shared :func:`~dataswamp_biosystems.paths.ensure_safe_output_dir`
+    policy so there is one implementation of path containment, and re-raises as
+    :class:`ObservedConfigError` to keep this function's exception contract (and
+    the CLI's exit code 2 for it) unchanged.
+    """
+    try:
+        ensure_safe_output_dir(output_dir, protected_paths={TRUTH_INPUT_LABEL: truth_dir})
+    except UnsafeOutputDirectoryError as exc:
+        raise ObservedConfigError(f"{exc}; refusing to write observed state into truth") from exc
 
 
 def load_truth_from_disk(

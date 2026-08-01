@@ -157,9 +157,22 @@ dataswamp validate-observed            # re-check a generated observed state
 ```
 
 `inject-defects` defaults its output to `generated/observed/`; pass
-`--output-dir` for another location (it may not resolve inside the truth
-directory) and `--force` to overwrite a non-empty one. `--seed` is the *defect*
-seed; the truth seed comes from the truth manifest.
+`--output-dir` for another location and `--force` to overwrite a non-empty one.
+`--seed` is the *defect* seed; the truth seed comes from the truth manifest.
+
+The output directory is checked against the command's protected inputs before
+anything is staged, renamed or removed. `inject-defects` refuses an output
+directory that **is**, **contains**, or **sits inside** the configuration
+directory or the truth directory it reads from — the repository root is
+therefore refused too, since it contains `config/`. Comparisons use canonicalised
+paths, so neither `..` segments, nor symlink aliases, nor (on a case-insensitive
+filesystem) differently cased spellings such as `CONFIG` can bypass the check.
+Where the filesystem distinguishes case, distinct directories stay distinct. Unsafe
+usage exits with code **2**, as does a non-empty output directory without
+`--force` (both are CLI usage errors, not data-validation failures). `--force`
+permits replacing a non-empty *safe* directory only; it never overrides the
+containment check. A sibling such as `generated/observed` alongside
+`generated/truth` remains valid.
 
 ## Determinism and safety
 

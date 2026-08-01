@@ -32,6 +32,7 @@ from dataswamp_biosystems.observed import (
     TruthImmutabilityError,
     read_observed_meta,
     registry_rows,
+    resolve_truth_dir,
     validate_registry,
 )
 from dataswamp_biosystems.observed import (
@@ -39,6 +40,12 @@ from dataswamp_biosystems.observed import (
 )
 from dataswamp_biosystems.observed import (
     validate_observed as validate_observed_estate,
+)
+from dataswamp_biosystems.paths import (
+    CONFIG_INPUT_LABEL,
+    TRUTH_INPUT_LABEL,
+    UnsafeOutputDirectoryError,
+    ensure_safe_output_dir,
 )
 from dataswamp_biosystems.truth import (
     GenerationPlan,
@@ -91,6 +98,32 @@ def _load_plan_or_exit(config_dir: Path, config: CanonicalConfig) -> GenerationP
             typer.echo(f"  - {issue.render()}", err=True)
         raise typer.Exit(code=1) from exc
     return plan
+
+
+def _prepare_output_dir_or_exit(
+    output_dir: Path,
+    protected_paths: dict[str, Path],
+    *,
+    force: bool,
+) -> None:
+    """Reject an unsafe or non-empty output directory before anything is written.
+
+    Runs the shared containment policy first, so a path overlapping a protected
+    input is refused before the non-empty/``--force`` question is even asked —
+    ``--force`` must never be a route to replacing a required input. Both
+    conditions are CLI usage errors and exit with code 2.
+    """
+    try:
+        ensure_safe_output_dir(output_dir, protected_paths=protected_paths)
+    except UnsafeOutputDirectoryError as exc:
+        typer.echo(f"Refusing to generate into {output_dir}: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    if output_dir.exists() and any(output_dir.iterdir()) and not force:
+        typer.echo(
+            f"Output directory {output_dir} is not empty; pass --force to overwrite.", err=True
+        )
+        raise typer.Exit(code=2)
 
 
 @app.callback()
@@ -148,8 +181,13 @@ def generate_truth(
 ) -> None:
     """Generate the deterministic truth graph under ``output_dir``.
 
+    ``output_dir`` is replaced wholesale, so it may not be, contain, or sit
+    inside the configuration directory (which also rules out the repository root
+    and any parent of it).
+
     Exit codes: 0 = written, 1 = invalid config/plan or failed invariants,
-    2 = a required file could not be loaded.
+    2 = a required file could not be loaded, or an unsafe/non-empty output
+    directory was given.
     """
     config = _load_config_or_exit(config_dir)
     plan = _load_plan_or_exit(config_dir, config)
@@ -158,11 +196,7 @@ def generate_truth(
         typer.echo(f"Seed must be a non-negative integer, got {resolved_seed}.", err=True)
         raise typer.Exit(code=2)
 
-    if output_dir.exists() and any(output_dir.iterdir()) and not force:
-        typer.echo(
-            f"Output directory {output_dir} is not empty; pass --force to overwrite.", err=True
-        )
-        raise typer.Exit(code=1)
+    _prepare_output_dir_or_exit(output_dir, {CONFIG_INPUT_LABEL: config_dir}, force=force)
 
     graph = generate_truth_graph(config, plan, resolved_seed)
     try:
@@ -262,8 +296,15 @@ def generate_files(
 
     The truth graph is regenerated in memory from the same config and seed (it is
     consumed, never re-invented), then a per-asset file set is materialized under
-    ``output_dir``. Exit codes: 0 = written, 1 = invalid config/plan or a safety
-    breach (path/budget), 2 = a required file could not be loaded.
+    ``output_dir``.
+
+    ``output_dir`` is replaced wholesale, so it may not be, contain, or sit
+    inside the configuration directory or the default truth directory — an
+    estate belongs alongside a truth graph, never on top of one.
+
+    Exit codes: 0 = written, 1 = invalid config/plan or a safety breach
+    (path/budget), 2 = a required file could not be loaded, or an unsafe/non-empty
+    output directory was given.
     """
     config = _load_config_or_exit(config_dir)
     plan = _load_plan_or_exit(config_dir, config)
@@ -272,11 +313,11 @@ def generate_files(
         typer.echo(f"Seed must be a non-negative integer, got {resolved_seed}.", err=True)
         raise typer.Exit(code=2)
 
-    if output_dir.exists() and any(output_dir.iterdir()) and not force:
-        typer.echo(
-            f"Output directory {output_dir} is not empty; pass --force to overwrite.", err=True
-        )
-        raise typer.Exit(code=1)
+    _prepare_output_dir_or_exit(
+        output_dir,
+        {CONFIG_INPUT_LABEL: config_dir, TRUTH_INPUT_LABEL: DEFAULT_TRUTH_DIR},
+        force=force,
+    )
 
     graph = generate_truth_graph(config, plan, resolved_seed)
     try:
@@ -431,9 +472,12 @@ def inject_defects(
 ) -> None:
     """Derive the observed state from an on-disk truth graph, without mutating it.
 
+    ``output_dir`` is replaced wholesale, so it may not be, contain, or sit
+    inside the configuration directory or the truth directory it reads from.
+
     Exit codes: 0 = written, 1 = invalid config/plan, failed generation checks,
-    or a truth-immutability breach, 2 = the truth graph could not be read or the
-    output directory resolves inside the truth directory.
+    or a truth-immutability breach, 2 = the truth graph could not be read, or an
+    unsafe/non-empty output directory was given.
     """
     config = _load_config_or_exit(config_dir)
     plan = _load_plan_or_exit(config_dir, config)
@@ -442,11 +486,11 @@ def inject_defects(
         typer.echo(f"Seed must be a non-negative integer, got {resolved_seed}.", err=True)
         raise typer.Exit(code=2)
 
-    if output_dir.exists() and any(output_dir.iterdir()) and not force:
-        typer.echo(
-            f"Output directory {output_dir} is not empty; pass --force to overwrite.", err=True
-        )
-        raise typer.Exit(code=1)
+    _prepare_output_dir_or_exit(
+        output_dir,
+        {CONFIG_INPUT_LABEL: config_dir, TRUTH_INPUT_LABEL: resolve_truth_dir(truth)},
+        force=force,
+    )
 
     try:
         report = run_defect_injection(truth, config, plan, profile, resolved_seed, output_dir)

@@ -69,7 +69,8 @@ def test_generate_refuses_nonempty_without_force(config_dir: Path, tmp_path: Pat
     out.mkdir()
     (out / "sentinel.txt").write_text("keep me", encoding="utf-8")
     result = _generate(config_dir, out)
-    assert result.exit_code == 1
+    # A missing --force is a CLI usage error (2), not a data-validation failure (1).
+    assert result.exit_code == 2
     assert "not empty" in result.output
 
 
