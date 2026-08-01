@@ -23,6 +23,7 @@ class ObservedIssueKind(StrEnum):
     LEDGER = "ledger"
     FIDELITY = "fidelity"
     CONTAMINATION = "contamination"
+    CONTROL_PARTITION = "control-partition"
     INCOMPATIBILITY = "incompatibility"
     CONSISTENCY = "consistency"
     PROFILE_BOUNDS = "profile-bounds"

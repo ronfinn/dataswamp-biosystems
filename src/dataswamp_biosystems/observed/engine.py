@@ -27,11 +27,14 @@ from dataswamp_biosystems.observed.defects import (
 )
 from dataswamp_biosystems.observed.entities import (
     ChangeOp,
+    ControlReason,
+    ControlRecord,
     DefectInstance,
     ExpectedFinding,
     ExpectedRemediation,
     MutationRecord,
     ObservedMeta,
+    RuleScopeRecord,
 )
 from dataswamp_biosystems.observed.index import SHARD_NAMES, GraphIndex, JsonRecord
 from dataswamp_biosystems.observed.profiles import ObservedProfile, profile_spec
@@ -39,8 +42,8 @@ from dataswamp_biosystems.truth import ids
 from dataswamp_biosystems.truth.graph import TruthGraph
 from dataswamp_biosystems.truth.rng import sub_rng
 
-OBSERVED_GENERATOR_VERSION = "1.0.0"
-OBSERVED_SCHEMA_VERSION = 1
+OBSERVED_GENERATOR_VERSION = "1.1.0"
+OBSERVED_SCHEMA_VERSION = 2
 
 
 def _symmetric_incompatibilities() -> dict[str, set[str]]:
@@ -59,7 +62,7 @@ _INCOMPATIBLE = _symmetric_incompatibilities()
 
 @dataclass(frozen=True)
 class ObservedResult:
-    """The full output of one engine run: observed graph plus the four ledgers."""
+    """The full output of one engine run: observed graph plus the six ledgers."""
 
     meta: ObservedMeta
     observed_graph: dict[str, Any]
@@ -67,6 +70,8 @@ class ObservedResult:
     mutations: list[MutationRecord]
     findings: list[ExpectedFinding]
     remediations: list[ExpectedRemediation]
+    controls: list[ControlRecord]
+    rule_scopes: list[RuleScopeRecord]
     summary: dict[str, Any]
 
 
@@ -104,6 +109,62 @@ def _is_control(index: GraphIndex, controls: set[str], entity_id: str) -> bool:
     if file_rec is not None:
         return file_rec.get("dataset_id") in controls
     return False
+
+
+def _build_controls(
+    index: GraphIndex,
+    reserved: set[str],
+    meta: ObservedMeta,
+    control_fraction: float,
+    instances: list[DefectInstance],
+    mutations: list[MutationRecord],
+    eligible_rule_count: dict[str, int],
+) -> list[ControlRecord]:
+    """Return every asset and file that carries no injected defect, id-sorted.
+
+    An entity is a control when it anchors no defect instance *and* is named by
+    no mutation, so an entity touched only indirectly (via its governance or
+    contract record) is correctly excluded — those mutations name the asset's
+    own instance anchor. The reserved partition is recorded explicitly, since it
+    is the subset held out from selection rather than merely never drawn.
+    """
+    defective = {instance.entity_id for instance in instances}
+    defective |= {mutation.entity_id for mutation in mutations}
+
+    records: list[ControlRecord] = []
+    for entity_id in sorted(set(index.asset_ids()) | set(index.file_ids())):
+        if entity_id in defective:
+            continue
+        shard = _primary_shard(index, entity_id)
+        truth_record = index.truth_record(shard, entity_id) or {}
+        parent_asset_id = str(truth_record.get("dataset_id", "")) if shard == "files" else ""
+        if entity_id in reserved:
+            reason = ControlReason.RESERVED_ASSET
+        elif parent_asset_id and parent_asset_id in reserved:
+            reason = ControlReason.MEMBER_OF_RESERVED_ASSET
+        elif eligible_rule_count.get(entity_id, 0) > 0:
+            reason = ControlReason.ELIGIBLE_UNSELECTED
+        else:
+            reason = ControlReason.NEVER_ELIGIBLE
+        records.append(
+            ControlRecord(
+                id=entity_id,
+                entity_kind=_entity_kind(index, entity_id),
+                shard=shard,
+                reason=reason,
+                reserved=reason
+                in (ControlReason.RESERVED_ASSET, ControlReason.MEMBER_OF_RESERVED_ASSET),
+                parent_asset_id=parent_asset_id,
+                modality=str(truth_record.get("modality", "")),
+                modality_group=_modality_group_of(index, entity_id),
+                eligible_rule_count=eligible_rule_count.get(entity_id, 0),
+                profile=meta.profile,
+                defect_seed=meta.defect_seed,
+                truth_seed=meta.truth_seed,
+                control_fraction=control_fraction,
+            )
+        )
+    return records
 
 
 def _primary_shard(index: GraphIndex, entity_id: str) -> str:
@@ -267,6 +328,7 @@ def _build_summary(
     meta: ObservedMeta,
     index: GraphIndex,
     controls: set[str],
+    control_records: list[ControlRecord],
     instances: list[DefectInstance],
     ledger: _Ledger,
 ) -> dict[str, Any]:
@@ -285,6 +347,14 @@ def _build_summary(
         by_modality_group[group] = by_modality_group.get(group, 0) + 1
         affected_entities.add(instance.entity_id)
     affected_assets = {e for e in affected_entities if e in index.asset_shard}
+    controls_by_reason: dict[str, int] = {}
+    controls_by_entity_kind: dict[str, int] = {}
+    for control in control_records:
+        reason = control.reason.value
+        controls_by_reason[reason] = controls_by_reason.get(reason, 0) + 1
+        controls_by_entity_kind[control.entity_kind] = (
+            controls_by_entity_kind.get(control.entity_kind, 0) + 1
+        )
     return {
         "meta": meta.model_dump(mode="json"),
         "totals": {
@@ -296,7 +366,11 @@ def _build_summary(
             "affected_assets": len(affected_assets),
             "affected_entities": len(affected_entities),
             "clean_assets": len(index.asset_ids()) - len(affected_assets),
+            "control_records": len(control_records),
+            "reserved_controls": sum(1 for c in control_records if c.reserved),
         },
+        "by_control_reason": dict(sorted(controls_by_reason.items())),
+        "by_control_entity_kind": dict(sorted(controls_by_entity_kind.items())),
         "skipped": {
             "precondition": ledger.skipped_precondition,
             "conflict": ledger.skipped_conflict,
@@ -349,19 +423,26 @@ def generate_observed(
     findings: list[ExpectedFinding] = []
     remediations: list[ExpectedRemediation] = []
 
-    for definition in defects_in_order():
-        if ledger.applied_total >= spec.global_cap:
-            break
-        rate = spec.rate_for(definition.category, definition.rule_id)
-        eligible = [e for e in definition.population(index) if not _is_control(index, controls, e)]
-        k = round(rate * len(eligible))
-        if k <= 0:
-            continue
-        shuffled = list(eligible)
-        sub_rng(defect_seed, "select", profile.value, definition.rule_id).shuffle(shuffled)
-        selected = sorted(shuffled[:k])
+    eligible_rule_count: dict[str, int] = {}
+    rule_scopes: list[RuleScopeRecord] = []
 
-        for entity_id in selected:
+    for definition in defects_in_order():
+        rate = spec.rate_for(definition.category, definition.rule_id)
+        population = definition.population(index)
+        excluded = [e for e in population if _is_control(index, controls, e)]
+        eligible = [e for e in population if not _is_control(index, controls, e)]
+        for entity_id in eligible:
+            eligible_rule_count[entity_id] = eligible_rule_count.get(entity_id, 0) + 1
+
+        k = round(rate * len(eligible))
+        candidates: list[str] = []
+        if k > 0:
+            shuffled = list(eligible)
+            sub_rng(defect_seed, "select", profile.value, definition.rule_id).shuffle(shuffled)
+            candidates = sorted(shuffled[:k])
+
+        applied_ids: list[str] = []
+        for entity_id in candidates:
             if ledger.applied_total >= spec.global_cap:
                 break
             applied_here = ledger.applied_rules.setdefault(entity_id, set())
@@ -403,9 +484,32 @@ def generate_observed(
             applied_here.add(definition.rule_id)
             ledger.per_entity_count[entity_id] = ledger.per_entity_count.get(entity_id, 0) + 1
             ledger.applied_total += 1
+            applied_ids.append(entity_id)
 
+        rule_scopes.append(
+            RuleScopeRecord(
+                id=definition.rule_id,
+                category=definition.category,
+                severity=definition.default_severity,
+                profile=profile.value,
+                defect_seed=defect_seed,
+                injection_rate=rate,
+                population_count=len(population),
+                control_excluded_count=len(excluded),
+                eligible_count=len(eligible),
+                candidate_count=len(candidates),
+                selected_count=len(applied_ids),
+                eligible_ids=sorted(eligible),
+                control_excluded_ids=sorted(excluded),
+                selected_ids=sorted(applied_ids),
+            )
+        )
+
+    control_records = _build_controls(
+        index, controls, meta, spec.control_fraction, instances, mutations, eligible_rule_count
+    )
     observed_graph = _observed_graph(meta, index)
-    summary = _build_summary(meta, index, controls, instances, ledger)
+    summary = _build_summary(meta, index, controls, control_records, instances, ledger)
     return ObservedResult(
         meta=meta,
         observed_graph=observed_graph,
@@ -413,6 +517,8 @@ def generate_observed(
         mutations=mutations,
         findings=findings,
         remediations=remediations,
+        controls=control_records,
+        rule_scopes=rule_scopes,
         summary=summary,
     )
 

@@ -1,10 +1,12 @@
 """Record models and taxonomy enums for the imperfection engine.
 
 The engine derives a deliberately-imperfect *observed* view of the truth graph.
-Four ledgers make every injected defect explicit and scorable: the defect
+Six ledgers make every injected defect explicit and scorable: the defect
 instances, the field-level mutations (with before/after values), the expected
-findings, and the expected remediations. Every model is frozen, rejects unknown
-keys, and carries ``synthetic: True``.
+findings, the expected remediations, the control partition (every entity that
+carries no defect — the benchmark's negative class), and the per-rule selection
+scope. Every model is frozen, rejects unknown keys, and carries
+``synthetic: True``.
 
 The observed graph itself is *not* modelled here: it is deliberately a relaxed
 collection of JSON objects (the truth entities' ``model_dump`` with mutations
@@ -171,6 +173,84 @@ class ExpectedFinding(BaseModel):
     synthetic: Literal[True] = True
 
 
+class ControlReason(StrEnum):
+    """Why an entity belongs to the clean (control) partition.
+
+    The first two reasons describe the *reserved* partition — assets the profile
+    holds out before selection, so no rule may ever draw them. The last two
+    describe entities that were exposed to selection (or to no rule at all) and
+    nevertheless carry no defect.
+    """
+
+    RESERVED_ASSET = "reserved-control-asset"
+    MEMBER_OF_RESERVED_ASSET = "member-of-reserved-control-asset"
+    ELIGIBLE_UNSELECTED = "eligible-unselected"
+    NEVER_ELIGIBLE = "never-eligible"
+
+
+class ControlRecord(BaseModel):
+    """One catalogue asset or file that carries no injected defect.
+
+    Together the control records are the benchmark's *negative* class: every
+    entity an assessment agent should leave unflagged. ``reserved`` marks the
+    strict held-out partition (excluded from every rule's eligible population
+    before selection); the other controls were eligible or out of scope and
+    simply not drawn. ``eligible_rule_count`` says how many rules had this entity
+    in their eligible population, so a specificity denominator can be scoped per
+    rule via ``rule-scope.jsonl``.
+    """
+
+    model_config = STRICT_MODEL_CONFIG
+
+    id: Slug
+    entity_kind: str = Field(min_length=1)
+    shard: str = Field(min_length=1)
+    reason: ControlReason
+    reserved: bool
+    parent_asset_id: str = ""
+    modality: str = ""
+    modality_group: str = ""
+    eligible_rule_count: int = Field(ge=0)
+    profile: str = Field(min_length=1)
+    defect_seed: int = Field(ge=0)
+    truth_seed: int = Field(ge=0)
+    control_fraction: float = Field(ge=0.0, le=1.0)
+    expected_status: Literal["clean"] = "clean"
+    synthetic: Literal[True] = True
+
+
+class RuleScopeRecord(BaseModel):
+    """The selection scope of one defect rule, as machine-readable counts and ids.
+
+    Emitted for every rule in the registry — including rules that fired zero
+    times — so an evaluator can scope precision and recall per rule without
+    parsing any human-readable ``selection_rationale`` prose.
+    The record ``id`` *is* the rule id, so a scope row joins directly to a
+    defect instance's ``rule_id``. The population splits exactly into
+    ``eligible_ids`` and
+    ``control_excluded_ids``; ``selected_ids`` are the entities actually mutated
+    and always match the rule's defect instances.
+    """
+
+    model_config = STRICT_MODEL_CONFIG
+
+    id: str = Field(min_length=1)
+    category: Category
+    severity: Severity
+    profile: str = Field(min_length=1)
+    defect_seed: int = Field(ge=0)
+    injection_rate: float = Field(ge=0.0, le=1.0)
+    population_count: int = Field(ge=0)
+    control_excluded_count: int = Field(ge=0)
+    eligible_count: int = Field(ge=0)
+    candidate_count: int = Field(ge=0)
+    selected_count: int = Field(ge=0)
+    eligible_ids: list[str] = Field(default_factory=list)
+    control_excluded_ids: list[str] = Field(default_factory=list)
+    selected_ids: list[str] = Field(default_factory=list)
+    synthetic: Literal[True] = True
+
+
 class ExpectedRemediation(BaseModel):
     """The remediation expected to resolve one finding (metadata only; never applied)."""
 
@@ -199,6 +279,9 @@ __all__ = [
     "ObservedMeta",
     "DefectInstance",
     "MutationRecord",
+    "ControlReason",
+    "ControlRecord",
+    "RuleScopeRecord",
     "ExpectedFinding",
     "ExpectedRemediation",
 ]
