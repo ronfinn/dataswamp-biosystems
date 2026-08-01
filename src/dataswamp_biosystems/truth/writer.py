@@ -15,6 +15,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from dataswamp_biosystems.provenance import PROVENANCE_NAME, provenance_bytes
 from dataswamp_biosystems.truth import serialize
 from dataswamp_biosystems.truth.graph import TruthGraph
 
@@ -114,6 +115,15 @@ def write_truth_graph(graph: TruthGraph, output_dir: Path | str) -> dict[str, An
             serialize.write_bytes(tmp / shard, shards[shard])
         serialize.write_bytes(tmp / MANIFEST_NAME, serialize.manifest_bytes(manifest))
         serialize.write_text(tmp / SUMMARY_NAME, _render_summary(graph))
+        serialize.write_bytes(
+            tmp / PROVENANCE_NAME,
+            provenance_bytes(
+                layer="truth",
+                generator_version=graph.meta.generator_version,
+                schema_version=graph.meta.schema_version,
+                scenario={"seed": graph.meta.seed, "epoch_anchor": graph.meta.epoch_anchor},
+            ),
+        )
 
         had_existing = output_dir.exists()
         if had_existing:
