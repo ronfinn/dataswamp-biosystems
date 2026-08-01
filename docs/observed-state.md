@@ -49,6 +49,8 @@ generated/observed/
 ├── expected-findings.jsonl      # one ExpectedFinding per instance
 ├── expected-remediations.jsonl  # one+ ExpectedRemediation per finding
 ├── mutation-log.jsonl           # one MutationRecord per field change (before/after)
+├── controls.jsonl               # one ControlRecord per clean entity (the negative class)
+├── rule-scope.jsonl             # one RuleScopeRecord per rule (eligible/selected/excluded)
 ├── profile-summary.json         # meta, distributions (category/severity/rule/modality), controls
 ├── truth-inputs.json            # SHA-256 of every truth input, verified unchanged
 └── summary.md                   # human-readable summary
@@ -79,6 +81,12 @@ generated/observed/
 - **ExpectedRemediation** — the fix expected to resolve the finding (metadata
   only; never applied), with `auto_fixable`, `requires_human_approval`,
   `reversible`, and a `truth_reference` back to the correct value.
+- **ControlRecord** — one catalogue asset or file that carries *no* injected
+  defect: the benchmark's negative class. See
+  [The control partition](#the-control-partition).
+- **RuleScopeRecord** — the machine-readable selection scope of one rule:
+  its population, which entities were control-excluded, which were eligible,
+  and which were actually selected.
 
 ### Mutation-log semantics
 
@@ -103,6 +111,99 @@ This lets an agent earn credit for *finding the right problem on the right
 entity* regardless of prose, and lets remediation proposals be scored against a
 concrete target. Assessment agents and scoring harnesses themselves are a future
 milestone; this milestone produces the labelled ground truth they will consume.
+
+## The control partition
+
+`controls.jsonl` names every catalogue asset and file that carries no injected
+defect, so an evaluator can tell "correctly left unflagged" from "missed". The
+partition is exhaustive by construction: across assets and files, an entity is
+either named by a defect instance or mutation, or it appears in `controls.jsonl`
+— nothing is silently omitted from the evaluation population.
+
+Each record carries the entity `id` — the truth-graph identifier, which is also
+the id under which the entity appears in the observed graph, and (for asset
+controls) the estate manifest's `asset_id`. Note that the materialized estate
+assigns generated files their *own* `gf-…` ids in a separate id space, so a
+truth `file-…` control joins to the estate through its `parent_asset_id`, not by
+file id. Each record also carries its
+`entity_kind` and `shard`, the `parent_asset_id` for files, `modality` and
+`modality_group`, the `profile`, `defect_seed`, `truth_seed` and
+`control_fraction` that reproduce it, `eligible_rule_count`, and
+`expected_status: "clean"`.
+
+`reason` says *why* the entity is clean, and `reserved` marks the strict
+held-out partition:
+
+| `reason` | `reserved` | Meaning |
+| --- | --- | --- |
+| `reserved-control-asset` | `true` | The profile held this asset out before selection; no rule could ever draw it. |
+| `member-of-reserved-control-asset` | `true` | A file whose dataset is a reserved control. |
+| `eligible-unselected` | `false` | The entity was in at least one rule's eligible population and simply was not drawn. |
+| `never-eligible` | `false` | No rule's population contained the entity. |
+
+### How controls differ from mutated targets and excluded artefacts
+
+*Mutated targets* are the entities named by `injected-defects.jsonl` and
+`mutation-log.jsonl` — the positive class. *Controls* are everything else in the
+asset/file population. *Reserved* controls are the subset deliberately excluded
+from the benchmark's selection population — a rule's `control_excluded_ids` in
+`rule-scope.jsonl` — as opposed to entities that were exposed to selection and
+survived it. An entity mutated only indirectly (through its governance,
+contract, or training record) is **not** a control: those mutations anchor to
+the asset's own defect instance.
+
+### Deriving TP, FP, FN and TN
+
+Join an agent's findings to the emitted ground truth on `(entity_id, rule_id)`
+— never on message prose:
+
+- **TP** — an agent finding matching a row in `expected-findings.jsonl`.
+- **FP** — an agent finding with no matching expected finding; a finding against
+  an id in `controls.jsonl` is an unambiguous false positive.
+- **FN** — an expected finding the agent did not raise.
+- **TN** — a control the agent did not flag.
+
+Precision is `TP / (TP + FP)` and recall is `TP / (TP + FN)`. Specificity is
+`TN / |controls|` over whichever control population the evaluation scopes: all
+controls for an estate-wide figure, or — per rule — the rule's `eligible_ids`
+minus its `selected_ids`, which is why `rule-scope.jsonl` emits the eligible
+population rather than only counts. The structured `eligible_count`,
+`control_excluded_count`, `candidate_count` and `selected_count` fields mean no
+evaluator ever has to parse the human-readable `selection_rationale` prose.
+
+### How controls are validated
+
+`validate-observed` reconstructs the expected partition from the recorded
+profile and defect seed and checks that the emitted ledgers respect it:
+
+- every emitted control resolves to a real truth asset or file;
+- control identifiers are unique;
+- the emitted set equals the reconstructed partition (missing and extra records
+  are both reported, by id);
+- each control's `reason`, `reserved`, `entity_kind` and `eligible_rule_count`
+  match the reconstruction;
+- no `DefectInstance` and no `MutationRecord` *on disk* targets a control;
+- every control's record in the observed graph is field-for-field equal to its
+  truth record — the record-level equivalent of byte identity, and the strongest
+  available evidence a control survived injection untouched;
+- every rule has a scope record, its counts match its listed ids, its eligible
+  and control-excluded sets are disjoint, and its selected ids are a subset of
+  its eligible ids and match the rule's defect instances.
+
+Failures are reported as `control-partition`, `contamination`,
+`duplicate-id`, `unresolved-reference` or `unknown-rule` issues naming the
+offending entity and the violated invariant, under the existing exit-code
+conventions (0 valid, 1 invalid, 2 unreadable).
+
+### Identity, ordering and schema
+
+Control records are sorted by entity id and rule-scope records by rule id, and
+every id list within a record is sorted, so output is byte-identical for a fixed
+config, truth seed, defect seed and profile — across processes and
+`PYTHONHASHSEED` values. Both files are part of the observed-state output
+contract and are covered by the regeneration tripwire. Adding them raised
+`schema_version` to `2` (generator version `1.1.0`); the pre-existing four
+ledgers and the observed graph's records are unchanged.
 
 ## Defect taxonomy
 
@@ -197,19 +298,22 @@ absence of contradictory mutations — two mutations writing the same
 rules. It deliberately does **not** enforce the truth-graph invariants on the
 observed graph — the observed graph is *supposed* to be broken.
 
-The control partition is enforced by the **engine**, which excludes control
-assets from every rule's eligible population at selection time. `validate-observed`
-does not currently reconstruct that partition to re-check it independently;
-control-partition validation is future work (see Limitations).
+The control partition is enforced by the **engine**, which excludes reserved
+control assets from every rule's eligible population at selection time, and is
+re-checked independently by `validate-observed`, which reconstructs the expected
+partition from the recorded profile and defect seed and verifies the emitted
+ledgers against it. See [The control partition](#the-control-partition).
 
 ## Limitations
 
 - Physical file integrity is represented in the observed graph only; the
   materialized estate is not corrupted this milestone.
-- `validate-observed` does not independently re-check the control partition.
-  Controls are excluded at selection time by the engine, but the validator does
-  not reconstruct them, and the reserved control asset ids are reported only as
-  a count in `profile-summary.json`, not emitted as data.
+- The control partition covers catalogue assets and files. Non-asset records
+  (governance, contract, lineage and similar) are scored through the asset their
+  defect instance anchors to, and are not themselves emitted as controls.
+- Scoring itself — computing the confusion matrix, weighting and reporting — is
+  a downstream concern. This milestone emits the labelled ground truth and the
+  validation evidence that make it computable.
 - Byte-for-byte determinism is defined within a fixed environment (pinned
   dependency versions), as with the truth graph and estate.
 - There are no scenario packs, no assessment agents, no automatic remediation,

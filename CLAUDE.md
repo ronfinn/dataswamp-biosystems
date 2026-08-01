@@ -110,7 +110,10 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     models, the in-code defect-definition registry (41 rules across 12
     categories), six maturity profiles, a truth-graph index with a mutable JSON
     working copy, the selection/mutation engine, an on-disk injection
-    orchestrator (checksums + path safety), atomic writer, and validator.
+    orchestrator (checksums + path safety), atomic writer, and validator. It
+    also emits and independently re-validates the **control partition**
+    (`controls.jsonl` + `rule-scope.jsonl`) — every asset/file left clean, so
+    downstream evaluation can measure true negatives and precision.
     Mutates only JSON copies of the truth graph (never the truth entities) and
     depends only on `company/` and `truth/`, never on DataHub. See
     `docs/observed-state.md`.

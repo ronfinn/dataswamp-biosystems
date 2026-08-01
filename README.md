@@ -28,8 +28,9 @@ Zarr). See [docs/file-generation.md](docs/file-generation.md).
 An **imperfection engine** derives a deliberately-imperfect **observed state**
 from the truth graph — what a catalogue might report after defects and drift —
 alongside a full, machine-readable ledger of every injected defect and its
-expected finding and remediation, with a healthy population of untouched
-controls. It never mutates the truth graph. See
+expected finding and remediation, plus an emitted and validated **control
+partition** naming every entity left clean, so true negatives and precision are
+measurable. It never mutates the truth graph. See
 [docs/observed-state.md](docs/observed-state.md).
 
 All four layers are deliberately catalogue-independent: they know nothing about
@@ -393,10 +394,10 @@ uv run dataswamp inject-defects --truth generated/truth/truth-graph.json --seed 
 The truth graph is read from disk (never modified): its inputs are checksummed
 before processing and verified unchanged afterwards, and defects are applied to
 independent JSON copies. The output may not resolve inside the truth directory.
-It writes `observed-graph.json`, four ledger files (`injected-defects.jsonl`,
-`expected-findings.jsonl`, `expected-remediations.jsonl`, `mutation-log.jsonl`),
-a `profile-summary.json`, a `truth-inputs.json` checksum manifest, and a
-`summary.md`. Profiles set how many defects are injected:
+It writes `observed-graph.json`, six ledger files (`injected-defects.jsonl`,
+`expected-findings.jsonl`, `expected-remediations.jsonl`, `mutation-log.jsonl`,
+`controls.jsonl`, `rule-scope.jsonl`), a `profile-summary.json`, a
+`truth-inputs.json` checksum manifest, and a `summary.md`. Profiles set how many defects are injected:
 
 | Profile | Character |
 | --- | --- |
@@ -410,12 +411,19 @@ a `profile-summary.json`, a `truth-inputs.json` checksum manifest, and a
 Every applied defect records a before/after mutation, an expected finding, and an
 expected remediation, so an agent's detections can be scored against known truth
 by matching structured fields (rule, entity, category, severity) rather than
-exact prose. The observed graph itself carries no defect annotations. `--seed` is
+exact prose. `controls.jsonl` names every truth asset and file left clean — the
+benchmark's negative class — and `rule-scope.jsonl` records each rule's eligible,
+control-excluded and selected populations, so an evaluator can compute true
+negatives, precision, recall and specificity from the emitted artefacts alone
+without parsing any prose. The observed graph itself carries no defect
+annotations. `--seed` is
 the defect seed (the truth seed comes from the truth manifest); override
 `--profile`, `--output-dir`, and `--force` as needed.
 
 Validate an existing observed state — a byte-for-byte regeneration check plus
-ledger structural, fidelity, and non-contamination invariants:
+ledger structural, fidelity, and non-contamination invariants, and an
+independent reconstruction of the control partition (no defect or mutation may
+target a control, and every control must be unchanged from truth):
 
 ```bash
 uv run dataswamp validate-observed
