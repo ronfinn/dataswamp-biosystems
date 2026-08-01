@@ -30,11 +30,14 @@ from dataswamp_biosystems.observed.engine import (
 )
 from dataswamp_biosystems.observed.entities import (
     Category,
+    ControlReason,
+    ControlRecord,
     DefectInstance,
     ExpectedFinding,
     ExpectedRemediation,
     MutationRecord,
     ObservedMeta,
+    RuleScopeRecord,
     Severity,
 )
 from dataswamp_biosystems.observed.errors import (
@@ -59,7 +62,11 @@ from dataswamp_biosystems.observed.profiles import (
     profile_specs,
 )
 from dataswamp_biosystems.observed.validate import read_observed_meta, validate_observed
-from dataswamp_biosystems.observed.writer import write_observed
+from dataswamp_biosystems.observed.writer import (
+    CONTROLS_NAME,
+    RULE_SCOPE_NAME,
+    write_observed,
+)
 
 __all__ = [
     "DEFECTS",
@@ -76,6 +83,11 @@ __all__ = [
     "resolve_truth_dir",
     "Category",
     "Severity",
+    "ControlReason",
+    "ControlRecord",
+    "RuleScopeRecord",
+    "CONTROLS_NAME",
+    "RULE_SCOPE_NAME",
     "DefectInstance",
     "MutationRecord",
     "ExpectedFinding",

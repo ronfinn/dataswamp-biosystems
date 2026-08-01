@@ -21,6 +21,8 @@ INJECTED_DEFECTS_NAME = "injected-defects.jsonl"
 EXPECTED_FINDINGS_NAME = "expected-findings.jsonl"
 EXPECTED_REMEDIATIONS_NAME = "expected-remediations.jsonl"
 MUTATION_LOG_NAME = "mutation-log.jsonl"
+CONTROLS_NAME = "controls.jsonl"
+RULE_SCOPE_NAME = "rule-scope.jsonl"
 PROFILE_SUMMARY_NAME = "profile-summary.json"
 SUMMARY_MD_NAME = "summary.md"
 TRUTH_INPUTS_NAME = "truth-inputs.json"
@@ -38,6 +40,8 @@ def observed_bytes(result: ObservedResult) -> dict[str, bytes]:
         EXPECTED_FINDINGS_NAME: serialize.jsonl_bytes(result.findings),
         EXPECTED_REMEDIATIONS_NAME: serialize.jsonl_bytes(result.remediations),
         MUTATION_LOG_NAME: serialize.jsonl_bytes(result.mutations),
+        CONTROLS_NAME: serialize.jsonl_bytes(result.controls),
+        RULE_SCOPE_NAME: serialize.jsonl_bytes(result.rule_scopes),
         PROFILE_SUMMARY_NAME: serialize.manifest_bytes(result.summary),
     }
 
@@ -61,10 +65,15 @@ def _render_summary_md(result: ObservedResult) -> str:
         f"- Assets: {totals['assets']} "
         f"({totals['control_assets']} control, {totals['affected_assets']} affected, "
         f"{totals['clean_assets']} clean)",
+        f"- Control records emitted: {totals['control_records']} "
+        f"({totals['reserved_controls']} reserved)",
         "",
-        "## Defects by category",
+        "## Controls by reason",
         "",
     ]
+    for reason, count in result.summary["by_control_reason"].items():
+        lines.append(f"- {reason}: {count}")
+    lines.extend(["", "## Defects by category", ""])
     for category, count in result.summary["by_category"].items():
         lines.append(f"- {category}: {count}")
     lines.extend(["", "## Defects by severity", ""])
@@ -130,6 +139,8 @@ __all__ = [
     "EXPECTED_FINDINGS_NAME",
     "EXPECTED_REMEDIATIONS_NAME",
     "MUTATION_LOG_NAME",
+    "CONTROLS_NAME",
+    "RULE_SCOPE_NAME",
     "PROFILE_SUMMARY_NAME",
     "SUMMARY_MD_NAME",
     "TRUTH_INPUTS_NAME",
