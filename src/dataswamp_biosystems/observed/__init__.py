@@ -17,7 +17,11 @@ from __future__ import annotations
 
 from dataswamp_biosystems.observed.defects import (
     DEFECTS,
+    REQUIRED_CONTRACT_STATES,
+    RULE_CONTRACTS,
     DefectDef,
+    RuleContract,
+    contract_coverage,
     defects_in_order,
     registry_rows,
     validate_registry,
@@ -29,6 +33,10 @@ from dataswamp_biosystems.observed.engine import (
     generate_observed,
 )
 from dataswamp_biosystems.observed.entities import (
+    NO_REMEDIATION_ACTION,
+    ApprovalEvidence,
+    ApprovalPolicy,
+    ApproverRole,
     Category,
     ControlReason,
     ControlRecord,
@@ -36,7 +44,9 @@ from dataswamp_biosystems.observed.entities import (
     ExpectedFinding,
     ExpectedRemediation,
     MutationRecord,
+    NonRemediableReason,
     ObservedMeta,
+    RemediationAvailability,
     RuleScopeRecord,
     Severity,
 )
@@ -71,6 +81,10 @@ from dataswamp_biosystems.observed.writer import (
 __all__ = [
     "DEFECTS",
     "DefectDef",
+    "RuleContract",
+    "RULE_CONTRACTS",
+    "REQUIRED_CONTRACT_STATES",
+    "contract_coverage",
     "defects_in_order",
     "registry_rows",
     "validate_registry",
@@ -83,6 +97,12 @@ __all__ = [
     "resolve_truth_dir",
     "Category",
     "Severity",
+    "RemediationAvailability",
+    "ApprovalPolicy",
+    "ApproverRole",
+    "ApprovalEvidence",
+    "NonRemediableReason",
+    "NO_REMEDIATION_ACTION",
     "ControlReason",
     "ControlRecord",
     "RuleScopeRecord",

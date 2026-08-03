@@ -54,6 +54,70 @@ class Severity(StrEnum):
 SEVERITY_RANK: dict[str, int] = {Severity.HIGH: 0, Severity.MEDIUM: 1, Severity.LOW: 2}
 
 
+class RemediationAvailability(StrEnum):
+    """Whether — and how — a defect can be remediated.
+
+    This is the *capability* dimension and is deliberately independent of
+    :class:`ApprovalPolicy`, which is the *authority* dimension. A change can be
+    mechanically derivable yet still require sign-off (correcting an access
+    classification), and it can need no sign-off yet be impossible to automate
+    (writing a missing description).
+    """
+
+    AUTOMATIC = "automatic"  # the correct value is mechanically derivable
+    MANUAL = "manual"  # a human must supply or decide the correct value
+    NONE = "none"  # nothing can be remediated from available information
+
+
+class ApprovalPolicy(StrEnum):
+    """Whether remediating a defect requires human authorisation."""
+
+    NOT_REQUIRED = "not-required"
+    REQUIRED = "required"
+
+
+class ApproverRole(StrEnum):
+    """Who may authorise a remediation.
+
+    The stewardship values mirror ``config/vocabularies/stewardship-types.yaml``;
+    ``data-owner`` is the owning team recorded on the asset itself.
+    """
+
+    NONE = "none"
+    DATA_STEWARD = "data-steward"
+    QUALITY_STEWARD = "quality-steward"
+    ACCESS_STEWARD = "access-steward"
+    DATA_OWNER = "data-owner"
+
+
+class ApprovalEvidence(StrEnum):
+    """The artefact an approval must produce to be auditable."""
+
+    NONE = "none"
+    STEWARD_SIGN_OFF = "steward-sign-off"
+    OWNER_SIGN_OFF = "owner-sign-off"
+    ACCESS_REVIEW_RECORD = "access-review-record"
+    QUALITY_REVIEW_RECORD = "quality-review-record"
+    TRAINING_APPROVAL_RECORD = "training-approval-record"
+
+
+class NonRemediableReason(StrEnum):
+    """Why a defect cannot be remediated from the information available.
+
+    Only meaningful when availability is :attr:`RemediationAvailability.NONE`.
+    """
+
+    NONE = "none"
+    SOURCE_SYSTEM_RECOVERY = "source-system-recovery-required"
+    UPSTREAM_REPROCESSING = "upstream-reprocessing-required"
+
+
+# The action recorded when a finding is deliberately non-remediable. It is an
+# explicit *no-action decision*, not a hollow fix: an agent that proposes a
+# repair here is wrong, and an agent that abstains is right.
+NO_REMEDIATION_ACTION = "no-remediation"
+
+
 class Multiplicity(StrEnum):
     """How many times a rule may apply to one primary entity."""
 
@@ -101,6 +165,9 @@ class DefectInstance(BaseModel):
     profile: str = Field(min_length=1)
     defect_seed: int = Field(ge=0)
     truth_seed: int = Field(ge=0)
+    remediation_availability: RemediationAvailability
+    approval_policy: ApprovalPolicy
+    approver_role: ApproverRole = ApproverRole.NONE
     mutation_ids: list[Slug] = Field(min_length=1)
     finding_id: Slug
     remediation_ids: list[Slug] = Field(min_length=1)
@@ -167,6 +234,8 @@ class ExpectedFinding(BaseModel):
     observable_evidence: str = Field(min_length=1)
     expected_message_semantics: str = Field(min_length=1)
     detection_locator: str = Field(min_length=1)
+    remediation_available: RemediationAvailability
+    non_remediable_reason: NonRemediableReason = NonRemediableReason.NONE
     remediation_id: Slug
     match_fields: dict[str, Any] = Field(default_factory=dict)
     expected_status: Literal["present"] = "present"
@@ -261,9 +330,17 @@ class ExpectedRemediation(BaseModel):
     instance_id: Slug
     rule_id: str = Field(min_length=1)
     action: str = Field(min_length=1)
+    action_class: str = Field(min_length=1)
     target: str = Field(min_length=1)
     recommended_value: Any = None
     truth_reference: Any = None
+    availability: RemediationAvailability
+    approval_policy: ApprovalPolicy
+    approver_role: ApproverRole = ApproverRole.NONE
+    approval_evidence: ApprovalEvidence = ApprovalEvidence.NONE
+    non_remediable_reason: NonRemediableReason = NonRemediableReason.NONE
+    # Retained so existing readers keep working; both are derived from the two
+    # independent dimensions above and are validated against them.
     auto_fixable: bool
     requires_human_approval: bool
     reversible: bool
@@ -275,6 +352,12 @@ __all__ = [
     "Severity",
     "SEVERITY_RANK",
     "Multiplicity",
+    "RemediationAvailability",
+    "ApprovalPolicy",
+    "ApproverRole",
+    "ApprovalEvidence",
+    "NonRemediableReason",
+    "NO_REMEDIATION_ACTION",
     "ChangeOp",
     "ObservedMeta",
     "DefectInstance",

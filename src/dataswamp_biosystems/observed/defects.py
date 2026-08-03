@@ -18,9 +18,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from dataswamp_biosystems.observed.entities import (
+    NO_REMEDIATION_ACTION,
+    ApprovalEvidence,
+    ApprovalPolicy,
+    ApproverRole,
     Category,
     ChangeOp,
     Multiplicity,
+    NonRemediableReason,
+    RemediationAvailability,
     Severity,
 )
 from dataswamp_biosystems.observed.index import GraphIndex, JsonRecord
@@ -78,8 +84,16 @@ class DefectDef:
     expected_finding: str
     remediation_action: str
     remediation_recommended: Any
-    auto_fixable: bool
-    requires_human_approval: bool
+    # The two independent contract dimensions. ``auto_fixable`` and
+    # ``requires_human_approval`` are derived from them (below) so existing
+    # readers keep working while the dimensions stay separable.
+    remediation_availability: RemediationAvailability
+    approval_policy: ApprovalPolicy
+    approver_role: ApproverRole
+    approval_evidence: ApprovalEvidence
+    non_remediable_reason: NonRemediableReason
+    # Change operations this rule is permitted to emit.
+    mutation_ops: tuple[ChangeOp, ...]
     reversible: bool
     # False when the defect exists only in the observed graph (metadata-only);
     # True would mean a physically-manifested defect on a separate observed file
@@ -94,6 +108,34 @@ class DefectDef:
     @property
     def manifestation(self) -> str:
         return "physical" if self.physically_manifested else "metadata"
+
+    @property
+    def auto_fixable(self) -> bool:
+        """Whether a machine can apply the fix (derived; never set directly)."""
+        return self.remediation_availability is RemediationAvailability.AUTOMATIC
+
+    @property
+    def requires_human_approval(self) -> bool:
+        """Whether authorisation is required (derived; independent of fixability)."""
+        return self.approval_policy is ApprovalPolicy.REQUIRED
+
+    @property
+    def is_remediable(self) -> bool:
+        return self.remediation_availability is not RemediationAvailability.NONE
+
+    @property
+    def action_class(self) -> str:
+        """The programmatic action class, e.g. ``restore_field`` (never free text)."""
+        if not self.is_remediable:
+            return NO_REMEDIATION_ACTION
+        return self.remediation_action.split(":", 1)[0]
+
+    @property
+    def contract_state(self) -> str:
+        """The benchmark state this rule occupies, for coverage reporting."""
+        if not self.is_remediable:
+            return "non-remediable"
+        return f"{self.remediation_availability.value}/{self.approval_policy.value}"
 
 
 # ---------------------------------------------------------------------------
@@ -704,16 +746,201 @@ def _big_datasets(idx: GraphIndex) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# The rule contract table.
+# ---------------------------------------------------------------------------
+#
+# Remediation availability (can it be fixed, and how) and approval policy (must
+# a human authorise it) are *independent* dimensions. Before this table existed
+# they were perfectly coupled — every rule was either automatic-and-unapproved
+# or manual-and-approved — which made two of the four quadrants unreachable and
+# let an agent infer one dimension from the other. They are now declared
+# separately, and :func:`validate_registry` enforces that all five benchmark
+# states remain populated.
+#
+# ``ops`` is the set of change operations a rule may emit. The values were
+# measured from every profile and then frozen as a declaration, so a mutation
+# that changes shape is caught rather than absorbed.
+
+
+@dataclass(frozen=True)
+class RuleContract:
+    """The declared, enforceable remediation contract for one defect rule."""
+
+    availability: RemediationAvailability
+    approval: ApprovalPolicy
+    ops: tuple[ChangeOp, ...]
+    approver: ApproverRole = ApproverRole.NONE
+    evidence: ApprovalEvidence = ApprovalEvidence.NONE
+    non_remediable_reason: NonRemediableReason = NonRemediableReason.NONE
+
+
+_AUTO = RemediationAvailability.AUTOMATIC
+_MANUAL = RemediationAvailability.MANUAL
+_NO_FIX = RemediationAvailability.NONE
+_FREE = ApprovalPolicy.NOT_REQUIRED
+_APPROVED = ApprovalPolicy.REQUIRED
+_SET = (ChangeOp.SET,)
+_SET_LIST = (ChangeOp.SET_LIST,)
+_DELETE = (ChangeOp.DELETE_RECORD,)
+_ADD = (ChangeOp.ADD_RECORD,)
+
+RULE_CONTRACTS: dict[str, RuleContract] = {
+    # -- automatic, no approval: mechanically derivable, no governance impact --
+    "FILE-CHECKSUM-MISMATCH": RuleContract(_AUTO, _FREE, _SET),
+    "LIF-STAGE-REGRESSION": RuleContract(_AUTO, _FREE, _SET),
+    "LIN-DATASET-NO-UPSTREAM": RuleContract(_AUTO, _FREE, _DELETE),
+    "LIN-PATH-NO-SLIDE-SOURCE": RuleContract(_AUTO, _FREE, _DELETE),
+    "LIN-PROVENANCE-DANGLING": RuleContract(_AUTO, _FREE, _SET),
+    "LIN-VCF-INDEX-MISSING": RuleContract(
+        _AUTO, _FREE, (ChangeOp.DELETE_RECORD, ChangeOp.SET_LIST)
+    ),
+    "META-MODALITY-META-EMPTY": RuleContract(_AUTO, _FREE, _SET),
+    "META-VERSION-MISSING": RuleContract(_AUTO, _FREE, _SET),
+    "MOD-GENOME-BUILD-MISSING": RuleContract(_AUTO, _FREE, _SET),
+    "NAM-PATH-CONVENTION": RuleContract(_AUTO, _FREE, _SET),
+    "NAM-VERSION-NONCANONICAL": RuleContract(_AUTO, _FREE, _SET),
+    "OWN-DENORM-MISMATCH": RuleContract(_AUTO, _FREE, _SET),
+    "SCH-RECORD-COUNT-ZERO": RuleContract(_AUTO, _FREE, _SET),
+    "SCH-SIZE-INVERSION": RuleContract(_AUTO, _FREE, _SET),
+    # -- automatic, approval required: the value is derivable, but the change
+    #    alters access, retention or AI-training posture, so it needs sign-off --
+    "AIR-TRAINING-STATUS-MISMATCH": RuleContract(
+        _AUTO, _APPROVED, _SET, ApproverRole.DATA_OWNER, ApprovalEvidence.TRAINING_APPROVAL_RECORD
+    ),
+    "GOV-CLASS-MISSING": RuleContract(
+        _AUTO, _APPROVED, _SET, ApproverRole.ACCESS_STEWARD, ApprovalEvidence.ACCESS_REVIEW_RECORD
+    ),
+    "GOV-RESTRICTED-AS-INTERNAL": RuleContract(
+        _AUTO, _APPROVED, _SET, ApproverRole.ACCESS_STEWARD, ApprovalEvidence.ACCESS_REVIEW_RECORD
+    ),
+    "GOV-RETENTION-MISSING": RuleContract(
+        _AUTO, _APPROVED, _SET, ApproverRole.DATA_STEWARD, ApprovalEvidence.STEWARD_SIGN_OFF
+    ),
+    "LIN-CROSS-STUDY-EDGE": RuleContract(
+        _AUTO, _APPROVED, _ADD, ApproverRole.DATA_STEWARD, ApprovalEvidence.STEWARD_SIGN_OFF
+    ),
+    # -- manual, no approval: human judgement, but no formal authorisation -----
+    "GOV-STALE-REVIEW": RuleContract(_MANUAL, _FREE, _SET),
+    "LIF-STALE-ASSET": RuleContract(_MANUAL, _FREE, _SET),
+    "META-DESC-MISSING": RuleContract(_MANUAL, _FREE, _SET),
+    "META-TITLE-MISSING": RuleContract(_MANUAL, _FREE, _SET),
+    "MOD-H5AD-NO-COUNTS-LAYER": RuleContract(_MANUAL, _FREE, _SET),
+    "NAM-DUP-FINAL-VERSION": RuleContract(_MANUAL, _FREE, _SET),
+    "SEM-DESC-GENERIC": RuleContract(_MANUAL, _FREE, _SET),
+    "SEM-TITLE-UNINFORMATIVE": RuleContract(_MANUAL, _FREE, _SET),
+    # -- manual, approval required --------------------------------------------
+    "AIR-TRAINING-APPROVAL-ABSENT": RuleContract(
+        _MANUAL,
+        _APPROVED,
+        _DELETE,
+        ApproverRole.DATA_OWNER,
+        ApprovalEvidence.TRAINING_APPROVAL_RECORD,
+    ),
+    "MOD-SPATIAL-COORDS-OOB": RuleContract(
+        _MANUAL, _APPROVED, _SET, ApproverRole.DATA_STEWARD, ApprovalEvidence.STEWARD_SIGN_OFF
+    ),
+    "OWN-OWNER-DANGLING": RuleContract(
+        _MANUAL, _APPROVED, _SET, ApproverRole.DATA_OWNER, ApprovalEvidence.OWNER_SIGN_OFF
+    ),
+    "OWN-OWNER-MISSING": RuleContract(
+        _MANUAL, _APPROVED, _SET, ApproverRole.DATA_OWNER, ApprovalEvidence.OWNER_SIGN_OFF
+    ),
+    "OWN-OWNER-WRONG-TEAM": RuleContract(
+        _MANUAL, _APPROVED, _SET, ApproverRole.DATA_OWNER, ApprovalEvidence.OWNER_SIGN_OFF
+    ),
+    "OWN-STEWARD-MISSING": RuleContract(
+        _MANUAL, _APPROVED, _SET_LIST, ApproverRole.DATA_STEWARD, ApprovalEvidence.STEWARD_SIGN_OFF
+    ),
+    "QC-CERTIFIED-CONTRADICTED": RuleContract(
+        _MANUAL,
+        _APPROVED,
+        _SET,
+        ApproverRole.QUALITY_STEWARD,
+        ApprovalEvidence.QUALITY_REVIEW_RECORD,
+    ),
+    "SCH-CONTRACT-MISSING": RuleContract(
+        _MANUAL, _APPROVED, _DELETE, ApproverRole.DATA_STEWARD, ApprovalEvidence.STEWARD_SIGN_OFF
+    ),
+    "SEM-DOMAIN-MISLABELLED": RuleContract(
+        _MANUAL, _APPROVED, _SET, ApproverRole.DATA_STEWARD, ApprovalEvidence.STEWARD_SIGN_OFF
+    ),
+    "USE-EXTERNAL-VS-RESTRICTED": RuleContract(
+        _MANUAL,
+        _APPROVED,
+        _SET_LIST,
+        ApproverRole.ACCESS_STEWARD,
+        ApprovalEvidence.ACCESS_REVIEW_RECORD,
+    ),
+    "USE-INTENDED-USE-MISSING": RuleContract(
+        _MANUAL, _APPROVED, _SET_LIST, ApproverRole.DATA_STEWARD, ApprovalEvidence.STEWARD_SIGN_OFF
+    ),
+    "USE-TRAINING-WITHOUT-APPROVAL": RuleContract(
+        _MANUAL,
+        _APPROVED,
+        _SET_LIST,
+        ApproverRole.DATA_OWNER,
+        ApprovalEvidence.TRAINING_APPROVAL_RECORD,
+    ),
+    # -- non-remediable: no correct action exists from the information here ----
+    "FILE-MISSING": RuleContract(
+        _NO_FIX,
+        _FREE,
+        _SET,
+        non_remediable_reason=NonRemediableReason.SOURCE_SYSTEM_RECOVERY,
+    ),
+    "MOD-MIXED-GENE-IDS": RuleContract(
+        _NO_FIX,
+        _FREE,
+        _SET,
+        non_remediable_reason=NonRemediableReason.UPSTREAM_REPROCESSING,
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
 # The registry.
 # ---------------------------------------------------------------------------
 
 
 def _def(**kwargs: Any) -> DefectDef:
+    """Build a rule, taking its remediation contract from :data:`RULE_CONTRACTS`.
+
+    A rule with no contract entry is a hard error rather than a silent default:
+    an unclassified rule would otherwise slip into the catalogue and quietly
+    weaken the benchmark's state coverage.
+    """
     kwargs.setdefault("incompatibilities", [])
     kwargs.setdefault("multiplicity", Multiplicity.PER_ENTITY)
     kwargs.setdefault("validation_rules", [])
+    declared_recommendation = "remediation_recommended" in kwargs
     kwargs.setdefault("remediation_recommended", "restore-from-truth")
     kwargs.setdefault("physically_manifested", False)
+    for legacy in ("auto_fixable", "requires_human_approval"):
+        if legacy in kwargs:
+            raise TypeError(
+                f"{kwargs.get('rule_id')!r}: {legacy!r} is derived from the rule contract; "
+                "declare remediation availability and approval policy in RULE_CONTRACTS"
+            )
+
+    rule_id = kwargs["rule_id"]
+    contract = RULE_CONTRACTS.get(rule_id)
+    if contract is None:
+        raise KeyError(f"defect rule {rule_id!r} has no entry in RULE_CONTRACTS")
+    kwargs["remediation_availability"] = contract.availability
+    kwargs["approval_policy"] = contract.approval
+    kwargs["approver_role"] = contract.approver
+    kwargs["approval_evidence"] = contract.evidence
+    kwargs["non_remediable_reason"] = contract.non_remediable_reason
+    kwargs["mutation_ops"] = contract.ops
+    if contract.availability is RemediationAvailability.NONE:
+        # Clearing the *default* recommendation is right; silently discarding one
+        # the author wrote is not — that would hide a contradicted declaration.
+        if declared_recommendation and kwargs["remediation_recommended"] is not None:
+            raise TypeError(
+                f"{rule_id!r}: declares remediation_recommended "
+                f"{kwargs['remediation_recommended']!r} but its contract is non-remediable"
+            )
+        kwargs["remediation_recommended"] = None
     return DefectDef(**kwargs)
 
 
@@ -732,8 +959,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="title is an empty string",
         expected_finding="Asset {id} is missing a human-readable title.",
         remediation_action="restore_field:title",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         incompatibilities=["SEM-TITLE-UNINFORMATIVE"],
         population=_all_assets,
@@ -752,8 +977,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="description is an empty string",
         expected_finding="Asset {id} is missing a description.",
         remediation_action="restore_field:description",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         incompatibilities=["SEM-DESC-GENERIC"],
         population=_all_assets,
@@ -772,8 +995,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="version is an empty string",
         expected_finding="Asset {id} is missing a version.",
         remediation_action="restore_field:version",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         incompatibilities=["NAM-VERSION-NONCANONICAL", "NAM-DUP-FINAL-VERSION"],
         population=_all_assets,
@@ -792,8 +1013,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="modality_metadata is an empty object",
         expected_finding="Dataset {id} has no modality-specific metadata.",
         remediation_action="restore_field:modality_metadata",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         incompatibilities=[
             "MOD-GENOME-BUILD-MISSING",
@@ -818,8 +1037,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="description reads 'data' / 'TODO' with no substance",
         expected_finding="Asset {id} has a generic, uninformative description.",
         remediation_action="rewrite_field:description",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["META-DESC-MISSING"],
         population=_all_assets,
@@ -838,8 +1055,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="title reads 'dataset' with no specifics",
         expected_finding="Asset {id} has an uninformative title.",
         remediation_action="rewrite_field:title",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["META-TITLE-MISSING"],
         population=_all_assets,
@@ -858,8 +1073,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="scientific_domain disagrees with the modality",
         expected_finding="Asset {id} is labelled with the wrong scientific domain.",
         remediation_action="correct_field:scientific_domain",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         population=_all_assets,
         mutate=_mislabel_domain,
@@ -878,8 +1091,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="owner_ref is empty on the asset and its governance record",
         expected_finding="Asset {id} has no assigned owner.",
         remediation_action="assign_owner",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=[
             "OWN-OWNER-WRONG-TEAM",
@@ -902,8 +1113,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="owner_ref is a team unrelated to the asset's study/programme",
         expected_finding="Asset {id} is owned by the wrong team.",
         remediation_action="reassign_owner",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["OWN-OWNER-MISSING", "OWN-OWNER-DANGLING", "OWN-DENORM-MISMATCH"],
         population=_all_assets,
@@ -922,8 +1131,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="steward_refs is empty on the asset and its governance record",
         expected_finding="Asset {id} has no assigned steward.",
         remediation_action="assign_steward",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         population=_all_assets,
         mutate=_steward_missing,
@@ -941,8 +1148,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="owner_ref does not resolve to any team or person",
         expected_finding="Asset {id} references a non-existent owner.",
         remediation_action="assign_owner",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["OWN-OWNER-MISSING", "OWN-OWNER-WRONG-TEAM", "OWN-DENORM-MISMATCH"],
         population=_all_assets,
@@ -961,8 +1166,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="asset owner_ref differs from governance-record owner_ref",
         expected_finding="Asset {id} owner disagrees with its governance record.",
         remediation_action="reconcile_owner",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         incompatibilities=["OWN-OWNER-MISSING", "OWN-OWNER-WRONG-TEAM", "OWN-OWNER-DANGLING"],
         population=_all_assets,
@@ -982,8 +1185,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="version reads 'final' / 'latest' rather than semver",
         expected_finding="Asset {id} uses a non-canonical version label.",
         remediation_action="normalise_version",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         incompatibilities=["META-VERSION-MISSING", "NAM-DUP-FINAL-VERSION"],
         population=_all_assets,
@@ -1002,8 +1203,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="two datasets in one study/group share version 'final'",
         expected_finding="Datasets in {id}'s group have duplicate final versions.",
         remediation_action="disambiguate_versions",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["META-VERSION-MISSING", "NAM-VERSION-NONCANONICAL"],
         population=_dup_group_reps,
@@ -1022,8 +1221,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="relative_path has spaces and uppercase segments",
         expected_finding="File {id} has a non-conforming path.",
         remediation_action="rename_path",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         population=lambda idx: idx.file_ids(),
         mutate=_bad_path,
@@ -1042,8 +1239,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="access_classification is an empty string",
         expected_finding="Asset {id} has no access classification.",
         remediation_action="classify_asset",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["GOV-RESTRICTED-AS-INTERNAL"],
         population=_all_assets,
@@ -1062,8 +1257,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="access_classification downgraded to internal",
         expected_finding="Restricted asset {id} is misclassified as internal.",
         remediation_action="reclassify_asset",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["GOV-CLASS-MISSING"],
         population=_restricted_assets,
@@ -1082,8 +1275,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="governance reviewed_at predates the estate by years",
         expected_finding="Asset {id} has a stale governance review.",
         remediation_action="schedule_review",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["LIF-STALE-ASSET"],
         population=_all_assets,
@@ -1102,8 +1293,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="retention_class is an empty string",
         expected_finding="Asset {id} has no retention class.",
         remediation_action="assign_retention",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         population=_all_assets,
         mutate=_clear_asset_field("retention_class", "", is_list=False),
@@ -1122,8 +1311,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="intended_uses is an empty list",
         expected_finding="Asset {id} declares no intended use.",
         remediation_action="declare_intended_use",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["USE-TRAINING-WITHOUT-APPROVAL", "USE-EXTERNAL-VS-RESTRICTED"],
         population=_all_assets,
@@ -1142,8 +1329,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="intended_uses includes model-training while status is unapproved",
         expected_finding="Asset {id} claims model-training use without approval.",
         remediation_action="review_training_use",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["USE-INTENDED-USE-MISSING"],
         population=_all_assets,
@@ -1162,8 +1347,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="intended_uses includes external-sharing on a restricted asset",
         expected_finding="Restricted asset {id} is marked for external sharing.",
         remediation_action="review_sharing_use",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["USE-INTENDED-USE-MISSING"],
         population=_restricted_assets,
@@ -1183,8 +1366,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="dataset has no upstream lineage edge",
         expected_finding="Dataset {id} has no upstream lineage.",
         remediation_action="restore_lineage",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         incompatibilities=["LIN-VCF-INDEX-MISSING"],
         population=_datasets,
@@ -1203,8 +1384,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="an upstream edge originates in a different study",
         expected_finding="Dataset {id} has an implausible cross-study lineage edge.",
         remediation_action="remove_edge",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         population=_datasets,
         mutate=_cross_study_edge,
@@ -1222,8 +1401,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="provenance_run_id references a non-existent run",
         expected_finding="Dataset {id} points at a non-existent provenance run.",
         remediation_action="repair_provenance",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         population=_datasets,
         mutate=_provenance_dangling,
@@ -1241,8 +1418,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="a referenced index file is absent from the dataset",
         expected_finding="Dataset {id} is missing its VCF index relationship.",
         remediation_action="restore_index_file",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         incompatibilities=["LIN-DATASET-NO-UPSTREAM"],
         population=lambda idx: _datasets_in_groups(idx, {"wgs-wes"}),
@@ -1261,8 +1436,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="dataset files have no producing-run lineage (no source slide)",
         expected_finding="Pathology dataset {id} has no source-slide lineage.",
         remediation_action="restore_lineage",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         population=lambda idx: _datasets_in_groups(idx, {"digital-pathology"}),
         mutate=_no_slide_source,
@@ -1281,8 +1454,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="contract_ref resolves to no contract record",
         expected_finding="Asset {id} has no data contract.",
         remediation_action="author_contract",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         population=_all_assets,
         mutate=_contract_missing,
@@ -1300,8 +1471,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="record_count is 0 while files are present",
         expected_finding="Dataset {id} reports zero records.",
         remediation_action="recompute_record_count",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         population=_datasets,
         mutate=_record_count_zero,
@@ -1319,8 +1488,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="logical_bytes < physical_bytes",
         expected_finding="Dataset {id} has an impossible size inversion.",
         remediation_action="recompute_sizes",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         population=_big_datasets,
         mutate=_size_inversion,
@@ -1339,8 +1506,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="modality_metadata has no reference_build",
         expected_finding="Dataset {id} does not declare a genome build.",
         remediation_action="declare_genome_build",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         incompatibilities=["META-MODALITY-META-EMPTY"],
         population=lambda idx: _datasets_in_groups(idx, {"wgs-wes"}),
@@ -1359,8 +1524,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="gene_id_system reads 'mixed:ensembl+symbol'",
         expected_finding="Dataset {id} mixes gene identifier systems.",
         remediation_action="harmonise_gene_ids",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["META-MODALITY-META-EMPTY"],
         population=lambda idx: _datasets_in_groups(idx, {"scrna-seq", "functional-genomics"}),
@@ -1379,8 +1542,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="counts_layer is declared 'absent'",
         expected_finding="Dataset {id} has no declared counts layer.",
         remediation_action="declare_counts_layer",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["META-MODALITY-META-EMPTY"],
         population=lambda idx: _datasets_in_groups(idx, {"scrna-seq"}),
@@ -1399,8 +1560,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="max_coord_um exceeds the declared capture area",
         expected_finding="Dataset {id} has spatial coordinates outside the image bounds.",
         remediation_action="clip_coordinates",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["META-MODALITY-META-EMPTY"],
         population=lambda idx: _datasets_in_groups(idx, {"visium-hd"}),
@@ -1420,8 +1579,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="no model-training approval backs the asset's status",
         expected_finding="Asset {id} has no model-training approval record.",
         remediation_action="record_training_decision",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["AIR-TRAINING-STATUS-MISMATCH"],
         population=_all_assets,
@@ -1440,8 +1597,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="asset training status differs from its approval record",
         expected_finding="Asset {id} training status disagrees with its approval.",
         remediation_action="reconcile_training_status",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         incompatibilities=["AIR-TRAINING-APPROVAL-ABSENT"],
         population=_all_assets,
@@ -1461,8 +1616,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="governance and quality dates predate the estate by years",
         expected_finding="Asset {id} is stale (old review and quality dates).",
         remediation_action="refresh_asset",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["GOV-STALE-REVIEW"],
         population=_stale_candidates,
@@ -1481,8 +1634,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="lifecycle_stage is raw despite pipeline provenance",
         expected_finding="Dataset {id} has an inconsistent lifecycle stage.",
         remediation_action="correct_lifecycle_stage",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         population=_pipeline_datasets,
         mutate=_stage_regression,
@@ -1500,8 +1651,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="a quality check fails while the asset remains passing",
         expected_finding="Asset {id}'s passing status is contradicted by QC evidence.",
         remediation_action="reconcile_quality_status",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         population=_all_assets,
         mutate=_certified_contradicted,
@@ -1520,8 +1669,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="observed checksum differs from the truth checksum",
         expected_finding="File {id} has a mismatched checksum.",
         remediation_action="reverify_checksum",
-        auto_fixable=True,
-        requires_human_approval=False,
         reversible=True,
         incompatibilities=["FILE-MISSING"],
         population=lambda idx: idx.file_ids(),
@@ -1540,8 +1687,6 @@ _DEFS: list[DefectDef] = [
         expected_evidence="file is marked not present but still referenced",
         expected_finding="File {id} is missing but still referenced.",
         remediation_action="restore_file",
-        auto_fixable=False,
-        requires_human_approval=True,
         reversible=True,
         incompatibilities=["FILE-CHECKSUM-MISMATCH"],
         population=lambda idx: idx.file_ids(),
@@ -1602,7 +1747,108 @@ def validate_registry(defects: dict[str, DefectDef]) -> list[str]:
             problems.append(f"{prefix} population is not callable")
         if not callable(definition.mutate):
             problems.append(f"{prefix} mutate is not callable")
+        problems.extend(_contract_problems(definition, prefix))
+
+    problems.extend(_coverage_problems(defects))
     return sorted(problems)
+
+
+def _contract_problems(definition: DefectDef, prefix: str) -> list[str]:
+    """Check one rule's remediation contract is internally consistent.
+
+    These are the declarations that would otherwise be descriptive only: a rule
+    claiming to be non-remediable while naming a repair action, an approval
+    requirement with nobody able to grant it, or an automatic fix with no
+    actionable target.
+    """
+    problems: list[str] = []
+    availability = definition.remediation_availability
+    approval = definition.approval_policy
+
+    if availability is RemediationAvailability.NONE:
+        if definition.non_remediable_reason is NonRemediableReason.NONE:
+            problems.append(f"{prefix} non-remediable rule declares no non_remediable_reason")
+        if definition.remediation_recommended is not None:
+            problems.append(
+                f"{prefix} non-remediable rule declares a recommended remediation value"
+            )
+    else:
+        if definition.non_remediable_reason is not NonRemediableReason.NONE:
+            problems.append(
+                f"{prefix} remediable rule declares non_remediable_reason "
+                f"{definition.non_remediable_reason.value!r}"
+            )
+        if not definition.remediation_action:
+            problems.append(f"{prefix} remediable rule has no remediation_action")
+        if availability is RemediationAvailability.AUTOMATIC and (
+            definition.remediation_recommended is None
+        ):
+            problems.append(
+                f"{prefix} automatically remediable rule has no recommended remediation value"
+            )
+
+    if approval is ApprovalPolicy.REQUIRED:
+        if definition.approver_role is ApproverRole.NONE:
+            problems.append(f"{prefix} approval is required but no approver_role is declared")
+        if definition.approval_evidence is ApprovalEvidence.NONE:
+            problems.append(f"{prefix} approval is required but no approval_evidence is declared")
+    else:
+        if definition.approver_role is not ApproverRole.NONE:
+            problems.append(
+                f"{prefix} approval is not required but declares approver_role "
+                f"{definition.approver_role.value!r}"
+            )
+        if definition.approval_evidence is not ApprovalEvidence.NONE:
+            problems.append(
+                f"{prefix} approval is not required but declares approval_evidence "
+                f"{definition.approval_evidence.value!r}"
+            )
+
+    if not definition.mutation_ops:
+        problems.append(f"{prefix} declares no permitted mutation_ops")
+    for op in definition.mutation_ops:
+        if not isinstance(op, ChangeOp):
+            problems.append(f"{prefix} unknown mutation operation {op!r}")
+
+    # Derived legacy booleans must agree with the dimensions they come from.
+    if definition.auto_fixable != (availability is RemediationAvailability.AUTOMATIC):
+        problems.append(f"{prefix} auto_fixable disagrees with remediation_availability")
+    if definition.requires_human_approval != (approval is ApprovalPolicy.REQUIRED):
+        problems.append(f"{prefix} requires_human_approval disagrees with approval_policy")
+    return problems
+
+
+# Every benchmark state the catalogue must keep populated. A state falling empty
+# means an agent can no longer be tested on that decision, so it is a registry
+# error rather than a silent gap.
+REQUIRED_CONTRACT_STATES: tuple[str, ...] = (
+    "automatic/not-required",
+    "automatic/required",
+    "manual/not-required",
+    "manual/required",
+    "non-remediable",
+)
+
+
+def contract_coverage(defects: dict[str, DefectDef] | None = None) -> dict[str, list[str]]:
+    """Return ``{contract_state: [rule_id, …]}`` for every required state, sorted."""
+    registry = DEFECTS if defects is None else defects
+    coverage: dict[str, list[str]] = {state: [] for state in REQUIRED_CONTRACT_STATES}
+    for definition in sorted(registry.values(), key=lambda d: d.rule_id):
+        coverage.setdefault(definition.contract_state, []).append(definition.rule_id)
+    return {state: sorted(rules) for state, rules in sorted(coverage.items())}
+
+
+def _coverage_problems(defects: dict[str, DefectDef]) -> list[str]:
+    coverage = contract_coverage(defects)
+    problems: list[str] = []
+    for state in REQUIRED_CONTRACT_STATES:
+        if not coverage.get(state):
+            problems.append(
+                f"<registry>: no rule covers the benchmark contract state {state!r}; "
+                "the catalogue must exercise every remediation/approval combination"
+            )
+    return problems
 
 
 def registry_rows() -> list[dict[str, Any]]:
@@ -1617,6 +1863,14 @@ def registry_rows() -> list[dict[str, Any]]:
                 "severity": definition.default_severity.value,
                 "applies_to": ",".join(definition.applies_to_kinds),
                 "modalities": ",".join(definition.applies_to_modalities),
+                "remediation_availability": definition.remediation_availability.value,
+                "approval_policy": definition.approval_policy.value,
+                "approver_role": definition.approver_role.value,
+                "approval_evidence": definition.approval_evidence.value,
+                "non_remediable_reason": definition.non_remediable_reason.value,
+                "action_class": definition.action_class,
+                "contract_state": definition.contract_state,
+                "mutation_ops": ",".join(op.value for op in definition.mutation_ops),
                 "auto_fixable": definition.auto_fixable,
                 "requires_human_approval": definition.requires_human_approval,
                 "reversible": definition.reversible,
@@ -1636,4 +1890,8 @@ __all__ = [
     "defects_in_order",
     "validate_registry",
     "registry_rows",
+    "RuleContract",
+    "RULE_CONTRACTS",
+    "REQUIRED_CONTRACT_STATES",
+    "contract_coverage",
 ]

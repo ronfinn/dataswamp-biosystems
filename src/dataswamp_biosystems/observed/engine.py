@@ -1,8 +1,11 @@
 """The deterministic imperfection engine.
 
 Given a truth graph, the canonical config, a profile, and a defect seed, this
-derives an observed graph plus the four ledgers (defect instances, mutations,
-expected findings, expected remediations). It never mutates the truth graph: all
+derives an observed graph plus the six ledgers (defect instances, mutations,
+expected findings, expected remediations, controls, rule scope). Every emitted
+record carries its rule's remediation contract — availability, approval policy
+and approver — so remediation capability and authorisation stay independently
+scorable. It never mutates the truth graph: all
 edits land on the :class:`~dataswamp_biosystems.observed.index.GraphIndex`
 working copy (independent JSON dicts).
 
@@ -20,12 +23,15 @@ from typing import Any
 from dataswamp_biosystems.company.config import CanonicalConfig
 from dataswamp_biosystems.observed.defects import (
     DEFECTS,
+    REQUIRED_CONTRACT_STATES,
     DefectDef,
     FieldChange,
     MutationContext,
+    contract_coverage,
     defects_in_order,
 )
 from dataswamp_biosystems.observed.entities import (
+    NO_REMEDIATION_ACTION,
     ChangeOp,
     ControlReason,
     ControlRecord,
@@ -42,8 +48,8 @@ from dataswamp_biosystems.truth import ids
 from dataswamp_biosystems.truth.graph import TruthGraph
 from dataswamp_biosystems.truth.rng import sub_rng
 
-OBSERVED_GENERATOR_VERSION = "1.1.0"
-OBSERVED_SCHEMA_VERSION = 2
+OBSERVED_GENERATOR_VERSION = "1.2.0"
+OBSERVED_SCHEMA_VERSION = 3
 
 
 def _symmetric_incompatibilities() -> dict[str, set[str]]:
@@ -156,7 +162,7 @@ def _build_controls(
                 in (ControlReason.RESERVED_ASSET, ControlReason.MEMBER_OF_RESERVED_ASSET),
                 parent_asset_id=parent_asset_id,
                 modality=str(truth_record.get("modality", "")),
-                modality_group=_modality_group_of(index, entity_id),
+                modality_group=modality_group_of(index, entity_id),
                 eligible_rule_count=eligible_rule_count.get(entity_id, 0),
                 profile=meta.profile,
                 defect_seed=meta.defect_seed,
@@ -273,6 +279,9 @@ def _emit(
         profile=profile,
         defect_seed=defect_seed,
         truth_seed=truth_seed,
+        remediation_availability=definition.remediation_availability,
+        approval_policy=definition.approval_policy,
+        approver_role=definition.approver_role,
         mutation_ids=[m.id for m in mutations],
         finding_id=finding_id,
         remediation_ids=[remediation_id],
@@ -290,6 +299,8 @@ def _emit(
         observable_evidence=definition.expected_evidence,
         expected_message_semantics=definition.expected_finding.format(id=entity_id),
         detection_locator=f"{primary_shard}:{entity_id}",
+        remediation_available=definition.remediation_availability,
+        non_remediable_reason=definition.non_remediable_reason,
         remediation_id=remediation_id,
         match_fields={
             "rule_id": definition.rule_id,
@@ -298,17 +309,32 @@ def _emit(
             "entity_id": entity_id,
             "entity_kind": entity_kind,
             "target_fields": target_fields,
+            "remediation_available": definition.remediation_availability.value,
+            "approval_policy": definition.approval_policy.value,
         },
     )
+    # A non-remediable finding still gets exactly one record, but it is an
+    # explicit *no-action decision* rather than a hollow fix: no action string,
+    # no recommended value, and a stated reason. An agent that proposes a repair
+    # here is wrong; one that abstains is right.
+    remediable = definition.is_remediable
     remediation = ExpectedRemediation(
         id=remediation_id,
         finding_id=finding_id,
         instance_id=instance_id,
         rule_id=definition.rule_id,
-        action=definition.remediation_action,
+        action=definition.remediation_action if remediable else NO_REMEDIATION_ACTION,
+        action_class=definition.action_class,
         target=f"{primary_shard}/{entity_id}",
-        recommended_value=definition.remediation_recommended,
+        recommended_value=definition.remediation_recommended if remediable else None,
+        # The truth reference is retained even when nothing can be remediated:
+        # it is the scoring ground truth, not a repair instruction.
         truth_reference={(c.field or c.shard): c.before for c in changes},
+        availability=definition.remediation_availability,
+        approval_policy=definition.approval_policy,
+        approver_role=definition.approver_role,
+        approval_evidence=definition.approval_evidence,
+        non_remediable_reason=definition.non_remediable_reason,
         auto_fixable=definition.auto_fixable,
         requires_human_approval=definition.requires_human_approval,
         reversible=definition.reversible,
@@ -330,6 +356,7 @@ def _build_summary(
     controls: set[str],
     control_records: list[ControlRecord],
     instances: list[DefectInstance],
+    mutations: list[MutationRecord],
     ledger: _Ledger,
 ) -> dict[str, Any]:
     by_category: dict[str, int] = {}
@@ -337,13 +364,24 @@ def _build_summary(
     by_rule: dict[str, int] = {}
     by_modality_group: dict[str, int] = {}
     by_entity_kind: dict[str, int] = {}
+    by_contract_state: dict[str, int] = {}
+    by_action_class: dict[str, int] = {}
+    by_mutation_op: dict[str, int] = {}
     affected_entities: set[str] = set()
+    for mutation in mutations:
+        op = mutation.operation.value
+        by_mutation_op[op] = by_mutation_op.get(op, 0) + 1
     for instance in instances:
+        definition = DEFECTS[instance.rule_id]
+        state = definition.contract_state
+        by_contract_state[state] = by_contract_state.get(state, 0) + 1
+        action = definition.action_class
+        by_action_class[action] = by_action_class.get(action, 0) + 1
         by_category[instance.category.value] = by_category.get(instance.category.value, 0) + 1
         by_severity[instance.severity.value] = by_severity.get(instance.severity.value, 0) + 1
         by_rule[instance.rule_id] = by_rule.get(instance.rule_id, 0) + 1
         by_entity_kind[instance.entity_kind] = by_entity_kind.get(instance.entity_kind, 0) + 1
-        group = _modality_group_of(index, instance.entity_id)
+        group = modality_group_of(index, instance.entity_id)
         by_modality_group[group] = by_modality_group.get(group, 0) + 1
         affected_entities.add(instance.entity_id)
     affected_assets = {e for e in affected_entities if e in index.asset_shard}
@@ -382,10 +420,23 @@ def _build_summary(
         "by_rule": dict(sorted(by_rule.items())),
         "by_modality_group": dict(sorted(by_modality_group.items())),
         "by_entity_kind": dict(sorted(by_entity_kind.items())),
+        # Contract coverage as structured data, so a gap is visible rather than
+        # assumed. ``by_contract_state`` counts what this profile actually fired;
+        # ``contract_state_coverage`` records which rules the catalogue declares
+        # for each state, including states this profile did not reach.
+        "by_contract_state": dict(sorted(by_contract_state.items())),
+        "by_action_class": dict(sorted(by_action_class.items())),
+        "by_mutation_op": dict(sorted(by_mutation_op.items())),
+        "contract_state_coverage": {
+            state: len(rule_ids) for state, rule_ids in contract_coverage().items()
+        },
+        "uncovered_contract_states": [
+            state for state in REQUIRED_CONTRACT_STATES if not by_contract_state.get(state)
+        ],
     }
 
 
-def _modality_group_of(index: GraphIndex, entity_id: str) -> str:
+def modality_group_of(index: GraphIndex, entity_id: str) -> str:
     """Return the modality group of an affected entity (via its dataset for files)."""
     shard = _primary_shard(index, entity_id)
     record = index.truth_record(shard, entity_id)
@@ -509,7 +560,7 @@ def generate_observed(
         index, controls, meta, spec.control_fraction, instances, mutations, eligible_rule_count
     )
     observed_graph = _observed_graph(meta, index)
-    summary = _build_summary(meta, index, controls, control_records, instances, ledger)
+    summary = _build_summary(meta, index, controls, control_records, instances, mutations, ledger)
     return ObservedResult(
         meta=meta,
         observed_graph=observed_graph,
@@ -528,4 +579,5 @@ __all__ = [
     "OBSERVED_SCHEMA_VERSION",
     "ObservedResult",
     "generate_observed",
+    "modality_group_of",
 ]

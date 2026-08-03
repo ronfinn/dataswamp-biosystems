@@ -24,6 +24,7 @@ class ObservedIssueKind(StrEnum):
     FIDELITY = "fidelity"
     CONTAMINATION = "contamination"
     CONTROL_PARTITION = "control-partition"
+    RULE_CONTRACT = "rule-contract"
     INCOMPATIBILITY = "incompatibility"
     CONSISTENCY = "consistency"
     PROFILE_BOUNDS = "profile-bounds"
