@@ -29,5 +29,7 @@ dist/
 .idea/
 .DS_Store
 
-# Generated synthetic outputs (future milestones) — never tracked
+# Generated synthetic outputs — never tracked. `dist/` (bundles) is covered by
+# the build-artifacts rule above; `export/` is the default adapter output.
 generated/
+export/
