@@ -18,11 +18,13 @@ import pytest
 from dataswamp_biosystems.bundle import Layer, build_bundle
 from dataswamp_biosystems.canonical import (
     CANONICAL_DEFECT_SEED,
+    CANONICAL_TRUTH_SEED,
     ESTATE_DIRNAME,
     OBSERVED_DIRNAME,
     TRUTH_DIRNAME,
     generate_canonical_from_config_dir,
 )
+from dataswamp_biosystems.company import load_config
 from dataswamp_biosystems.evaluation import (
     evaluate,
     load_ground_truth,
@@ -30,6 +32,10 @@ from dataswamp_biosystems.evaluation import (
     prediction_digest,
     write_evaluation,
 )
+from dataswamp_biosystems.observed.engine import generate_observed
+from dataswamp_biosystems.observed.profiles import ObservedProfile
+from dataswamp_biosystems.observed.writer import write_observed
+from dataswamp_biosystems.truth import generate_truth_graph, load_generation_plan
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_DIR = REPO_ROOT / "config"
@@ -110,3 +116,20 @@ def mutable_bundle(full_bundle_dir: Path, tmp_path: Path) -> Path:
 
 
 CANONICAL_SEED = CANONICAL_DEFECT_SEED
+
+
+@pytest.fixture(scope="session")
+def real_observed_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The canonical scenario's observed state, generated and written once.
+
+    Shared by the evaluation tests and the example-submission tests: both score
+    against exactly the ground truth the benchmark publishes, and generating it
+    per-module would be pure waste.
+    """
+    config = load_config(CONFIG_DIR)
+    plan = load_generation_plan(CONFIG_DIR)
+    graph = generate_truth_graph(config, plan, CANONICAL_TRUTH_SEED)
+    result = generate_observed(graph, config, ObservedProfile.DEMO, CANONICAL_DEFECT_SEED)
+    target = tmp_path_factory.mktemp("real-observed") / "observed"
+    write_observed(result, target)
+    return target

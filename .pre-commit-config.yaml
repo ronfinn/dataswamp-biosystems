@@ -9,10 +9,13 @@ repos:
       - id: check-added-large-files
       - id: check-merge-conflict
 
+  # Pinned to the same Ruff the dev dependency group resolves, so the hook and
+  # `uv run ruff format --check .` cannot disagree about a file — a contributor
+  # following CONTRIBUTING.md must not meet two gates with two opinions.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.6
+    rev: v0.15.22
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [--fix]
       - id: ruff-format
 

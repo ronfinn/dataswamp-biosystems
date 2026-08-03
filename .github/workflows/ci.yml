@@ -103,10 +103,26 @@ jobs:
       - name: Build the distribution
         run: uv build
 
+      # Deliberately run from `/tmp`, outside the checkout: an installed user has
+      # no `config/` of their own, so this is what proves the packaged
+      # configuration and examples actually ship and resolve. Running it from the
+      # repository root would pass even if the wheel carried neither.
       - name: Install the built wheel and smoke-test the CLI
         run: |
           uv venv --python ${{ matrix.python }} /tmp/wheel-env
           VIRTUAL_ENV=/tmp/wheel-env uv pip install --resolution lowest-direct dist/*.whl
+          cd /tmp
           /tmp/wheel-env/bin/dataswamp version
           /tmp/wheel-env/bin/dataswamp validate-config
           /tmp/wheel-env/bin/dataswamp validate-defects
+
+      # The documented quick start, exactly as the README gives it, from an
+      # installed package with no checkout in sight — then again, to prove the
+      # advertised determinism rather than merely asserting it.
+      - name: Run the documented quick start and check it is deterministic
+        run: |
+          cd /tmp
+          /tmp/wheel-env/bin/dataswamp demo --output-dir /tmp/dsw-demo
+          /tmp/wheel-env/bin/dataswamp demo --output-dir /tmp/dsw-demo-again
+          diff -r /tmp/dsw-demo /tmp/dsw-demo-again
+          /tmp/wheel-env/bin/dataswamp verify-bundle /tmp/dsw-demo/bundle

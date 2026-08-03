@@ -1,5 +1,13 @@
 # Progress
 
+> **Superseded by [CHANGELOG.md](../CHANGELOG.md).** From the v0.1 release
+> candidate onward, completed work is recorded there in a standard changelog
+> format. This file is kept as the historical build log for the milestones up to
+> and including the imperfection engine; the evaluation engine, benchmark
+> bundles, the DataHub adapter and the release-readiness work are described in
+> the changelog rather than duplicated here. Two running logs would only drift
+> apart.
+
 A running log of completed milestones. Newest first.
 
 ## Imperfection engine (observed state) — 2026-07-18

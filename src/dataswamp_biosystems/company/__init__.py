@@ -21,7 +21,14 @@ from dataswamp_biosystems.company.errors import (
     ConfigValidationError,
     IssueKind,
 )
-from dataswamp_biosystems.company.loader import DEFAULT_CONFIG_DIR, load_config
+from dataswamp_biosystems.company.loader import (
+    DEFAULT_CONFIG_DIR,
+    PACKAGED_CONFIG_DIR,
+    SOURCE_CONFIG_DIR,
+    is_config_dir,
+    load_config,
+    resolve_config_dir,
+)
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -33,5 +40,9 @@ __all__ = [
     "ConfigValidationError",
     "IssueKind",
     "DEFAULT_CONFIG_DIR",
+    "PACKAGED_CONFIG_DIR",
+    "SOURCE_CONFIG_DIR",
+    "is_config_dir",
+    "resolve_config_dir",
     "load_config",
 ]
