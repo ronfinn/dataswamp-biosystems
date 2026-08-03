@@ -24,6 +24,15 @@ from dataswamp_biosystems.estate import (
     validate_estate,
     write_estate,
 )
+from dataswamp_biosystems.evaluation import (
+    EvaluationConfigError,
+    PredictionValidationError,
+    evaluate,
+    load_ground_truth,
+    load_predictions,
+    prediction_digest,
+    write_evaluation,
+)
 from dataswamp_biosystems.observed import (
     DEFECTS,
     ObservedConfigError,
@@ -66,6 +75,17 @@ app = typer.Typer(help="Data Swamp Biosystems command-line interface.")
 DEFAULT_TRUTH_DIR = Path("generated") / "truth"
 DEFAULT_ESTATE_DIR = Path("generated") / "estate"
 DEFAULT_OBSERVED_DIR = Path("generated") / "observed"
+DEFAULT_EVALUATION_DIR = Path("generated") / "evaluation"
+
+# The observed state is a required *input* to evaluation, so it joins the config
+# and truth directories as a protected path — an evaluation run must never be
+# able to replace the ground truth it is scored against.
+OBSERVED_INPUT_LABEL = "observed ground-truth directory"
+# The prediction *file* is protected, not its parent directory: protecting the
+# parent would reject every output under the repository whenever a submission
+# sits at the repository root, while protecting the file still rejects an output
+# directory that is, or contains, the submission being scored.
+PREDICTIONS_INPUT_LABEL = "prediction file"
 
 
 def _load_config_or_exit(config_dir: Path) -> CanonicalConfig:
@@ -587,6 +607,106 @@ def validate_observed(
     typer.echo(
         f"Observed state at {observed_dir} is valid "
         f"(profile {meta['profile']}, defect seed {meta['defect_seed']})."
+    )
+
+
+@app.command(name="evaluate")
+def evaluate_predictions(
+    predictions: Annotated[
+        Path,
+        typer.Option("--predictions", help="JSONL file of agent predictions to score."),
+    ],
+    observed_dir: Annotated[
+        Path,
+        typer.Option("--observed-dir", help="Directory containing the observed ground truth."),
+    ] = DEFAULT_OBSERVED_DIR,
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Directory to write the evaluation reports into."),
+    ] = DEFAULT_EVALUATION_DIR,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite a non-empty output directory."),
+    ] = False,
+) -> None:
+    """Score a prediction file against an emitted observed state.
+
+    Ground truth and the submission are both fully validated *before* anything is
+    written, so an invalid submission never replaces a previous evaluation.
+
+    ``output_dir`` is replaced wholesale, so it may not be, contain, or sit
+    inside the configuration directory, the observed ground-truth directory, or
+    the directory holding the prediction file — ``--force`` overrides only the
+    non-empty check, never path safety.
+
+    Exit codes: 0 = evaluated, 1 = the submission violates the prediction
+    contract, 2 = ground truth or predictions could not be read, or an
+    unsafe/non-empty output directory was given.
+    """
+    _prepare_output_dir_or_exit(
+        output_dir,
+        {
+            CONFIG_INPUT_LABEL: DEFAULT_CONFIG_DIR,
+            OBSERVED_INPUT_LABEL: observed_dir,
+            PREDICTIONS_INPUT_LABEL: predictions,
+        },
+        force=force,
+    )
+
+    try:
+        truth = load_ground_truth(observed_dir)
+    except EvaluationConfigError as exc:
+        typer.echo(f"Could not read ground truth: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    try:
+        submitted, raw = load_predictions(
+            predictions,
+            known_entities=truth.known_entities,
+            known_rules=truth.rule_ids,
+        )
+    except EvaluationConfigError as exc:
+        typer.echo(f"Could not read predictions: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except PredictionValidationError as exc:
+        typer.echo(f"Predictions are invalid — {len(exc.issues)} issue(s):", err=True)
+        for issue in exc.issues:
+            typer.echo(f"  - {issue.render()}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    result = evaluate(truth, submitted, prediction_digest=prediction_digest(raw))
+    summary = write_evaluation(result, output_dir)
+
+    micro = summary["findings"]["overall_micro"]
+    counts = micro["counts"]
+    metrics = micro["metrics"]
+
+    def show(name: str) -> str:
+        value = metrics[name]["value"]
+        return "n/a" if value is None else f"{value:.4f}"
+
+    typer.echo(
+        f"Evaluation written to {output_dir} "
+        f"(profile {summary['benchmark']['profile']}, "
+        f"{summary['submission']['predictions']} prediction(s))."
+    )
+    typer.echo(
+        f"  pairs: {summary['universe']['evaluated_pairs']} "
+        f"({counts['positives']} positive, {counts['negatives']} negative)"
+    )
+    typer.echo(f"  TP {counts['tp']}  FP {counts['fp']}  FN {counts['fn']}  TN {counts['tn']}")
+    typer.echo(
+        f"  precision {show('precision')}  recall {show('recall')}  "
+        f"specificity {show('specificity')}  F1 {show('f1')}"
+    )
+    typer.echo(
+        f"  reserved-control false positives: {summary['reserved_controls']['false_positives']}"
+    )
+    typer.echo(f"  out-of-scope false positives: {summary['out_of_scope']['false_positives']}")
+    typer.echo(
+        f"  remediations: {summary['remediation']['counts']['submitted']} submitted, "
+        f"{summary['remediation']['counts']['fully_correct']} fully correct, "
+        f"{summary['remediation']['counts']['unsafe_actions']} unsafe"
     )
 
 
