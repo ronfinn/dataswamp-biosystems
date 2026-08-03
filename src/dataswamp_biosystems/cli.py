@@ -24,12 +24,19 @@ from dataswamp_biosystems.bundle import (
     build_bundle,
     verify_bundle,
 )
+from dataswamp_biosystems.canonical import (
+    ESTATE_DIRNAME,
+    OBSERVED_DIRNAME,
+    TRUTH_DIRNAME,
+    generate_canonical,
+)
 from dataswamp_biosystems.company import (
     DEFAULT_CONFIG_DIR,
     CanonicalConfig,
     ConfigLoadError,
     ConfigValidationError,
     load_config,
+    resolve_config_dir,
 )
 from dataswamp_biosystems.estate import (
     EstateConfigError,
@@ -48,6 +55,7 @@ from dataswamp_biosystems.evaluation import (
     prediction_digest,
     write_evaluation,
 )
+from dataswamp_biosystems.examples import example_path
 from dataswamp_biosystems.observed import (
     DEFECTS,
     ObservedConfigError,
@@ -104,6 +112,10 @@ PREDICTIONS_INPUT_LABEL = "prediction file"
 
 DEFAULT_BUNDLE_DIR = Path("dist") / "dataswamp-benchmark"
 DEFAULT_DATAHUB_EXPORT_DIR = Path("export") / "datahub"
+
+# The demo writes every layer, the bundle and the export beneath one directory,
+# so a new user has a single thing to look at — and a single thing to delete.
+DEFAULT_DEMO_DIR = Path("dataswamp-demo")
 
 # Every layer directory a bundle reads is a protected input for the build, and
 # the bundle itself is a protected input for an adapter export: neither command
@@ -206,6 +218,7 @@ def validate_config(
     Exit codes: 0 = valid, 1 = validation issues, 2 = configuration could not
     be loaded (missing file or malformed YAML).
     """
+    config_dir = resolve_config_dir(config_dir)
     config = _load_config_or_exit(config_dir)
 
     typer.echo(f"Configuration is valid ({config.company.display_name}).")
@@ -243,6 +256,7 @@ def generate_truth(
     2 = a required file could not be loaded, or an unsafe/non-empty output
     directory was given.
     """
+    config_dir = resolve_config_dir(config_dir)
     config = _load_config_or_exit(config_dir)
     plan = _load_plan_or_exit(config_dir, config)
     resolved_seed = seed if seed is not None else config.generation.seed
@@ -298,6 +312,7 @@ def validate_truth(
         typer.echo(f"Could not read manifest {manifest_path}: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
+    config_dir = resolve_config_dir(config_dir)
     config = _load_config_or_exit(config_dir)
     plan = _load_plan_or_exit(config_dir, config)
     graph = generate_truth_graph(config, plan, seed)
@@ -360,6 +375,7 @@ def generate_files(
     (path/budget), 2 = a required file could not be loaded, or an unsafe/non-empty
     output directory was given.
     """
+    config_dir = resolve_config_dir(config_dir)
     config = _load_config_or_exit(config_dir)
     plan = _load_plan_or_exit(config_dir, config)
     resolved_seed = seed if seed is not None else config.generation.seed
@@ -425,6 +441,7 @@ def validate_files(
         typer.echo(f"Could not read estate at {estate_dir}: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
+    config_dir = resolve_config_dir(config_dir)
     config = _load_config_or_exit(config_dir)
     plan = _load_plan_or_exit(config_dir, config)
     graph = generate_truth_graph(config, plan, truth_seed)
@@ -551,6 +568,7 @@ def inject_defects(
     or a truth-immutability breach, 2 = the truth graph could not be read, or an
     unsafe/non-empty output directory was given.
     """
+    config_dir = resolve_config_dir(config_dir)
     config = _load_config_or_exit(config_dir)
     plan = _load_plan_or_exit(config_dir, config)
     resolved_seed = seed if seed is not None else config.generation.seed
@@ -622,6 +640,7 @@ def validate_observed(
         typer.echo(f"Could not read observed state at {observed_dir}: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
+    config_dir = resolve_config_dir(config_dir)
     config = _load_config_or_exit(config_dir)
     plan = _load_plan_or_exit(config_dir, config)
     graph = generate_truth_graph(config, plan, truth_seed)
@@ -964,6 +983,139 @@ def export_datahub_command(
     typer.echo(f"  aspects: {counts['aspects']}")
     for entity_type, count in counts["by_entity_type"].items():
         typer.echo(f"    {entity_type}: {count}")
+
+
+@app.command(name="demo")
+def demo(
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Directory to write the whole demo into."),
+    ] = DEFAULT_DEMO_DIR,
+    predictions: Annotated[
+        Path | None,
+        typer.Option(
+            "--predictions",
+            help="Submission to score; defaults to the packaged 'partial' example.",
+        ),
+    ] = None,
+    config_dir: Annotated[
+        Path,
+        typer.Option("--config-dir", help="Directory containing the canonical configuration."),
+    ] = DEFAULT_CONFIG_DIR,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite a non-empty output directory."),
+    ] = False,
+) -> None:
+    """Run the whole benchmark workflow end to end into one directory.
+
+    Generates the canonical scenario (truth graph, file estate, observed state),
+    scores a prediction file against it, packages and verifies a portable
+    bundle, and emits the observed DataHub metadata — the same code paths the
+    individual commands use, in the order the documentation describes them.
+
+    Everything is deterministic and offline: no seed, credential, network access
+    or DataHub server is involved, and re-running into a fresh directory
+    reproduces identical benchmark bytes.
+
+    Exit codes: 0 = complete, 1 = a generated or emitted artefact failed its own
+    validation, 2 = an input could not be read, or an unsafe/non-empty output
+    directory was given.
+    """
+    config_dir = resolve_config_dir(config_dir)
+    submission = predictions if predictions is not None else example_path()
+
+    _prepare_output_dir_or_exit(
+        output_dir,
+        {CONFIG_INPUT_LABEL: config_dir, PREDICTIONS_INPUT_LABEL: submission},
+        force=force,
+    )
+    if not submission.is_file():
+        typer.echo(f"Could not read predictions: no such file: {submission}", err=True)
+        raise typer.Exit(code=2)
+
+    config = _load_config_or_exit(config_dir)
+    plan = _load_plan_or_exit(config_dir, config)
+
+    generated = output_dir / "generated"
+    truth_dir = generated / TRUTH_DIRNAME
+    estate_dir = generated / ESTATE_DIRNAME
+    observed_dir = generated / OBSERVED_DIRNAME
+    evaluation_dir = generated / "evaluation"
+    bundle_dir = output_dir / "bundle"
+    datahub_dir = output_dir / "export" / "datahub"
+
+    typer.echo(f"[1/5] Generating the canonical scenario into {generated} ...")
+    generate_canonical(generated, config, plan)
+
+    typer.echo(f"[2/5] Scoring {submission} ...")
+    try:
+        truth = load_ground_truth(observed_dir)
+        submitted, raw = load_predictions(
+            submission, known_entities=truth.known_entities, known_rules=truth.rule_ids
+        )
+    except EvaluationConfigError as exc:
+        typer.echo(f"Could not read the submission: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except PredictionValidationError as exc:
+        typer.echo(f"Predictions are invalid — {len(exc.issues)} issue(s):", err=True)
+        for issue in exc.issues:
+            typer.echo(f"  - {issue.render()}", err=True)
+        raise typer.Exit(code=1) from exc
+    result = evaluate(truth, submitted, prediction_digest=prediction_digest(raw))
+    summary = write_evaluation(result, evaluation_dir)
+
+    typer.echo(f"[3/5] Packaging a bundle into {bundle_dir} ...")
+    build_bundle(
+        bundle_dir,
+        sources={
+            Layer.TRUTH: truth_dir,
+            Layer.ESTATE: estate_dir,
+            Layer.OBSERVED: observed_dir,
+            Layer.EVALUATION: evaluation_dir,
+        },
+    )
+
+    typer.echo("[4/5] Verifying the bundle ...")
+    try:
+        manifest = verify_bundle(bundle_dir, strict=True)
+    except BundleValidationError as exc:
+        typer.echo(f"Bundle is invalid — {len(exc.issues)} issue(s):", err=True)
+        for bundle_issue in exc.issues:
+            typer.echo(f"  - {bundle_issue.render()}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"[5/5] Exporting observed DataHub metadata into {datahub_dir} ...")
+    export = export_datahub(bundle_dir, datahub_dir, mode=ExportMode.OBSERVED)
+
+    micro = summary["findings"]["overall_micro"]
+    counts = micro["counts"]
+
+    def show(name: str) -> str:
+        value = micro["metrics"][name]["value"]
+        return "n/a" if value is None else f"{value:.4f}"
+
+    typer.echo("")
+    typer.echo("Demo complete. Output:")
+    typer.echo(f"  truth graph        {truth_dir}")
+    typer.echo(f"  file estate        {estate_dir}")
+    typer.echo(f"  observed state     {observed_dir}")
+    typer.echo(f"  evaluation report  {evaluation_dir / 'evaluation-report.md'}")
+    typer.echo(f"  benchmark bundle   {bundle_dir}")
+    typer.echo(f"  DataHub metadata   {datahub_dir}")
+    typer.echo("")
+    typer.echo(f"Scored submission: {submission}")
+    typer.echo(f"  TP {counts['tp']}  FP {counts['fp']}  FN {counts['fn']}  TN {counts['tn']}")
+    typer.echo(
+        f"  precision {show('precision')}  recall {show('recall')}  "
+        f"specificity {show('specificity')}  F1 {show('f1')}"
+    )
+    typer.echo(
+        f"  reserved-control false positives: {summary['reserved_controls']['false_positives']}"
+    )
+    typer.echo(f"  unsafe remediations: {summary['remediation']['counts']['unsafe_actions']}")
+    typer.echo(f"Bundle fingerprint: {manifest.bundle_fingerprint}")
+    typer.echo(f"DataHub entities:   {export['counts']['entities']}")
 
 
 def main() -> None:

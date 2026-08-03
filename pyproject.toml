@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dataswamp-biosystems"
-version = "0.1.0"
+version = "0.1.0rc1"
 description = "An open, entirely fictional synthetic oncology data estate and governance benchmark. No real patient data is used."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -44,6 +44,33 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dataswamp_biosystems"]
+
+# The canonical configuration and the example submissions ship *inside* the
+# distribution, so `pip install dataswamp-biosystems` is enough to generate a
+# benchmark — a source checkout is a contributor convenience, not a requirement.
+# Both are copied verbatim from the tracked trees, so the packaged copy and the
+# checkout copy generate identical bytes.
+[tool.hatch.build.targets.wheel.force-include]
+"config" = "dataswamp_biosystems/_config"
+"examples/predictions" = "dataswamp_biosystems/_examples/predictions"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src",
+    "config",
+    "examples",
+    "tests",
+    "docs",
+    "scripts",
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE",
+    "pyproject.toml",
+    "uv.lock",
+    ".pre-commit-config.yaml",
+]
 
 [tool.ruff]
 line-length = 100

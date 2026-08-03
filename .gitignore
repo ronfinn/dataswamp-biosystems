@@ -33,3 +33,6 @@ dist/
 # the build-artifacts rule above; `export/` is the default adapter output.
 generated/
 export/
+
+# The quick start's default output directory (`dataswamp demo`).
+dataswamp-demo/
