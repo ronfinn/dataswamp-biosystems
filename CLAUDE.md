@@ -53,10 +53,14 @@ directory packaged from emitted layer output by
 `src/dataswamp_biosystems/bundle/` via `dataswamp build-bundle`, checked by
 `dataswamp verify-bundle`, and read through the stable streaming `BundleReader`),
 and the **DataHub adapter** (a deterministic Metadata Change Proposal emitter in
-`src/dataswamp_biosystems/adapters/datahub/` via `dataswamp export-datahub`). See
+`src/dataswamp_biosystems/adapters/datahub/` via `dataswamp export-datahub`), and
+the **release surface** (a `dataswamp demo` command running the whole workflow
+into one directory, committed example submissions under `examples/predictions/`,
+and the canonical `config/` tree plus those examples shipped *inside* the
+distribution so an installed package needs no checkout). See
 `docs/domain-model.md`, `docs/truth-graph-schema.md`, `docs/file-generation.md`,
-`docs/observed-state.md`, `docs/evaluation.md`, `docs/bundles.md`, and
-`docs/datahub.md`.
+`docs/observed-state.md`, `docs/evaluation.md`, `docs/bundles.md`,
+`docs/datahub.md`, and `docs/public-api.md`.
 
 All five generation layers, and the bundle packager, are deliberately
 catalogue-independent. The observed layer never mutates the truth graph, the
@@ -88,6 +92,7 @@ uv run dataswamp evaluate --observed-dir generated/observed --predictions predic
 uv run dataswamp build-bundle --output-dir dist/benchmark --release v0.1.0  # package a portable bundle
 uv run dataswamp verify-bundle dist/benchmark      # verify a bundle end to end
 uv run dataswamp export-datahub --bundle dist/benchmark --mode observed --output-dir export/datahub
+uv run dataswamp demo --output-dir ./dataswamp-demo  # the whole workflow, end to end
 uv run pytest                  # run tests
 uv run ruff check .            # lint
 uv run ruff format --check .   # format check
@@ -174,6 +179,12 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     marked as such in tags, custom properties and the export manifest. Emits
     schemas directly rather than depending on `acryl-datahub`. See
     `docs/datahub.md`.
+  - `examples.py` — resolves the committed example submissions, preferring a
+    checkout's `examples/predictions/`, then the copy force-included into the
+    distribution, then the source tree (for an editable install run from
+    elsewhere). `company/loader.py::resolve_config_dir` does the same for
+    `config/`. Only the *default* falls back; an explicit `--config-dir` that
+    does not exist must still fail loudly.
   - `provenance.py` — the shared environment/scenario provenance object written
     into every generated output directory (no wall-clock values; excluded from
     the golden digests by design).
@@ -189,7 +200,13 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
   packaging, verification and tamper detection, the reader API, URN determinism,
   the DataHub mapping (pinned by committed fixtures under
   `tests/adapters/fixtures/`), the privilege boundary, and CLI commands. Shared
-  benchmark fixtures live in `tests/conftest.py`. The DataHub fixtures are never
+  benchmark fixtures live in `tests/conftest.py` (including `real_observed_dir`,
+the canonical observed state, generated once per session).
+`tests/test_release_surface.py`, `tests/test_examples.py` and
+`tests/test_distribution.py` cover the public release surface: the documented
+commands, the demo's output and determinism, the example submissions' pinned
+scores, the stable public imports, and what the built wheel must and must not
+contain. The DataHub fixtures are never
   rewritten by `pytest` — regenerate them deliberately with
   `uv run --frozen python scripts/update_datahub_fixtures.py --confirm --reason ...`.
 
@@ -281,3 +298,11 @@ referential integrity, not just happy-path execution.
   scopes data generation.
 - Never add placeholder packages or modules for capabilities that haven't
   been designed yet.
+- **Never present generated-benchmark-data licensing as resolved.** It is an
+  open decision recorded in `docs/generated-data-licensing-decision.md`; bundles
+  declare `generated_data_license: not-separately-defined`. Do not select a
+  licence, draft licence wording, or offer a legal conclusion.
+- **Never change a committed example submission by hand.** Regenerate with
+  `scripts/update_example_predictions.py --confirm` and update the score tables
+  in `README.md` and `examples/README.md` — they are pinned by
+  `tests/test_examples.py` because they are published results.
