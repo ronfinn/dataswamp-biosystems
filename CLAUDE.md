@@ -48,12 +48,23 @@ the registry and `dataswamp validate-observed` to re-check output), and the
 `src/dataswamp_biosystems/evaluation/` that consumes an emitted observed state as
 ground truth and a versioned JSONL prediction file, emitting confusion-matrix and
 remediation reports under git-ignored `generated/evaluation/` via `dataswamp
-evaluate`). See `docs/domain-model.md`, `docs/truth-graph-schema.md`,
-`docs/file-generation.md`, `docs/observed-state.md`, and `docs/evaluation.md`.
+evaluate`), the **benchmark bundle** (a versioned, checksummed, portable
+directory packaged from emitted layer output by
+`src/dataswamp_biosystems/bundle/` via `dataswamp build-bundle`, checked by
+`dataswamp verify-bundle`, and read through the stable streaming `BundleReader`),
+and the **DataHub adapter** (a deterministic Metadata Change Proposal emitter in
+`src/dataswamp_biosystems/adapters/datahub/` via `dataswamp export-datahub`). See
+`docs/domain-model.md`, `docs/truth-graph-schema.md`, `docs/file-generation.md`,
+`docs/observed-state.md`, `docs/evaluation.md`, `docs/bundles.md`, and
+`docs/datahub.md`.
 
-All five layers are deliberately catalogue-independent. The observed layer never
-mutates the truth graph, and the evaluation layer mutates nothing at all. There
-is no scenario-pack layer, no assessment agents, and no DataHub integration yet.
+All five generation layers, and the bundle packager, are deliberately
+catalogue-independent. The observed layer never mutates the truth graph, the
+evaluation layer mutates nothing at all, and the bundle layer copies emitted
+bytes without reinterpreting them. The DataHub adapter is the *only* place a
+catalogue is named, it consumes bundles rather than generators, and no DataHub
+package is a dependency. There is no scenario-pack layer and no assessment
+agents yet.
 
 Do not implement future-milestone capabilities (below) speculatively. Add
 them only when a task explicitly scopes them, and do not create placeholder
@@ -74,6 +85,9 @@ uv run dataswamp validate-defects  # validate the defect registry
 uv run dataswamp inject-defects --truth generated/truth/truth-graph.json --seed 20260717 --profile demo  # derive observed state
 uv run dataswamp validate-observed  # validate a generated observed state
 uv run dataswamp evaluate --observed-dir generated/observed --predictions predictions.jsonl  # score an agent
+uv run dataswamp build-bundle --output-dir dist/benchmark --release v0.1.0  # package a portable bundle
+uv run dataswamp verify-bundle dist/benchmark      # verify a bundle end to end
+uv run dataswamp export-datahub --bundle dist/benchmark --mode observed --output-dir export/datahub
 uv run pytest                  # run tests
 uv run ruff check .            # lint
 uv run ruff format --check .   # format check
@@ -142,6 +156,24 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     metrics are emitted as `null` with their numerator and denominator, never as
     `0.0`. Depends only on `company/`, `truth/` and `observed/`, never on
     DataHub. See `docs/evaluation.md`.
+  - `bundle/` — the versioned benchmark bundle: layout and path rules, the
+    manifest models, the packager, the total verifier, and the stable streaming
+    `BundleReader`. It is a *packager and reader*, never a generator: it copies
+    emitted bytes verbatim and never regenerates or rewrites a layer. The
+    manifest declares every content file; `checksums.sha256` covers the manifest
+    in turn and is itself verified by exact recomputation. A bundle is a
+    directory, not an archive — deliberately, to avoid archive-header
+    nondeterminism. Depends only on the layers it packages, never on an adapter.
+    See `docs/bundles.md`.
+  - `adapters/datahub/` — the deterministic DataHub adapter: URN construction,
+    the entity/aspect mapping, the file emitter and the offline payload
+    validator. It consumes a verified bundle through `BundleReader` and nothing
+    else. `observed` mode reads `observed-graph.json` *alone* — never the
+    findings, remediations, controls, rule scope or mutation log — which is the
+    structural guarantee against truth leakage; `truth` mode is privileged and
+    marked as such in tags, custom properties and the export manifest. Emits
+    schemas directly rather than depending on `acryl-datahub`. See
+    `docs/datahub.md`.
   - `provenance.py` — the shared environment/scenario provenance object written
     into every generated output directory (no wall-clock values; excluded from
     the golden digests by design).
@@ -153,14 +185,23 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
 - `tests/` — mirrors the package for test discovery; `tests/company/`,
   `tests/truth/`, `tests/estate/`, `tests/observed/`, and `tests/evaluation/`
   cover the model, generators, the defect registry and engine, invariants, file
-  contents, scoring semantics, and CLI commands.
+  contents, and scoring semantics; `tests/bundle/` and `tests/adapters/` cover
+  packaging, verification and tamper detection, the reader API, URN determinism,
+  the DataHub mapping (pinned by committed fixtures under
+  `tests/adapters/fixtures/`), the privilege boundary, and CLI commands. Shared
+  benchmark fixtures live in `tests/conftest.py`. The DataHub fixtures are never
+  rewritten by `pytest` — regenerate them deliberately with
+  `uv run --frozen python scripts/update_datahub_fixtures.py --confirm --reason ...`.
 
 ### Architectural independence from DataHub
 
-DataHub integration is a future, optional milestone. Core generation and
-governance logic must never depend on DataHub types, clients, or schemas.
-Any future DataHub integration should be an adapter layer that consumes this
-project's own manifests/APIs — not the other way around.
+DataHub integration exists only as an *adapter*, and the direction is one-way.
+Core generation and governance logic must never depend on DataHub types, clients
+or schemas. The adapter consumes this project's own emitted artefacts — in
+practice a verified benchmark bundle — and translates them outward; nothing
+consumes the adapter. Adding a catalogue import to a core layer, or a catalogue
+client to the dependencies, is a breaking architectural change and is caught by
+`tests/adapters/test_isolation.py`.
 
 ### Separation of truth and observed state
 
@@ -225,8 +266,17 @@ referential integrity, not just happy-path execution.
   denominator with pairs outside the relevant rule's population — inflated true
   negatives make every agent look good and are the failure mode this benchmark
   exists to avoid.
-- Never add DataHub as a dependency or import until a task explicitly scopes
-  DataHub integration.
+- **Never let a core layer import or name DataHub.** `company/`, `truth/`,
+  `estate/`, `observed/`, `evaluation/` and `bundle/` must stay
+  catalogue-independent; the adapter depends on them, never the reverse.
+  `tests/adapters/test_isolation.py` enforces this.
+- **Never add `acryl-datahub` (or another catalogue client) as a dependency.**
+  The adapter emits documented payload shapes and is testable with no server, no
+  network and no credentials; keep it that way.
+- **Never leak ground truth into an observed DataHub export.** The observed
+  source graph reads the observed graph alone; do not widen it.
+- **Never let the bundle layer regenerate or rewrite what it packages**, and
+  never let an adapter write inside the bundle it reads.
 - Never generate scientific/synthetic datasets until a task explicitly
   scopes data generation.
 - Never add placeholder packages or modules for capabilities that haven't

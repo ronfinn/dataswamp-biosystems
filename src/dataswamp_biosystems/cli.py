@@ -9,6 +9,21 @@ from typing import Annotated
 import typer
 
 from dataswamp_biosystems import __version__
+from dataswamp_biosystems.adapters.datahub import (
+    ExportMode,
+    build_mcps,
+    build_source,
+    export_datahub,
+    validate_export,
+)
+from dataswamp_biosystems.bundle import (
+    BundleConfigError,
+    BundleReader,
+    BundleValidationError,
+    Layer,
+    build_bundle,
+    verify_bundle,
+)
 from dataswamp_biosystems.company import (
     DEFAULT_CONFIG_DIR,
     CanonicalConfig,
@@ -86,6 +101,24 @@ OBSERVED_INPUT_LABEL = "observed ground-truth directory"
 # sits at the repository root, while protecting the file still rejects an output
 # directory that is, or contains, the submission being scored.
 PREDICTIONS_INPUT_LABEL = "prediction file"
+
+DEFAULT_BUNDLE_DIR = Path("dist") / "dataswamp-benchmark"
+DEFAULT_DATAHUB_EXPORT_DIR = Path("export") / "datahub"
+
+# Every layer directory a bundle reads is a protected input for the build, and
+# the bundle itself is a protected input for an adapter export: neither command
+# may replace the artefacts it is packaging or translating.
+ESTATE_INPUT_LABEL = "estate input directory"
+EVALUATION_INPUT_LABEL = "evaluation input directory"
+BUNDLE_INPUT_LABEL = "benchmark bundle directory"
+DATAHUB_EXPORT_INPUT_LABEL = "DataHub export directory"
+
+_LAYER_INPUT_LABELS: dict[Layer, str] = {
+    Layer.TRUTH: TRUTH_INPUT_LABEL,
+    Layer.ESTATE: ESTATE_INPUT_LABEL,
+    Layer.OBSERVED: OBSERVED_INPUT_LABEL,
+    Layer.EVALUATION: EVALUATION_INPUT_LABEL,
+}
 
 
 def _load_config_or_exit(config_dir: Path) -> CanonicalConfig:
@@ -708,6 +741,229 @@ def evaluate_predictions(
         f"{summary['remediation']['counts']['fully_correct']} fully correct, "
         f"{summary['remediation']['counts']['unsafe_actions']} unsafe"
     )
+
+
+@app.command(name="build-bundle")
+def build_bundle_command(
+    truth_dir: Annotated[
+        Path,
+        typer.Option("--truth-dir", help="Directory containing a generated truth graph."),
+    ] = DEFAULT_TRUTH_DIR,
+    estate_dir: Annotated[
+        Path,
+        typer.Option("--estate-dir", help="Directory containing a generated file estate."),
+    ] = DEFAULT_ESTATE_DIR,
+    observed_dir: Annotated[
+        Path,
+        typer.Option("--observed-dir", help="Directory containing a generated observed state."),
+    ] = DEFAULT_OBSERVED_DIR,
+    evaluation_dir: Annotated[
+        Path,
+        typer.Option("--evaluation-dir", help="Directory containing an evaluation report."),
+    ] = DEFAULT_EVALUATION_DIR,
+    layers: Annotated[
+        list[Layer] | None,
+        typer.Option(
+            "--layer",
+            help="Layer to include; repeatable. Defaults to every layer whose directory exists.",
+        ),
+    ] = None,
+    release: Annotated[
+        str | None,
+        typer.Option("--release", help="Benchmark release name; defaults to the package version."),
+    ] = None,
+    datahub_export_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--datahub-export",
+            help="Embed an existing DataHub export under adapters/datahub/ in the bundle.",
+        ),
+    ] = None,
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Directory to write the bundle into."),
+    ] = DEFAULT_BUNDLE_DIR,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite a non-empty output directory."),
+    ] = False,
+) -> None:
+    """Package generated benchmark output into a versioned, checksummed bundle.
+
+    Only the layers actually present are bundled, so a truth-only bundle, a
+    truth+estate bundle, one with the observed ground truth, and a complete
+    benchmark with a worked evaluation are all first-class. A layer may only be
+    included alongside the layers it was derived from.
+
+    ``output_dir`` is replaced wholesale, so it may not be, contain, or sit
+    inside the configuration directory or any bundled layer directory —
+    ``--force`` overrides only the non-empty check, never path safety.
+
+    Exit codes: 0 = written, 2 = an input could not be read or an unsafe/non-empty
+    output directory was given.
+    """
+    candidates: dict[Layer, Path] = {
+        Layer.TRUTH: truth_dir,
+        Layer.ESTATE: estate_dir,
+        Layer.OBSERVED: observed_dir,
+        Layer.EVALUATION: evaluation_dir,
+    }
+    if layers:
+        selected = {layer: candidates[layer] for layer in dict.fromkeys(layers)}
+    else:
+        selected = {layer: path for layer, path in candidates.items() if path.is_dir()}
+    if Layer.TRUTH not in selected:
+        typer.echo(
+            f"A bundle must include the truth layer; no truth graph at {truth_dir}.", err=True
+        )
+        raise typer.Exit(code=2)
+
+    protected = {CONFIG_INPUT_LABEL: DEFAULT_CONFIG_DIR}
+    protected.update({_LAYER_INPUT_LABELS[layer]: path for layer, path in selected.items()})
+    if datahub_export_dir is not None:
+        protected[DATAHUB_EXPORT_INPUT_LABEL] = datahub_export_dir
+    _prepare_output_dir_or_exit(output_dir, protected, force=force)
+
+    try:
+        manifest = build_bundle(
+            output_dir,
+            sources=selected,
+            release=release,
+            adapter_exports=({"datahub": datahub_export_dir} if datahub_export_dir else None),
+        )
+    except BundleConfigError as exc:
+        typer.echo(f"Could not build the bundle: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(
+        f"Bundle written to {output_dir} "
+        f"(release {manifest.benchmark_release}, schema {manifest.bundle_schema_version})."
+    )
+    typer.echo(f"  layers: {', '.join(manifest.layers)}")
+    typer.echo(f"  bundled files: {len(manifest.files)}")
+    for name, count in manifest.counts.items():
+        typer.echo(f"  {name}: {count}")
+    typer.echo(f"  bundle fingerprint: {manifest.bundle_fingerprint}")
+
+
+@app.command(name="verify-bundle")
+def verify_bundle_command(
+    bundle_dir: Annotated[
+        Path,
+        typer.Argument(help="Directory containing a benchmark bundle."),
+    ],
+    strict: Annotated[
+        bool,
+        typer.Option(
+            "--strict/--no-strict",
+            help="Reject files present in the bundle but absent from the manifest.",
+        ),
+    ] = True,
+) -> None:
+    """Verify a benchmark bundle's manifest, checksums, structure and provenance.
+
+    Every invariant is checked and every failure reported, each naming the file
+    and the invariant it broke. Nothing is written and the bundle is never
+    modified.
+
+    Exit codes: 0 = valid, 1 = one or more invariants failed, 2 = the manifest is
+    missing or unreadable.
+    """
+    try:
+        manifest = verify_bundle(bundle_dir, strict=strict)
+    except BundleConfigError as exc:
+        typer.echo(f"Could not read the bundle: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except BundleValidationError as exc:
+        typer.echo(f"Bundle is invalid — {len(exc.issues)} issue(s):", err=True)
+        for issue in exc.issues:
+            typer.echo(f"  - {issue.render()}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(
+        f"Bundle at {bundle_dir} is valid "
+        f"(release {manifest.benchmark_release}, {len(manifest.files)} file(s))."
+    )
+    typer.echo(f"  layers: {', '.join(manifest.layers)}")
+    typer.echo(f"  bundle fingerprint: {manifest.bundle_fingerprint}")
+    typer.echo(f"  environment fingerprint: {manifest.environment_fingerprint}")
+    for name, record in sorted(manifest.adapters.items()):
+        typer.echo(f"  adapter {name}: {record.get('mode', '')} at {record.get('path', '')}")
+
+
+@app.command(name="export-datahub")
+def export_datahub_command(
+    bundle_dir: Annotated[
+        Path,
+        typer.Option("--bundle", help="Directory containing a benchmark bundle."),
+    ] = DEFAULT_BUNDLE_DIR,
+    mode: Annotated[
+        ExportMode,
+        typer.Option(
+            "--mode",
+            help="observed = what an agent under test may see; truth = privileged ground truth.",
+        ),
+    ] = ExportMode.OBSERVED,
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Directory to write the DataHub export into."),
+    ] = DEFAULT_DATAHUB_EXPORT_DIR,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite a non-empty output directory."),
+    ] = False,
+) -> None:
+    """Emit deterministic DataHub metadata from a verified benchmark bundle.
+
+    No DataHub server, token or network access is involved: the command writes
+    the Metadata Change Proposals DataHub's file source ingests, plus a ready-to-
+    run recipe that reads credentials from the environment.
+
+    ``--mode observed`` (the default) is built from the observed catalogue graph
+    alone and contains no ground truth. ``--mode truth`` is a privileged export
+    for benchmark administration: it is tagged and manifested as such.
+
+    ``output_dir`` is replaced wholesale, so it may not be, contain, or sit
+    inside the bundle it reads.
+
+    Exit codes: 0 = written, 1 = the emitted payload failed validation,
+    2 = the bundle could not be read or an unsafe/non-empty output directory was
+    given.
+    """
+    _prepare_output_dir_or_exit(
+        output_dir,
+        {CONFIG_INPUT_LABEL: DEFAULT_CONFIG_DIR, BUNDLE_INPUT_LABEL: bundle_dir},
+        force=force,
+    )
+
+    # Validate the payload before anything is written, so a mapping fault never
+    # replaces a previous, sound export.
+    try:
+        with BundleReader.open(bundle_dir) as reader:
+            problems = validate_export(build_mcps(build_source(reader, mode)), mode)
+    except BundleConfigError as exc:
+        typer.echo(f"Could not read the bundle: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except BundleValidationError as exc:
+        typer.echo(f"Bundle is invalid — {len(exc.issues)} issue(s):", err=True)
+        for issue in exc.issues:
+            typer.echo(f"  - {issue.render()}", err=True)
+        raise typer.Exit(code=2) from exc
+    if problems:
+        typer.echo(f"DataHub export is invalid — {len(problems)} problem(s):", err=True)
+        for problem in problems:
+            typer.echo(f"  - {problem}", err=True)
+        raise typer.Exit(code=1)
+
+    manifest = export_datahub(bundle_dir, output_dir, mode=mode)
+    counts = manifest["counts"]
+    typer.echo(f"DataHub export written to {output_dir} (mode {manifest['mode']}).")
+    if manifest["privileged"]:
+        typer.echo("  PRIVILEGED: this export carries benchmark ground truth.")
+    typer.echo(f"  entities: {counts['entities']}")
+    typer.echo(f"  aspects: {counts['aspects']}")
+    for entity_type, count in counts["by_entity_type"].items():
+        typer.echo(f"    {entity_type}: {count}")
 
 
 def main() -> None:

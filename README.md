@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![Project status](https://img.shields.io/badge/status-pre--alpha-orange)
 
-## Current milestone: benchmark evaluation and scoring
+## Current milestone: portable benchmark bundles and DataHub export
 
 This repository contains packaging, tooling, a CLI, the **canonical company
 model** — a fictional oncology company (programmes, studies, teams, people,
@@ -41,10 +41,25 @@ controls and out-of-scope predictions, and byte-identical reports for identical
 inputs. It computes evidence, not opinion: no weights, no composite score. See
 [docs/evaluation.md](docs/evaluation.md).
 
-All five layers are deliberately catalogue-independent: they know nothing about
-DataHub or any downstream consumer. The truth graph remains the ground truth for
-benchmarks. Scenario packs, assessment agents and DataHub integration are future
-milestones — see Roadmap below.
+A **benchmark bundle** makes a run portable (`dataswamp build-bundle`): one
+directory carrying the generated layers, a versioned manifest, SHA-256 checksums
+for every file, environment provenance, and licensing and schema notices — so it
+can be published, cited, verified (`dataswamp verify-bundle`) and consumed
+without knowing anything about this repository. A stable streaming
+`BundleReader` is the supported way to read one. See
+[docs/bundles.md](docs/bundles.md).
+
+A **DataHub adapter** translates a verified bundle into DataHub entities and
+aspects (`dataswamp export-datahub`), with deterministic URNs derived from stable
+DataSwamp ids, an `observed` mode built from the observed graph alone and a
+clearly-marked privileged `truth` mode. It emits Metadata Change Proposals as
+files — no server, token or network needed — and takes no DataHub dependency.
+See [docs/datahub.md](docs/datahub.md).
+
+The five generation layers remain deliberately catalogue-independent: they know
+nothing about DataHub or any downstream consumer, and the adapter consumes their
+emitted artefacts rather than the other way round. Scenario packs and assessment
+agents are future milestones — see Roadmap below.
 
 ---
 
@@ -105,7 +120,9 @@ for the first public release and are being developed incrementally.
 | Scientific file-estate generation | Available        |
 | Controlled defect injection       | Available        |
 | Benchmark evaluation and scoring   | Available        |
-| DataHub integration               | Planned          |
+| Versioned benchmark bundles       | Available        |
+| DataHub metadata export           | Available        |
+| DataHub live ingestion            | Planned          |
 | OpenMetadata integration          | Planned          |
 | OpenLineage export                | Planned          |
 | AI-agent benchmark harness        | Planned          |
@@ -494,6 +511,48 @@ byte-identical reports. The prediction schema, the exact metric definitions,
 undefined-metric behaviour, abstention handling and remediation scoring are all
 documented in [docs/evaluation.md](docs/evaluation.md).
 
+### Package a portable benchmark bundle
+
+```bash
+uv run dataswamp build-bundle \
+  --output-dir dist/dataswamp-benchmark-v0.1.0 \
+  --release v0.1.0
+uv run dataswamp verify-bundle dist/dataswamp-benchmark-v0.1.0
+```
+
+Every layer whose directory exists is included, so truth-only, truth+estate,
+truth+estate+observed and complete bundles are all first-class — and a layer may
+only be bundled with the layers it was derived from. The bundle carries a
+versioned manifest declaring every file with its SHA-256, a `sha256sum`-compatible
+checksum record covering the manifest in turn, environment provenance, schema
+versions, and licensing and content-assurance notices. Identical inputs produce a
+byte-identical bundle.
+
+`verify-bundle` reports every broken invariant at once, each naming the file:
+tampered bytes, missing or undeclared files, unsafe paths, symlinks, inconsistent
+provenance and fingerprint drift. Consumers read a bundle through the streaming
+`BundleReader`, which verifies on open and never loads the benchmark into memory.
+See [docs/bundles.md](docs/bundles.md).
+
+### Export metadata to DataHub
+
+```bash
+uv run dataswamp export-datahub \
+  --bundle dist/dataswamp-benchmark-v0.1.0 \
+  --mode observed \
+  --output-dir export/datahub
+```
+
+Writes Metadata Change Proposals (JSONL and JSON array), an export manifest and a
+ready-to-run ingestion recipe. No DataHub server, token or network access is
+involved, and no DataHub package is a dependency of this project. URNs are
+deterministic functions of stable DataSwamp ids — never of display names — so
+re-ingesting the same benchmark is idempotent.
+
+`--mode observed` (the default) is built from the observed catalogue graph alone
+and reveals no ground truth. `--mode truth` is a privileged administration export
+and is tagged and manifested as such. See [docs/datahub.md](docs/datahub.md).
+
 ## Development
 
 ### Run the test suite
@@ -785,11 +844,15 @@ Implemented:
 * Deterministic defect injection
 * Reproducibility and snapshot tests
 
+Also implemented:
+
+* Versioned, checksummed benchmark bundles
+* Stable streaming reader API for bundle consumers
+* Deterministic DataHub metadata export
+
 Remaining for v0.1:
 
 * Truth-versus-observed comparison reporting
-* Machine-readable benchmark reports
-* Human-readable benchmark reports
 * End-to-end demonstration
 * First official GitHub release
 
@@ -799,7 +862,7 @@ expected findings and remediations, remain future work.
 
 ### v0.2 — Metadata and Lineage Integrations
 
-* DataHub metadata emitter
+* DataHub live ingestion and round-trip validation
 * OpenMetadata integration
 * OpenLineage event export
 * Neo4j graph export
