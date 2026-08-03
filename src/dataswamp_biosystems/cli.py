@@ -30,6 +30,7 @@ from dataswamp_biosystems.observed import (
     ObservedProfile,
     ObservedValidationError,
     TruthImmutabilityError,
+    contract_coverage,
     read_observed_meta,
     registry_rows,
     resolve_truth_dir,
@@ -398,14 +399,18 @@ def list_defects(
 ) -> None:
     """Print the defect-rule registry.
 
-    Each rule is annotated with whether it is automatically fixable and whether
-    remediation requires human approval, followed by rule counts per category.
+    Each rule is annotated with its remediation contract — how it can be
+    remediated and whether that requires approval, which are independent — plus
+    rule counts per category and per benchmark contract state.
 
     Exit codes: 0 = printed.
     """
     rows = registry_rows()
     if as_json:
-        typer.echo(json.dumps(rows, indent=2, sort_keys=True))
+        # Coverage travels with the rules so a consumer can see which benchmark
+        # states the catalogue exercises without re-deriving it from the rows.
+        payload = {"rules": rows, "contract_state_coverage": contract_coverage()}
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
         return
 
     by_category: dict[str, int] = {}
@@ -414,25 +419,36 @@ def list_defects(
 
     typer.echo(f"{len(rows)} defect rule(s) across {len(by_category)} categories:")
     for row in rows:
-        flags = []
-        if row["auto_fixable"]:
-            flags.append("auto-fixable")
-        if row["requires_human_approval"]:
-            flags.append("needs-approval")
-        flag_text = f" [{', '.join(flags)}]" if flags else ""
+        # Show the two independent dimensions, not a single fixability flag.
+        flags = [f"remediation={row['remediation_availability']}"]
+        flags.append(f"approval={row['approval_policy']}")
+        if row["approver_role"] != "none":
+            flags.append(f"approver={row['approver_role']}")
+        if row["non_remediable_reason"] != "none":
+            flags.append(f"reason={row['non_remediable_reason']}")
+        flag_text = f" [{', '.join(flags)}]"
         typer.echo(
             f"  {row['rule_id']} [{row['category']}/{row['severity']}] {row['title']}{flag_text}"
         )
     typer.echo("Rules by category:")
     for category in sorted(by_category):
         typer.echo(f"  {category}: {by_category[category]}")
+    typer.echo("Rules by contract state:")
+    for state, rule_ids in contract_coverage().items():
+        typer.echo(f"  {state}: {len(rule_ids)}")
 
 
 @app.command(name="validate-defects")
 def validate_defects() -> None:
-    """Validate the defect-rule registry itself.
+    """Validate the defect-rule registry and its remediation contracts.
 
-    Exit codes: 0 = valid, 1 = the registry has structural problems.
+    Checks structural well-formedness, that every rule's remediation contract is
+    internally consistent (remediation availability and approval policy are
+    independent, so neither may be inferred from the other), and that the
+    catalogue collectively covers every benchmark contract state. Requires no
+    generated benchmark output.
+
+    Exit codes: 0 = valid, 1 = the registry has structural or contract problems.
     """
     problems = validate_registry(DEFECTS)
     if problems:
@@ -441,6 +457,9 @@ def validate_defects() -> None:
             typer.echo(f"  - {problem}", err=True)
         raise typer.Exit(code=1)
     typer.echo(f"Defect registry is valid ({len(DEFECTS)} rules).")
+    typer.echo("Contract-state coverage:")
+    for state, rule_ids in contract_coverage().items():
+        typer.echo(f"  {state}: {len(rule_ids)} rule(s)")
 
 
 @app.command(name="inject-defects")

@@ -80,8 +80,8 @@ Every generated output directory contains one shared `provenance.json`:
   "provenance_schema_version": 1,
   "dataswamp_version": "0.1.0",
   "layer": "observed",
-  "generator_version": "1.1.0",
-  "schema_version": 2,
+  "generator_version": "1.2.0",
+  "schema_version": 3,
   "python": { "version": "3.12", "implementation": "CPython" },
   "platform": { "system": "Linux", "machine": "x86_64" },
   "direct_dependencies": { "anndata": "0.13.2", "numpy": "2.5.1", "…": "…" },
@@ -170,6 +170,48 @@ A pull request touching `tests/golden/canonical-digests.json` must answer:
 
 A dependency or lockfile change that moves generated output is never accepted
 without an explanation of its determinism impact.
+
+### Why the canonical golden output changed
+
+The observed-state digests were updated once, for the rule and remediation
+contract (observed `schema_version` 2 → 3, generator `1.1.0` → `1.2.0`). The
+change was verified by generating the canonical scenario from both the previous
+`main` and the new code and diffing them field by field. Recording the evidence
+here so a future reviewer need not re-derive it:
+
+**Unchanged — no selection, control or truth drift.** The truth graph and the
+whole file estate are byte-identical. So are `controls.jsonl` and
+`rule-scope.jsonl`: the control partition and every rule's scope are untouched.
+`observed-graph.json` differs *only* in its `generator_version` and
+`schema_version` fields — the mutated graph payload itself is identical. Record
+counts, record ids and record order are identical in all four ledgers (177
+defects, 177 findings, 177 remediations, 215 mutations), so no rule selected a
+different population.
+
+**Changed — attributable to the contract, one item at a time.**
+
+| Artefact | Difference |
+|---|---|
+| `injected-defects.jsonl` | new `remediation_availability`, `approval_policy`, `approver_role` fields; no existing field changed |
+| `expected-findings.jsonl` | new `remediation_available`, `non_remediable_reason` fields; `match_fields` gains the same two keys so an evaluator can match on them |
+| `expected-remediations.jsonl` | new `availability`, `approval_policy`, `approver_role`, `approval_evidence`, `non_remediable_reason`, `action_class` fields; 12 records became `no-remediation` (8 `FILE-MISSING`, 4 `MOD-MIXED-GENE-IDS`) with a null `recommended_value`; 23 `auto_fixable` and 45 `requires_human_approval` values were reclassified |
+| `mutation-log.jsonl` | no new fields; the same 23 `auto_fixable` and 49 `requires_human_approval` reclassifications |
+| `profile-summary.json` | new `by_contract_state`, `by_action_class`, `by_mutation_op`, `contract_state_coverage` and `uncovered_contract_states` blocks |
+
+The reclassifications are the point of the change, not a side effect: previously
+the two dimensions were perfectly coupled, leaving two of the four quadrants
+unreachable. Five rules moved to `automatic/required` (the fix is derivable but
+alters access, retention or training posture — `GOV-CLASS-MISSING`,
+`GOV-RESTRICTED-AS-INTERNAL`, `GOV-RETENTION-MISSING`,
+`AIR-TRAINING-STATUS-MISMATCH`, `LIN-CROSS-STUDY-EDGE`) and eight to
+`manual/not-required` (judgement is needed but no sign-off — including
+`META-TITLE-MISSING`, `META-DESC-MISSING`, `SEM-DESC-GENERIC`,
+`GOV-STALE-REVIEW`). `FILE-MISSING` and `MOD-MIXED-GENE-IDS` became
+non-remediable.
+
+Provenance remains deterministic: no wall-clock values were introduced, and
+`provenance.json` differs only in the two version fields it is supposed to
+report.
 
 ## Reproducing a canonical benchmark
 

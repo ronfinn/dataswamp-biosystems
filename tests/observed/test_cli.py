@@ -8,7 +8,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from dataswamp_biosystems.observed.defects import registry_rows
+from dataswamp_biosystems.observed.defects import (
+    DEFECTS,
+    REQUIRED_CONTRACT_STATES,
+    contract_coverage,
+    registry_rows,
+)
 from dataswamp_biosystems.observed.writer import (
     CONTROLS_NAME,
     INJECTED_DEFECTS_NAME,
@@ -76,7 +81,8 @@ def test_list_defects_reports_counts_by_category() -> None:
         assert f"  {category}: {count}" in result.stdout
 
 
-def test_list_defects_reports_severity_fixability_and_approval() -> None:
+def test_list_defects_reports_severity_remediation_and_approval() -> None:
+    """Each rule line names both contract dimensions, not one derived flag."""
     result = _run(["list-defects"])
     assert result.returncode == 0, result.stderr
 
@@ -85,16 +91,52 @@ def test_list_defects_reports_severity_fixability_and_approval() -> None:
         for line in result.stdout.splitlines()
         if line.startswith("  ")
     }
-    checked_auto = checked_approval = False
+    seen_availability: set[str] = set()
+    seen_approval: set[str] = set()
     for row in registry_rows():
         line = lines[row["rule_id"]]
         assert f"[{row['category']}/{row['severity']}]" in line
-        assert ("auto-fixable" in line) is bool(row["auto_fixable"])
-        assert ("needs-approval" in line) is bool(row["requires_human_approval"])
-        checked_auto = checked_auto or bool(row["auto_fixable"])
-        checked_approval = checked_approval or bool(row["requires_human_approval"])
-    assert checked_auto, "registry has no auto-fixable rule to assert on"
-    assert checked_approval, "registry has no approval-requiring rule to assert on"
+        assert f"remediation={row['remediation_availability']}" in line
+        assert f"approval={row['approval_policy']}" in line
+        if row["approver_role"] != "none":
+            assert f"approver={row['approver_role']}" in line
+        if row["non_remediable_reason"] != "none":
+            assert f"reason={row['non_remediable_reason']}" in line
+        seen_availability.add(row["remediation_availability"])
+        seen_approval.add(row["approval_policy"])
+    assert seen_availability == {"automatic", "manual", "none"}
+    assert seen_approval == {"not-required", "required"}
+
+
+def test_list_defects_reports_contract_state_coverage() -> None:
+    result = _run(["list-defects"])
+    assert result.returncode == 0, result.stderr
+    assert "Rules by contract state:" in result.stdout
+    for state, rule_ids in contract_coverage().items():
+        assert f"  {state}: {len(rule_ids)}" in result.stdout
+
+
+def test_list_defects_json_carries_rules_and_coverage() -> None:
+    """The JSON form is the structured contract surface a scorer consumes."""
+    result = _run(["list-defects", "--json"])
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+
+    assert {row["rule_id"] for row in payload["rules"]} == set(DEFECTS)
+    assert payload["contract_state_coverage"] == contract_coverage()
+    for state in REQUIRED_CONTRACT_STATES:
+        assert payload["contract_state_coverage"][state], f"state {state!r} is unpopulated"
+    for row in payload["rules"]:
+        # The declaration must be present as data, not implied by prose.
+        assert row["remediation_availability"] in {"automatic", "manual", "none"}
+        assert row["approval_policy"] in {"not-required", "required"}
+        assert row["mutation_ops"]
+
+
+def test_list_defects_json_is_deterministic() -> None:
+    first = _run(["list-defects", "--json"])
+    second = _run(["list-defects", "--json"])
+    assert first.stdout == second.stdout
 
 
 def test_validate_defects_exits_zero() -> None:
