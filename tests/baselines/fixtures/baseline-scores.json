@@ -1,0 +1,235 @@
+{
+  "baselines": {
+    "naive-metadata": {
+      "agent": {
+        "name": "naive-metadata",
+        "version": "1.0.0"
+      },
+      "counts": {
+        "fn": 118,
+        "fp": 6,
+        "tn": 6938,
+        "tp": 59
+      },
+      "findings": {
+        "f1": {
+          "denominator": 242,
+          "numerator": 118,
+          "value": 0.48760330578512395
+        },
+        "precision": {
+          "denominator": 65,
+          "numerator": 59,
+          "value": 0.9076923076923077
+        },
+        "recall": {
+          "denominator": 177,
+          "numerator": 59,
+          "value": 0.3333333333333333
+        },
+        "specificity": {
+          "denominator": 6944,
+          "numerator": 6938,
+          "value": 0.9991359447004609
+        }
+      },
+      "out_of_scope_false_positives": 0,
+      "predictions": 65,
+      "remediation": {
+        "correctness_given_true_positive": {
+          "denominator": 0,
+          "numerator": 0,
+          "value": null
+        },
+        "coverage": {
+          "denominator": 59,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "end_to_end": {
+          "denominator": 177,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "fully_correct": 0,
+        "submitted": 0,
+        "unsafe_actions": 0
+      },
+      "reserved_controls": {
+        "false_positive_rate": 0.0,
+        "false_positives": 0,
+        "pairs": 2076
+      },
+      "rules_used": [
+        "GOV-CLASS-MISSING",
+        "GOV-RETENTION-MISSING",
+        "META-DESC-MISSING",
+        "META-MODALITY-META-EMPTY",
+        "META-TITLE-MISSING",
+        "META-VERSION-MISSING",
+        "NAM-VERSION-NONCANONICAL",
+        "OWN-OWNER-MISSING",
+        "OWN-STEWARD-MISSING",
+        "SCH-RECORD-COUNT-ZERO",
+        "SEM-DESC-GENERIC",
+        "SEM-TITLE-UNINFORMATIVE",
+        "USE-INTENDED-USE-MISSING"
+      ]
+    },
+    "null": {
+      "agent": {
+        "name": "null",
+        "version": "1.0.0"
+      },
+      "counts": {
+        "fn": 177,
+        "fp": 0,
+        "tn": 6944,
+        "tp": 0
+      },
+      "findings": {
+        "f1": {
+          "denominator": 177,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "precision": {
+          "denominator": 0,
+          "numerator": 0,
+          "value": null
+        },
+        "recall": {
+          "denominator": 177,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "specificity": {
+          "denominator": 6944,
+          "numerator": 6944,
+          "value": 1.0
+        }
+      },
+      "out_of_scope_false_positives": 0,
+      "predictions": 0,
+      "remediation": {
+        "correctness_given_true_positive": {
+          "denominator": 0,
+          "numerator": 0,
+          "value": null
+        },
+        "coverage": {
+          "denominator": 0,
+          "numerator": 0,
+          "value": null
+        },
+        "end_to_end": {
+          "denominator": 177,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "fully_correct": 0,
+        "submitted": 0,
+        "unsafe_actions": 0
+      },
+      "reserved_controls": {
+        "false_positive_rate": 0.0,
+        "false_positives": 0,
+        "pairs": 2076
+      },
+      "rules_used": []
+    },
+    "rule-based": {
+      "agent": {
+        "name": "rule-based",
+        "version": "1.0.0"
+      },
+      "counts": {
+        "fn": 85,
+        "fp": 0,
+        "tn": 6944,
+        "tp": 92
+      },
+      "findings": {
+        "f1": {
+          "denominator": 269,
+          "numerator": 184,
+          "value": 0.6840148698884758
+        },
+        "precision": {
+          "denominator": 92,
+          "numerator": 92,
+          "value": 1.0
+        },
+        "recall": {
+          "denominator": 177,
+          "numerator": 92,
+          "value": 0.519774011299435
+        },
+        "specificity": {
+          "denominator": 6944,
+          "numerator": 6944,
+          "value": 1.0
+        }
+      },
+      "out_of_scope_false_positives": 0,
+      "predictions": 92,
+      "remediation": {
+        "correctness_given_true_positive": {
+          "denominator": 92,
+          "numerator": 92,
+          "value": 1.0
+        },
+        "coverage": {
+          "denominator": 92,
+          "numerator": 92,
+          "value": 1.0
+        },
+        "end_to_end": {
+          "denominator": 177,
+          "numerator": 92,
+          "value": 0.519774011299435
+        },
+        "fully_correct": 92,
+        "submitted": 92,
+        "unsafe_actions": 0
+      },
+      "reserved_controls": {
+        "false_positive_rate": 0.0,
+        "false_positives": 0,
+        "pairs": 2076
+      },
+      "rules_used": [
+        "AIR-TRAINING-APPROVAL-ABSENT",
+        "AIR-TRAINING-STATUS-MISMATCH",
+        "GOV-CLASS-MISSING",
+        "GOV-RETENTION-MISSING",
+        "LIN-DATASET-NO-UPSTREAM",
+        "LIN-PROVENANCE-DANGLING",
+        "META-DESC-MISSING",
+        "META-MODALITY-META-EMPTY",
+        "META-TITLE-MISSING",
+        "META-VERSION-MISSING",
+        "OWN-DENORM-MISMATCH",
+        "OWN-OWNER-MISSING",
+        "OWN-STEWARD-MISSING",
+        "QC-CERTIFIED-CONTRADICTED",
+        "SCH-CONTRACT-MISSING",
+        "SCH-RECORD-COUNT-ZERO",
+        "SCH-SIZE-INVERSION",
+        "USE-EXTERNAL-VS-RESTRICTED",
+        "USE-INTENDED-USE-MISSING",
+        "USE-TRAINING-WITHOUT-APPROVAL"
+      ]
+    }
+  },
+  "benchmark": {
+    "defect_seed": 20260717,
+    "expected_findings": 177,
+    "generator_version": "1.2.0",
+    "ground_truth_fingerprint": "d9730762ece17ff54c092f78b380eb84597c5546370a460f5aed5ebd63ddac0d",
+    "profile": "demo",
+    "truth_generator_version": "1.0.0",
+    "truth_seed": 20260717
+  },
+  "schema_version": 1
+}

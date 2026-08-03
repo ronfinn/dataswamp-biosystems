@@ -115,6 +115,7 @@ jobs:
           /tmp/wheel-env/bin/dataswamp version
           /tmp/wheel-env/bin/dataswamp validate-config
           /tmp/wheel-env/bin/dataswamp validate-defects
+          /tmp/wheel-env/bin/dataswamp list-baselines
 
       # The documented quick start, exactly as the README gives it, from an
       # installed package with no checkout in sight — then again, to prove the
@@ -126,3 +127,24 @@ jobs:
           /tmp/wheel-env/bin/dataswamp demo --output-dir /tmp/dsw-demo-again
           diff -r /tmp/dsw-demo /tmp/dsw-demo-again
           /tmp/wheel-env/bin/dataswamp verify-bundle /tmp/dsw-demo/bundle
+
+      # Every reference baseline, from the installed package, against what the
+      # demo just generated — then a repeat run, because a published baseline
+      # score is worth nothing if the submission behind it is not reproducible.
+      - name: Run every reference baseline from the installed package
+        run: |
+          cd /tmp
+          for agent in null naive-metadata rule-based; do
+            /tmp/wheel-env/bin/dataswamp run-baseline --agent "$agent" \
+              --observed-dir /tmp/dsw-demo/generated/observed \
+              --output "/tmp/baseline-$agent.jsonl" --force \
+              --evaluate --evaluation-dir "/tmp/baseline-eval-$agent"
+            /tmp/wheel-env/bin/dataswamp run-baseline --agent "$agent" \
+              --observed-dir /tmp/dsw-demo/generated/observed \
+              --output "/tmp/baseline-$agent-again.jsonl" --force
+            diff "/tmp/baseline-$agent.jsonl" "/tmp/baseline-$agent-again.jsonl"
+            /tmp/wheel-env/bin/dataswamp evaluate \
+              --observed-dir /tmp/dsw-demo/generated/observed \
+              --predictions "/tmp/baseline-$agent.jsonl" \
+              --output-dir "/tmp/baseline-recheck-$agent"
+          done

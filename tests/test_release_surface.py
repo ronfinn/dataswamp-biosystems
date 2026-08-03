@@ -39,6 +39,8 @@ DOCUMENTED_COMMANDS = (
     "build-bundle",
     "verify-bundle",
     "export-datahub",
+    "list-baselines",
+    "run-baseline",
     "demo",
 )
 
@@ -68,6 +70,21 @@ STABLE_IMPORTS: dict[str, tuple[str, ...]] = {
         "EvaluationError",
         "EvaluationConfigError",
         "PredictionValidationError",
+    ),
+    "dataswamp_biosystems.baselines": (
+        "BASELINE_NAMES",
+        "BaselineAgent",
+        "BaselineInfo",
+        "BaselineRun",
+        "ObservedInput",
+        "baseline_infos",
+        "get_baseline",
+        "run_baseline",
+        "render_predictions",
+        "write_predictions",
+        "BaselineError",
+        "UnknownBaselineError",
+        "ObservedInputError",
     ),
     "dataswamp_biosystems.adapters.datahub": ("ExportMode", "export_datahub"),
     "dataswamp_biosystems.examples": ("example_path", "examples_dir", "EXAMPLE_SUBMISSIONS"),
@@ -123,6 +140,31 @@ class TestDemo:
             "export/datahub",
         ):
             assert (demo_dir / relative).exists(), f"demo did not produce {relative}"
+
+    @pytest.mark.slow
+    def test_a_baseline_runs_against_what_the_demo_generated(
+        self, demo_dir: Path, tmp_path: Path
+    ) -> None:
+        """The documented follow-on step: run a baseline over the demo's output."""
+        output = tmp_path / "baseline.jsonl"
+        result = runner.invoke(
+            app,
+            [
+                "run-baseline",
+                "--agent",
+                "rule-based",
+                "--observed-dir",
+                str(demo_dir / "generated" / "observed"),
+                "--output",
+                str(output),
+                "--evaluate",
+                "--evaluation-dir",
+                str(tmp_path / "evaluation"),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert output.read_text(encoding="utf-8").strip()
+        assert (tmp_path / "evaluation" / "evaluation-report.md").is_file()
 
     @pytest.mark.slow
     def test_the_bundle_it_builds_verifies(self, demo_dir: Path) -> None:

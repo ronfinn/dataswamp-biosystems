@@ -13,7 +13,35 @@ entries below.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Reference baseline agents.** Three small, readable benchmark participants
+  published so a result has something to be compared against: `null` (claims
+  nothing — the recall floor and specificity ceiling), `naive-metadata` (shallow
+  single-field signals) and `rule-based` (20 of the 41 defect rules
+  re-implemented against observed metadata). New commands `dataswamp
+  run-baseline` and `dataswamp list-baselines`; `run-baseline --evaluate` scores
+  through the ordinary evaluator rather than a second scoring path. See
+  [docs/baselines.md](docs/baselines.md).
+- **Published canonical baseline scores**, pinned by
+  `tests/baselines/fixtures/baseline-scores.json` and regenerated deliberately
+  with `scripts/update_baseline_scores.py --confirm --reason ...`. Runtime is
+  reported in the documentation rather than pinned, because it is
+  machine-dependent.
+
+### Notes
+
+- Baselines are scored as genuine participants: each reads `observed-graph.json`
+  and nothing else. The boundary is structural — one module opens one file — and
+  is covered by tests that run every agent in a directory from which the ground
+  truth has been deleted, that record every path opened during a run, and that
+  reject a hard-coded canonical identifier anywhere in the package.
+- No schema, generator version or golden digest changed. The baselines are new
+  consumers of existing artefacts; they generate nothing.
+- Two rules, `GOV-STALE-REVIEW` and `LIF-STALE-ASSET`, are documented as
+  under-specified from observed metadata alone. No registry change was made.
+- The baselines are **not** production-quality governance agents, and no LLM
+  provider integration ships in this milestone.
 
 ## [0.1.0rc1] — 2026-08-03
 

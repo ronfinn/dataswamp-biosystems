@@ -42,6 +42,7 @@ and cannot be inflated by counting entities a rule never applied to.
 | Scoring an agent's predictions | `evaluate` | [evaluation.md](docs/evaluation.md) |
 | Portable, checksummed bundles | `build-bundle` / `verify-bundle` | [bundles.md](docs/bundles.md) |
 | DataHub metadata export (offline) | `export-datahub` | [datahub.md](docs/datahub.md) |
+| Reference baseline agents | `run-baseline` / `list-baselines` | [baselines.md](docs/baselines.md) |
 | The whole workflow, end to end | `demo` | below |
 
 41 defect rules across 12 categories, six maturity profiles, and a fixed
@@ -122,6 +123,14 @@ dataswamp verify-bundle    dist/benchmark
 dataswamp export-datahub   --bundle dist/benchmark --mode observed --output-dir export/datahub
 ```
 
+Run a reference baseline against the same benchmark and score it in one step:
+
+```bash
+dataswamp list-baselines
+dataswamp run-baseline --agent rule-based --observed-dir generated/observed \
+                       --output predictions.jsonl --evaluate
+```
+
 Every generating command refuses an output directory that is, contains or sits
 inside one of its inputs, and refuses a non-empty directory without `--force`.
 
@@ -172,6 +181,28 @@ entities and proposes automatic fixes where the contract requires a human
 decision, and the report says so separately rather than burying it in an
 aggregate score.
 
+## Reference baseline scores
+
+Three baseline agents ship with the benchmark so a result has something to be
+compared against. Each reads `observed-graph.json` and nothing else — never the
+expected findings, the controls or the rule scope — and each is short enough to
+read in full. **They are not production-quality governance agents.** Scored
+against the same canonical `demo` scenario:
+
+| Baseline | Predictions | Precision | Recall | Specificity | F1 | Reserved-control FPs | Remediation end-to-end |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `null` | 0 | n/a | 0.0000 | 1.0000 | 0.0000 | 0 | 0.0000 |
+| `naive-metadata` | 65 | 0.9077 | 0.3333 | 0.9991 | 0.4876 | 0 | 0.0000 |
+| `rule-based` | 92 | 1.0000 | 0.5198 | 1.0000 | 0.6840 | 0 | 0.5198 |
+
+The null baseline's precision is `null`, not `0.0`: it predicted nothing, so the
+denominator is empty and the quantity was never measured. The rule-based agent
+implements 20 of the 41 rules; the 21 it cannot reach from observed metadata are
+listed — with reasons — in [docs/baselines.md](docs/baselines.md), which also
+records two rules that turned out to be under-specified from observed metadata
+alone. Scores are comparable only within one generator version, config
+fingerprint, profile and seed.
+
 ## Guarantees and limitations
 
 **Reproducibility.** The same configuration, generator version and seed produce
@@ -193,8 +224,8 @@ out-of-scope false positive rather than folded into the matrix.
   correctness benchmark, not a load test.
 * One estate shape and one defect taxonomy — no difficulty tiers, no adversarial
   or cross-asset scenarios yet.
-* No reference baseline agents are published yet, so there is no established
-  score to beat.
+* The published baselines are deliberately simple and metadata-only; none opens a
+  materialized scientific file, and no LLM-backed agent ships.
 * DataHub export is offline file emission; live ingestion is not implemented.
 * No run-to-run comparison or regression reporting yet.
 
@@ -249,6 +280,7 @@ published yet. The package version is `0.1.0rc1`.
 | [docs/file-generation.md](docs/file-generation.md) | Scientific file formats, profiles and placeholders |
 | [docs/observed-state.md](docs/observed-state.md) | Defect taxonomy, ledgers, profiles, control partition |
 | [docs/evaluation.md](docs/evaluation.md) | The prediction contract and the scoring semantics |
+| [docs/baselines.md](docs/baselines.md) | The reference baseline agents, their permitted reads and canonical scores |
 | [docs/bundles.md](docs/bundles.md) | Bundle layout, manifest, verification, reader API |
 | [docs/datahub.md](docs/datahub.md) | URNs, entity/aspect mapping, the privilege boundary |
 | [docs/public-api.md](docs/public-api.md) | Stable vs experimental vs internal interfaces |

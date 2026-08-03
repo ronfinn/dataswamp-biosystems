@@ -67,6 +67,7 @@ cd /tmp                                  # deliberately outside the checkout
 /tmp/dsw-release/bin/dataswamp --help
 /tmp/dsw-release/bin/dataswamp validate-config
 /tmp/dsw-release/bin/dataswamp validate-defects
+/tmp/dsw-release/bin/dataswamp list-baselines
 ```
 
 `validate-config` outside the checkout proves the packaged configuration
@@ -105,6 +106,22 @@ done
 ```
 
 The numbers must match the tables in `examples/README.md`.
+
+## 8a. Each reference baseline scores as documented
+
+```bash
+for agent in null naive-metadata rule-based; do
+  /tmp/dsw-release/bin/dataswamp run-baseline --agent $agent \
+    --observed-dir /tmp/dsw-demo/generated/observed \
+    --output /tmp/dsw-baseline-$agent.jsonl --force \
+    --evaluate --evaluation-dir /tmp/dsw-baseline-eval-$agent
+done
+```
+
+The numbers must match the tables in `docs/baselines.md` and `README.md`. A
+mismatch means a published baseline result has changed and the release is not
+ready — regenerate deliberately with `scripts/update_baseline_scores.py` and
+justify the change, rather than editing a table to fit.
 
 ## 9. Bundle and export
 

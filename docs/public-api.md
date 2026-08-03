@@ -31,7 +31,8 @@ export-datahub
 demo
 ```
 
-Plus `version`, `list-defects` and `validate-defects`.
+Plus `version`, `list-defects`, `validate-defects`, `list-baselines` and
+`run-baseline`.
 
 Stable per command: the command name, its options, and its **exit codes** —
 `0` success, `1` the input was read but is invalid (failed validation, a
@@ -73,6 +74,14 @@ from dataswamp_biosystems.evaluation import (
     GroundTruth, load_ground_truth,
     evaluate, prediction_digest, write_evaluation,
     EvaluationError, EvaluationConfigError, PredictionValidationError,
+)
+
+# Running a reference baseline agent against an observed state.
+from dataswamp_biosystems.baselines import (
+    BASELINE_NAMES, BaselineAgent, BaselineInfo, BaselineRun,
+    ObservedInput, get_baseline, baseline_infos,
+    run_baseline, render_predictions, write_predictions,
+    BaselineError, UnknownBaselineError, ObservedInputError,
 )
 
 # Emitting DataHub metadata from a verified bundle.

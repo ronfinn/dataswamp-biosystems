@@ -122,12 +122,13 @@ Also implemented:
 * Stable streaming reader API for bundle consumers
 * Deterministic DataHub metadata export
 * End-to-end demonstration (`dataswamp demo`) and example submissions
+* Reference baseline agents with published canonical scores
+  (see [baselines.md](baselines.md))
 
 Remaining for v0.1:
 
 * A designated licence for generated benchmark data
   (see [generated-data-licensing-decision.md](generated-data-licensing-decision.md))
-* Reference baseline agents to publish alongside the benchmark
 * First official GitHub release
 
 Beyond v0.1, scenario packs composing profiles and defect sets into named

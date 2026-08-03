@@ -107,6 +107,21 @@ Review the diff before committing: a change here means the benchmark's published
 example results have changed, and the tables above and in the README must be
 updated to match.
 
+## Reference baselines
+
+The three files here are *scoring* examples — they show what the evaluator does
+with each kind of claim. If you want a submission produced by an agent that
+actually looked at the data, run a reference baseline instead:
+
+```bash
+dataswamp run-baseline --agent rule-based --observed-dir generated/observed \
+                       --output baseline.jsonl --evaluate
+```
+
+Unlike these examples, a baseline is derived from the *observed* graph alone and
+so is a genuine benchmark participant. Its canonical scores are published in
+[docs/baselines.md](../docs/baselines.md).
+
 ## Python API example
 
 [`python_api_example.py`](python_api_example.py) does the same work through the
