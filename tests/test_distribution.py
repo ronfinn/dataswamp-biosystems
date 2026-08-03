@@ -37,7 +37,13 @@ REQUIRED_MEMBERS = (
     "dataswamp_biosystems/_examples/predictions/partial.jsonl",
     "dataswamp_biosystems/_examples/predictions/unsafe.jsonl",
     "dataswamp_biosystems/py.typed",
+    "dataswamp_biosystems/baselines/__init__.py",
+    "dataswamp_biosystems/baselines/rule_agent.py",
 )
+
+# The baseline score fixture is a *test* asset, not a shipped one: an installed
+# user runs the baselines, they do not re-verify the maintainer's pinned numbers.
+FORBIDDEN_MEMBERS = ("dataswamp_biosystems/baseline-scores.json",)
 
 # Anything matching these must never ship. Credentials and developer scratch are
 # the obvious ones; caches and OS artefacts are the ones that actually happen.
@@ -84,6 +90,13 @@ def wheel_members(tmp_path_factory: pytest.TempPathFactory) -> list[str]:
 @pytest.mark.parametrize("member", REQUIRED_MEMBERS)
 def test_wheel_carries_required_resources(wheel_members: list[str], member: str) -> None:
     assert member in wheel_members, f"{member} is missing from the wheel"
+
+
+@pytest.mark.slow
+def test_wheel_excludes_test_only_assets(wheel_members: list[str]) -> None:
+    for member in FORBIDDEN_MEMBERS:
+        assert member not in wheel_members
+    assert not [name for name in wheel_members if "baseline-scores" in name]
 
 
 @pytest.mark.slow
