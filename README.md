@@ -51,17 +51,22 @@ canonical scenario pinned by committed golden digests.
 
 Requires Python 3.12 or 3.13.
 
-```bash
-pip install dataswamp-biosystems      # from a built distribution
-```
-
-Or from a checkout, using [uv](https://docs.astral.sh/uv/):
+**Not on PyPI yet** — this is a release candidate and nothing has been
+published. Install from a checkout, using [uv](https://docs.astral.sh/uv/):
 
 ```bash
 git clone https://github.com/ronfinn/dataswamp-biosystems.git
 cd dataswamp-biosystems
 uv sync
 uv run dataswamp --help
+```
+
+Or build a distribution and install it anywhere:
+
+```bash
+uv build
+pip install dist/dataswamp_biosystems-*.whl
+dataswamp --help
 ```
 
 The canonical configuration and the example submissions ship *inside* the

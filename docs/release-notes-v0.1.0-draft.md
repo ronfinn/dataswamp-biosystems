@@ -12,6 +12,10 @@ Before publishing, resolve:
    is a score to compare against.
 3. The final version — `0.1.0` rather than `0.1.0rc1` — and the corresponding
    `pyproject.toml`, `__init__.py` and `tests/test_package.py` update.
+4. Whether to publish to PyPI. The "Try it" section below assumes so; if the
+   release ships as a GitHub artefact only, replace `pip install
+   dataswamp-biosystems` with the wheel-from-checkout instructions the README
+   gives.
 
 Then follow [the release checklist](release-checklist.md).
 

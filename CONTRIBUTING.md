@@ -4,6 +4,10 @@ Contributions, discussions, bug reports and feature proposals are welcome. This
 is a small project — the process below is deliberately light, and describes the
 tooling that actually exists rather than a process for a large team.
 
+Useful areas: scientific data models, metadata schemas, governance scenarios,
+defect definitions, validation rules, platform integrations, documentation,
+example configurations, reproducibility testing and scientific-domain packs.
+
 Before starting a substantial change, please open an issue describing the
 problem or use case, the proposed behaviour, the expected output, any relevant
 scientific or metadata standard, and how the change could be tested.
