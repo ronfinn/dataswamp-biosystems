@@ -32,8 +32,16 @@ from typing import Any
 
 from dataswamp_biosystems.company.config import CanonicalConfig
 from dataswamp_biosystems.observed.defects import DEFECTS
-from dataswamp_biosystems.observed.engine import ObservedResult, generate_observed
-from dataswamp_biosystems.observed.entities import ChangeOp, MutationRecord
+from dataswamp_biosystems.observed.engine import (
+    ObservedResult,
+    generate_observed,
+    modality_group_of,
+)
+from dataswamp_biosystems.observed.entities import (
+    NO_REMEDIATION_ACTION,
+    ChangeOp,
+    MutationRecord,
+)
 from dataswamp_biosystems.observed.errors import (
     ObservedConfigError,
     ObservedIssueCollector,
@@ -108,8 +116,325 @@ def validate_observed(observed_dir: Path, graph: TruthGraph, config: CanonicalCo
     _check_fidelity(result, index, issues)
     _check_contamination(result, issues)
     _check_controls(observed_dir, result, index, issues)
+    _check_rule_contracts(result, index, issues)
 
     issues.raise_if_any()
+
+
+def _contract_issue(
+    issues: ObservedIssueCollector,
+    *,
+    kind: str,
+    entity_id: str,
+    rule_id: str,
+    field: str,
+    declared: object,
+    generated: object,
+) -> None:
+    """Report generated evidence that contradicts its rule's declaration."""
+    issues.add(
+        ObservedIssueKind.RULE_CONTRACT,
+        f"rule {rule_id!r} declares {field}={declared!r} "
+        f"but the generated record has {generated!r}",
+        entity_kind=kind,
+        entity_id=entity_id,
+        field=field,
+    )
+
+
+def _check_rule_contracts(
+    result: ObservedResult, index: GraphIndex, issues: ObservedIssueCollector
+) -> None:
+    """Prove every generated record agrees with its rule's declared contract.
+
+    Rule metadata is only a contract if the evidence is checked against it. This
+    verifies the two dimensions independently — remediation availability and
+    approval policy — so neither can be silently inferred from the other, and
+    that a non-remediable finding carries an explicit no-action decision rather
+    than a hollow fix.
+
+    It also enforces *applicability* against the population each rule actually
+    selected: a modality-specific rule that reaches an unrelated modality is a
+    silently mis-scoped benchmark, not a harmless extra defect.
+    """
+    for instance in result.instances:
+        definition = DEFECTS.get(instance.rule_id)
+        if definition is None:
+            continue  # already reported as an unknown rule
+        if instance.remediation_availability is not definition.remediation_availability:
+            _contract_issue(
+                issues,
+                kind="instance",
+                entity_id=instance.id,
+                rule_id=instance.rule_id,
+                field="remediation_availability",
+                declared=definition.remediation_availability.value,
+                generated=instance.remediation_availability.value,
+            )
+        if instance.approval_policy is not definition.approval_policy:
+            _contract_issue(
+                issues,
+                kind="instance",
+                entity_id=instance.id,
+                rule_id=instance.rule_id,
+                field="approval_policy",
+                declared=definition.approval_policy.value,
+                generated=instance.approval_policy.value,
+            )
+        if instance.approver_role is not definition.approver_role:
+            _contract_issue(
+                issues,
+                kind="instance",
+                entity_id=instance.id,
+                rule_id=instance.rule_id,
+                field="approver_role",
+                declared=definition.approver_role.value,
+                generated=instance.approver_role.value,
+            )
+        if instance.category is not definition.category:
+            _contract_issue(
+                issues,
+                kind="instance",
+                entity_id=instance.id,
+                rule_id=instance.rule_id,
+                field="category",
+                declared=definition.category.value,
+                generated=instance.category.value,
+            )
+        if instance.severity is not definition.default_severity:
+            _contract_issue(
+                issues,
+                kind="instance",
+                entity_id=instance.id,
+                rule_id=instance.rule_id,
+                field="severity",
+                declared=definition.default_severity.value,
+                generated=instance.severity.value,
+            )
+        if instance.entity_kind not in definition.applies_to_kinds:
+            issues.add(
+                ObservedIssueKind.RULE_CONTRACT,
+                f"rule {instance.rule_id!r} applies to "
+                f"{sorted(definition.applies_to_kinds)} but was applied to a "
+                f"{instance.entity_kind!r}",
+                entity_kind="instance",
+                entity_id=instance.id,
+                field="entity_kind",
+            )
+        declared_modalities = set(definition.applies_to_modalities)
+        if "*" not in declared_modalities:
+            group = modality_group_of(index, instance.entity_id)
+            if group not in declared_modalities:
+                issues.add(
+                    ObservedIssueKind.RULE_CONTRACT,
+                    f"rule {instance.rule_id!r} applies to modality group(s) "
+                    f"{sorted(declared_modalities)} but was applied to entity "
+                    f"{instance.entity_id!r} in group {group!r}",
+                    entity_kind="instance",
+                    entity_id=instance.id,
+                    field="applies_to_modalities",
+                )
+
+    for mutation in result.mutations:
+        definition = DEFECTS.get(mutation.rule_id)
+        if definition is None:
+            continue
+        if mutation.operation not in definition.mutation_ops:
+            _contract_issue(
+                issues,
+                kind="mutation",
+                entity_id=mutation.id,
+                rule_id=mutation.rule_id,
+                field="mutation_ops",
+                declared=[op.value for op in definition.mutation_ops],
+                generated=mutation.operation.value,
+            )
+        if mutation.auto_fixable != definition.auto_fixable:
+            _contract_issue(
+                issues,
+                kind="mutation",
+                entity_id=mutation.id,
+                rule_id=mutation.rule_id,
+                field="auto_fixable",
+                declared=definition.auto_fixable,
+                generated=mutation.auto_fixable,
+            )
+        if mutation.requires_human_approval != definition.requires_human_approval:
+            _contract_issue(
+                issues,
+                kind="mutation",
+                entity_id=mutation.id,
+                rule_id=mutation.rule_id,
+                field="requires_human_approval",
+                declared=definition.requires_human_approval,
+                generated=mutation.requires_human_approval,
+            )
+
+    for finding in result.findings:
+        definition = DEFECTS.get(finding.rule_id)
+        if definition is None:
+            continue
+        if finding.remediation_available is not definition.remediation_availability:
+            _contract_issue(
+                issues,
+                kind="finding",
+                entity_id=finding.id,
+                rule_id=finding.rule_id,
+                field="remediation_available",
+                declared=definition.remediation_availability.value,
+                generated=finding.remediation_available.value,
+            )
+        if finding.non_remediable_reason is not definition.non_remediable_reason:
+            _contract_issue(
+                issues,
+                kind="finding",
+                entity_id=finding.id,
+                rule_id=finding.rule_id,
+                field="non_remediable_reason",
+                declared=definition.non_remediable_reason.value,
+                generated=finding.non_remediable_reason.value,
+            )
+        if finding.category is not definition.category:
+            _contract_issue(
+                issues,
+                kind="finding",
+                entity_id=finding.id,
+                rule_id=finding.rule_id,
+                field="category",
+                declared=definition.category.value,
+                generated=finding.category.value,
+            )
+        if finding.severity is not definition.default_severity:
+            _contract_issue(
+                issues,
+                kind="finding",
+                entity_id=finding.id,
+                rule_id=finding.rule_id,
+                field="severity",
+                declared=definition.default_severity.value,
+                generated=finding.severity.value,
+            )
+
+    _check_remediation_contracts(result, issues)
+
+
+def _check_remediation_contracts(result: ObservedResult, issues: ObservedIssueCollector) -> None:
+    """Check remediation records, including the explicit no-action decisions."""
+    per_finding: dict[str, int] = {}
+    for remediation in result.remediations:
+        per_finding[remediation.finding_id] = per_finding.get(remediation.finding_id, 0) + 1
+        definition = DEFECTS.get(remediation.rule_id)
+        if definition is None:
+            continue
+
+        for field_name, declared, generated in (
+            ("availability", definition.remediation_availability, remediation.availability),
+            ("approval_policy", definition.approval_policy, remediation.approval_policy),
+            ("approver_role", definition.approver_role, remediation.approver_role),
+            ("approval_evidence", definition.approval_evidence, remediation.approval_evidence),
+            (
+                "non_remediable_reason",
+                definition.non_remediable_reason,
+                remediation.non_remediable_reason,
+            ),
+        ):
+            if declared is not generated:
+                _contract_issue(
+                    issues,
+                    kind="remediation",
+                    entity_id=remediation.id,
+                    rule_id=remediation.rule_id,
+                    field=field_name,
+                    declared=declared.value,
+                    generated=generated.value,
+                )
+
+        if remediation.auto_fixable != definition.auto_fixable:
+            _contract_issue(
+                issues,
+                kind="remediation",
+                entity_id=remediation.id,
+                rule_id=remediation.rule_id,
+                field="auto_fixable",
+                declared=definition.auto_fixable,
+                generated=remediation.auto_fixable,
+            )
+        if remediation.requires_human_approval != definition.requires_human_approval:
+            _contract_issue(
+                issues,
+                kind="remediation",
+                entity_id=remediation.id,
+                rule_id=remediation.rule_id,
+                field="requires_human_approval",
+                declared=definition.requires_human_approval,
+                generated=remediation.requires_human_approval,
+            )
+
+        # A non-remediable finding must carry an explicit no-action decision, and
+        # must never carry an actionable repair instruction.
+        if definition.is_remediable:
+            if remediation.action == NO_REMEDIATION_ACTION:
+                issues.add(
+                    ObservedIssueKind.RULE_CONTRACT,
+                    f"rule {remediation.rule_id!r} is remediable but the record "
+                    "declares no remediation",
+                    entity_kind="remediation",
+                    entity_id=remediation.id,
+                    field="action",
+                )
+            if remediation.action != definition.remediation_action:
+                _contract_issue(
+                    issues,
+                    kind="remediation",
+                    entity_id=remediation.id,
+                    rule_id=remediation.rule_id,
+                    field="action",
+                    declared=definition.remediation_action,
+                    generated=remediation.action,
+                )
+        else:
+            if remediation.action != NO_REMEDIATION_ACTION:
+                _contract_issue(
+                    issues,
+                    kind="remediation",
+                    entity_id=remediation.id,
+                    rule_id=remediation.rule_id,
+                    field="action",
+                    declared=NO_REMEDIATION_ACTION,
+                    generated=remediation.action,
+                )
+            if remediation.recommended_value is not None:
+                issues.add(
+                    ObservedIssueKind.RULE_CONTRACT,
+                    f"rule {remediation.rule_id!r} is non-remediable but the record "
+                    f"recommends {remediation.recommended_value!r}",
+                    entity_kind="remediation",
+                    entity_id=remediation.id,
+                    field="recommended_value",
+                )
+        if remediation.action_class != definition.action_class:
+            _contract_issue(
+                issues,
+                kind="remediation",
+                entity_id=remediation.id,
+                rule_id=remediation.rule_id,
+                field="action_class",
+                declared=definition.action_class,
+                generated=remediation.action_class,
+            )
+
+    # Contradictory evidence: a finding must resolve to exactly one decision.
+    for finding in result.findings:
+        count = per_finding.get(finding.id, 0)
+        if count != 1:
+            issues.add(
+                ObservedIssueKind.RULE_CONTRACT,
+                f"finding has {count} remediation record(s); exactly one is required "
+                "(a non-remediable finding carries an explicit no-action decision)",
+                entity_kind="finding",
+                entity_id=finding.id,
+                field="remediation_id",
+            )
 
 
 def _read_jsonl(
