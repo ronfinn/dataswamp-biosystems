@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![Project status](https://img.shields.io/badge/status-pre--alpha-orange)
 
-## Current milestone: imperfection engine (observed state)
+## Current milestone: benchmark evaluation and scoring
 
 This repository contains packaging, tooling, a CLI, the **canonical company
 model** — a fictional oncology company (programmes, studies, teams, people,
@@ -33,7 +33,15 @@ partition** naming every entity left clean, so true negatives and precision are
 measurable. It never mutates the truth graph. See
 [docs/observed-state.md](docs/observed-state.md).
 
-All four layers are deliberately catalogue-independent: they know nothing about
+An **evaluation engine** scores an agent's predictions against that ground truth
+(`dataswamp evaluate`): a versioned prediction schema, pair-level matching on
+`(entity_id, rule_id)` with per-rule denominators read from `rule-scope.jsonl`,
+confusion-matrix and remediation metrics, separate reporting for reserved
+controls and out-of-scope predictions, and byte-identical reports for identical
+inputs. It computes evidence, not opinion: no weights, no composite score. See
+[docs/evaluation.md](docs/evaluation.md).
+
+All five layers are deliberately catalogue-independent: they know nothing about
 DataHub or any downstream consumer. The truth graph remains the ground truth for
 benchmarks. Scenario packs, assessment agents and DataHub integration are future
 milestones — see Roadmap below.
@@ -96,7 +104,7 @@ for the first public release and are being developed incrementally.
 | Truth graph generation            | Available        |
 | Scientific file-estate generation | Available        |
 | Controlled defect injection       | Available        |
-| Truth-versus-observed reports     | Planned for v0.1 |
+| Benchmark evaluation and scoring   | Available        |
 | DataHub integration               | Planned          |
 | OpenMetadata integration          | Planned          |
 | OpenLineage export                | Planned          |
@@ -156,9 +164,9 @@ Each rule's declarations are an enforced contract, not documentation. Whether a 
 
 ### 3. Benchmark Results
 
-Because the authoritative truth and injected defects are known, tools can be evaluated against measurable expected results.
+Because the authoritative truth and injected defects are known, tools can be evaluated against measurable expected results. `dataswamp evaluate` does exactly that: it scores a JSONL prediction file against the emitted ground truth and writes confusion-matrix and remediation metrics as both JSON and a Markdown scorecard. See [docs/evaluation.md](docs/evaluation.md).
 
-Potential measures include:
+Measures include:
 
 * Defect-detection precision
 * Defect-detection recall
@@ -453,6 +461,38 @@ target a control, and every control must be unchanged from truth):
 ```bash
 uv run dataswamp validate-observed
 ```
+
+## Scoring an agent (evaluation)
+
+Score a JSONL prediction file against an emitted observed state, into the
+git-ignored `generated/evaluation/`:
+
+```bash
+uv run dataswamp evaluate \
+  --observed-dir generated/observed \
+  --predictions predictions.jsonl \
+  --output-dir generated/evaluation
+```
+
+Ground truth and the submission are fully validated before anything is written,
+so an invalid submission never replaces a previous evaluation. Malformed,
+duplicate, unknown-id and contradictory predictions are rejected with the line,
+field, value and expected contract — never silently dropped.
+
+Scoring is pair-level on `(entity_id, rule_id)`, with each rule's population read
+from `rule-scope.jsonl`, so entities that were never in a rule's population
+cannot inflate specificity. Predictions against a known entity outside a rule's
+population are reported separately as out-of-scope rather than folded into the
+matrix. False positives against reserved controls — held out before selection —
+are broken out on their own, and an actionable remediation proposed against a
+clean entity is flagged as an unsafe action.
+
+It writes `evaluation-summary.json`, `finding-results.jsonl`,
+`remediation-results.jsonl`, `rule-metrics.jsonl`, `category-metrics.jsonl`, an
+`evaluation-report.md` scorecard, and `provenance.json`. Identical inputs produce
+byte-identical reports. The prediction schema, the exact metric definitions,
+undefined-metric behaviour, abstention handling and remediation scoring are all
+documented in [docs/evaluation.md](docs/evaluation.md).
 
 ## Development
 

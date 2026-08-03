@@ -43,13 +43,17 @@ machine-readable ledger of every injected defect and its expected finding and
 remediation, emitted under git-ignored `generated/observed/` via `dataswamp
 inject-defects` — which reads the truth graph from disk, checksums it, and
 verifies it is unmodified — with `dataswamp list-defects`/`validate-defects` for
-the registry and `dataswamp validate-observed` to re-check output). See
-`docs/domain-model.md`, `docs/truth-graph-schema.md`,
-`docs/file-generation.md`, and `docs/observed-state.md`.
+the registry and `dataswamp validate-observed` to re-check output), and the
+**evaluation engine** (a deterministic scorer in
+`src/dataswamp_biosystems/evaluation/` that consumes an emitted observed state as
+ground truth and a versioned JSONL prediction file, emitting confusion-matrix and
+remediation reports under git-ignored `generated/evaluation/` via `dataswamp
+evaluate`). See `docs/domain-model.md`, `docs/truth-graph-schema.md`,
+`docs/file-generation.md`, `docs/observed-state.md`, and `docs/evaluation.md`.
 
-All four layers are deliberately catalogue-independent. The observed layer never
-mutates the truth graph. There is no scenario-pack layer, no assessment agents,
-and no DataHub integration yet.
+All five layers are deliberately catalogue-independent. The observed layer never
+mutates the truth graph, and the evaluation layer mutates nothing at all. There
+is no scenario-pack layer, no assessment agents, and no DataHub integration yet.
 
 Do not implement future-milestone capabilities (below) speculatively. Add
 them only when a task explicitly scopes them, and do not create placeholder
@@ -69,6 +73,7 @@ uv run dataswamp list-defects      # list the defect registry
 uv run dataswamp validate-defects  # validate the defect registry
 uv run dataswamp inject-defects --truth generated/truth/truth-graph.json --seed 20260717 --profile demo  # derive observed state
 uv run dataswamp validate-observed  # validate a generated observed state
+uv run dataswamp evaluate --observed-dir generated/observed --predictions predictions.jsonl  # score an agent
 uv run pytest                  # run tests
 uv run ruff check .            # lint
 uv run ruff format --check .   # format check
@@ -125,6 +130,18 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     Mutates only JSON copies of the truth graph (never the truth entities) and
     depends only on `company/` and `truth/`, never on DataHub. See
     `docs/observed-state.md`.
+  - `evaluation/` — the deterministic scoring engine: the versioned prediction
+    contract and its total validator, a read-only ground-truth loader over the
+    emitted observed state, count-based metrics, the pair-level scoring engine,
+    and the atomic report writer. It is **read-only** with respect to every other
+    layer — it consumes emitted artefacts and never regenerates or rewrites them.
+    Scoring is pair-level on `(entity_id, rule_id)` with each rule's population
+    read from `rule-scope.jsonl`; entities outside a rule's population never
+    enter its denominators, and a prediction against one is reported as an
+    out-of-scope false positive rather than folded into the matrix. Undefined
+    metrics are emitted as `null` with their numerator and denominator, never as
+    `0.0`. Depends only on `company/`, `truth/` and `observed/`, never on
+    DataHub. See `docs/evaluation.md`.
   - `provenance.py` — the shared environment/scenario provenance object written
     into every generated output directory (no wall-clock values; excluded from
     the golden digests by design).
@@ -134,9 +151,9 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
   `config/vocabularies/` and `config/truth/generation-plan.yaml`. Tracked;
   distinct from the git-ignored `generated/`.
 - `tests/` — mirrors the package for test discovery; `tests/company/`,
-  `tests/truth/`, `tests/estate/`, and `tests/observed/` cover the model,
-  generators, the defect registry and engine, invariants, file contents, and CLI
-  commands.
+  `tests/truth/`, `tests/estate/`, `tests/observed/`, and `tests/evaluation/`
+  cover the model, generators, the defect registry and engine, invariants, file
+  contents, scoring semantics, and CLI commands.
 
 ### Architectural independence from DataHub
 
@@ -200,6 +217,14 @@ referential integrity, not just happy-path execution.
   them as a side effect of unrelated work — defects are test fixtures, not bugs.
 - **Never let observed-state concerns leak into the truth generator**, and never
   mutate the truth graph from the observed layer.
+- **Never let the evaluator regenerate or rewrite ground truth.** It consumes
+  the emitted observed state and nothing else; if a scoring need seems to
+  require a ground-truth schema change, justify and test that change on its own
+  terms before touching the golden digests.
+- **Never report an undefined metric as zero**, and never widen a metric's
+  denominator with pairs outside the relevant rule's population — inflated true
+  negatives make every agent look good and are the failure mode this benchmark
+  exists to avoid.
 - Never add DataHub as a dependency or import until a task explicitly scopes
   DataHub integration.
 - Never generate scientific/synthetic datasets until a task explicitly
