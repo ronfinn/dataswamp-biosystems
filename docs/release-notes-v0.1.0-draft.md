@@ -8,11 +8,9 @@ Before publishing, resolve:
 
 1. The generated-data licence
    ([decision document](generated-data-licensing-decision.md)).
-2. Whether to publish reference baseline agents alongside the release, so there
-   is a score to compare against.
-3. The final version — `0.1.0` rather than `0.1.0rc1` — and the corresponding
+2. The final version — `0.1.0` rather than `0.1.0rc1` — and the corresponding
    `pyproject.toml`, `__init__.py` and `tests/test_package.py` update.
-4. Whether to publish to PyPI. The "Try it" section below assumes so; if the
+3. Whether to publish to PyPI. The "Try it" section below assumes so; if the
    release ships as a GitHub artefact only, replace `pip install
    dataswamp-biosystems` with the wheel-from-checkout instructions the README
    gives.
@@ -41,6 +39,10 @@ and what it proposed to do about it.
 ```bash
 pip install dataswamp-biosystems
 dataswamp demo --output-dir ./dataswamp-demo
+dataswamp run-baseline --agent rule-based \
+    --observed-dir ./dataswamp-demo/generated/observed \
+    --output baseline.jsonl --evaluate \
+    --evaluation-dir ./dataswamp-demo/baseline-evaluation
 ```
 
 A couple of seconds, no credentials, no network, no server. Run it twice and the
@@ -67,6 +69,10 @@ output is byte-identical.
   composite score.
 - **Portable benchmark bundles** — one self-describing, checksummed directory
   that can be published, cited and verified without this repository.
+- **Reference baseline agents** — `null`, `naive-metadata` and `rule-based`,
+  each reading the observed graph and nothing else, with published canonical
+  scores so a new result has something to be compared against. They are
+  deliberately simple, and are not production-quality governance agents.
 - **An offline DataHub adapter** — Metadata Change Proposals and a ready-to-run
   recipe, with a structural guarantee that the observed export carries no ground
   truth. No DataHub package is a dependency.
@@ -102,7 +108,8 @@ regulatory compliance.
 - Small by design — a correctness benchmark, not a load test.
 - One estate shape and one defect taxonomy; no difficulty tiers or adversarial
   scenarios yet.
-- No published baseline agent scores.
+- The published baselines are metadata-only and deliberately simple; none opens
+  a materialized scientific file, and no LLM-backed agent ships.
 - No run-to-run comparison or regression reporting.
 - DataHub export is offline emission only; no live ingestion, no other
   catalogue.

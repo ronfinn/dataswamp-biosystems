@@ -141,6 +141,24 @@ uv run --frozen python scripts/update_example_predictions.py --confirm
 
 Then update the score tables in `examples/README.md` and `README.md` to match.
 
+### Regenerating the baseline scores
+
+```bash
+uv run --frozen python scripts/update_baseline_scores.py --confirm --reason "..."
+```
+
+Then update the score tables in `docs/baselines.md` and `README.md` to match.
+These are published benchmark results, so a change here needs the same
+justification a golden change does: state what behaviour changed and why.
+
+### Adding a baseline agent
+
+See [docs/baselines.md](docs/baselines.md). The one rule that is not negotiable:
+a baseline reads the observed graph through `ObservedInput` and opens no file
+itself. The isolation tests in `tests/baselines/test_isolation.py` are written
+against that boundary, and a baseline that can see the answers publishes a
+meaningless score.
+
 ## Release checklist
 
 See [docs/release-checklist.md](docs/release-checklist.md) for the exact
