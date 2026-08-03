@@ -22,8 +22,6 @@ from pathlib import Path
 
 import pytest
 
-from dataswamp_biosystems.company import CanonicalConfig, load_config
-from dataswamp_biosystems.observed.engine import generate_observed
 from dataswamp_biosystems.observed.entities import (
     NO_REMEDIATION_ACTION,
     ApprovalEvidence,
@@ -39,19 +37,14 @@ from dataswamp_biosystems.observed.entities import (
     RuleScopeRecord,
     Severity,
 )
-from dataswamp_biosystems.observed.profiles import ObservedProfile
 from dataswamp_biosystems.observed.writer import (
     CONTROLS_NAME,
     EXPECTED_FINDINGS_NAME,
     EXPECTED_REMEDIATIONS_NAME,
     PROFILE_SUMMARY_NAME,
     RULE_SCOPE_NAME,
-    write_observed,
 )
 from dataswamp_biosystems.truth import (
-    GenerationPlan,
-    generate_truth_graph,
-    load_generation_plan,
     serialize,
 )
 
@@ -292,13 +285,6 @@ def tiny_observed_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return target
 
 
-@pytest.fixture(scope="session")
-def real_observed_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Generate and write the canonical scenario's observed state once per session."""
-    config: CanonicalConfig = load_config(REAL_CONFIG_DIR)
-    plan: GenerationPlan = load_generation_plan(REAL_CONFIG_DIR)
-    graph = generate_truth_graph(config, plan, CANONICAL_SEED)
-    result = generate_observed(graph, config, ObservedProfile.DEMO, CANONICAL_SEED)
-    target = tmp_path_factory.mktemp("real-observed") / "observed"
-    write_observed(result, target)
-    return target
+# ``real_observed_dir`` lives in the root ``tests/conftest.py``: the example
+# submissions are scored against the same canonical ground truth, and generating
+# it twice per session would be pure waste.
