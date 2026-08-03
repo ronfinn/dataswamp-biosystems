@@ -152,6 +152,8 @@ The defect registry covers twelve categories, including:
 
 Every defect is generated from a known truth state and recorded in machine-readable ledgers, together with its expected finding and expected remediation.
 
+Each rule's declarations are an enforced contract, not documentation. Whether a fix can be derived (`automatic`, `manual` or `none`) and whether it needs authorisation are independent dimensions, and some findings are explicitly **non-remediable** — an agent that abstains there is right. Generated evidence is validated against every declaration; see [docs/observed-state.md](docs/observed-state.md#the-rule-and-remediation-contract).
+
 ### 3. Benchmark Results
 
 Because the authoritative truth and injected defects are known, tools can be evaluated against measurable expected results.

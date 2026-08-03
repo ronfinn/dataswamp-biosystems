@@ -78,9 +78,13 @@ generated/observed/
   observed graph, `expected_message_semantics` states what the finding must
   communicate, `detection_locator` says where to look, and `remediation_id` links
   the expected fix.
-- **ExpectedRemediation** — the fix expected to resolve the finding (metadata
-  only; never applied), with `auto_fixable`, `requires_human_approval`,
-  `reversible`, and a `truth_reference` back to the correct value.
+- **ExpectedRemediation** — the decision expected to resolve the finding
+  (metadata only; never applied), carrying the rule's remediation contract —
+  `availability`, `approval_policy`, `approver_role`, `approval_evidence`,
+  `non_remediable_reason`, `action_class` — plus the derived `auto_fixable` and
+  `requires_human_approval` booleans, `reversible`, and a `truth_reference` back
+  to the correct value. See [The rule and remediation
+  contract](#the-rule-and-remediation-contract).
 - **ControlRecord** — one catalogue asset or file that carries *no* injected
   defect: the benchmark's negative class. See
   [The control partition](#the-control-partition).
@@ -205,6 +209,15 @@ contract and are covered by the regeneration tripwire. Adding them raised
 `schema_version` to `2` (generator version `1.1.0`); the pre-existing four
 ledgers and the observed graph's records are unchanged.
 
+Adding the rule and remediation contract raised `schema_version` to `3`
+(generator version `1.2.0`). That release added contract fields to the defect,
+finding and remediation ledgers and coverage blocks to the profile summary,
+and reclassified the rules whose fixability and approval had previously been
+coupled. `controls.jsonl`, `rule-scope.jsonl`, the truth graph and the file
+estate are byte-identical across the change, and the observed graph's records
+differ only by the version bump — see [Why the canonical golden output
+changed](reproducibility.md#why-the-canonical-golden-output-changed).
+
 ## Defect taxonomy
 
 Defects are defined in an in-code registry (`observed/defects.py`) spanning
@@ -221,8 +234,102 @@ model-training approval, cross-study lineage edge, duplicate final versions,
 QC-contradicted certification, checksum mismatch, and missing file.
 
 Each rule declares its applicability, prerequisites, mutation, expected evidence,
-expected finding and remediation, severity, whether it is auto-fixable or needs
-human approval, reversibility, incompatibilities, and multiplicity.
+expected finding and remediation, severity, its remediation contract (below),
+reversibility, incompatibilities, and multiplicity.
+
+## The rule and remediation contract
+
+A rule's declarations are a **contract**, not documentation: every generated
+record is validated against them, so a rule cannot claim one thing and emit
+another.
+
+### Two independent dimensions
+
+Remediation availability and approval policy are separate axes, because they
+answer different questions:
+
+| | |
+|---|---|
+| **Remediation availability** — *can a correct fix be derived?* | `automatic` (mechanically derivable from the graph), `manual` (a human must supply or decide the value), `none` (nothing can be remediated from the information available) |
+| **Approval policy** — *may it be applied without authorisation?* | `not-required`, or `required` (with an `approver_role` and the `approval_evidence` the sign-off must produce) |
+
+Collapsing these into one "fixability" scale would be wrong in both directions. A
+misclassified access label is mechanically derivable yet must not be changed
+without an access review (`automatic` + `required`). A missing description needs
+no formal sign-off yet no machine can recover the lost text (`manual` +
+`not-required`). Modelling them separately also stops an agent inferring one
+from the other — with a single scale, guessing "needs approval" from "not
+auto-fixable" would score correctly without any governance reasoning.
+
+### The five required contract states
+
+The catalogue must collectively keep all five populated; a state falling empty is
+a **registry error**, since an empty state is a decision agents can no longer be
+tested on. Individual rules are not expected to cover more than one.
+
+| Contract state | Rules | Example |
+|---|---|---|
+| `automatic/not-required` | 14 | `OWN-DENORM-MISMATCH` — reconcile a denormalised owner |
+| `automatic/required` | 5 | `GOV-RESTRICTED-AS-INTERNAL` — the correct label is known, but reclassification needs an access review |
+| `manual/not-required` | 8 | `META-DESC-MISSING` — a human must write it; nobody must approve it |
+| `manual/required` | 12 | `OWN-OWNER-WRONG-TEAM` — reassignment needs judgement *and* owner sign-off |
+| `non-remediable` | 2 | `FILE-MISSING` — the bytes are gone; only source-system recovery helps |
+
+### Non-remediable findings
+
+Some defects cannot be fixed from available information. Forcing them to carry a
+remediation would make the ledger dishonest, so they instead record an explicit
+**no-action decision**: `action` is the literal `no-remediation`,
+`recommended_value` is null, and `non_remediable_reason` states why
+(`source-system-recovery-required`, `upstream-reprocessing-required`).
+
+The one-remediation-per-finding invariant is *retained*, not relaxed: every
+finding still resolves to exactly one record. What changed is that the record may
+be a decision not to act. This is deliberate — an agent that proposes a repair
+here is wrong, and one that abstains is right, which is only scorable if the
+abstention is represented. The `truth_reference` is still emitted: it is scoring
+ground truth, not a repair instruction.
+
+### Rule-authoring requirements
+
+Every rule needs an entry in `RULE_CONTRACTS` declaring its availability,
+approval policy, permitted `ops`, and — when approval is required — an approver
+role and evidence type. A rule with no entry raises at import; there is no
+default. `auto_fixable` and `requires_human_approval` are **derived properties**
+and cannot be set by hand (attempting it raises `TypeError`), which is what keeps
+the two axes from silently re-coupling.
+
+### What is validated
+
+`validate-defects` checks each declaration is internally consistent — a
+non-remediable rule may not name a recommended value, an approval requirement
+must name someone able to grant it, an approval-free rule must not name an
+approver — and that all five contract states remain populated.
+
+`validate-observed` checks the *generated evidence* against those declarations:
+
+- every mutation's operation is one the rule permits;
+- every affected entity is within the rule's declared entity kinds **and**
+  modality groups, checked against the population the rule actually selected;
+- findings and remediations carry their rule's availability, approval policy,
+  approver, evidence and reason;
+- `auto_fixable` / `requires_human_approval` on emitted records equal the rule's
+  declaration, checked per-axis so one cannot mask the other;
+- non-remediable rules emit a no-action decision and never a recommended value;
+  remediable rules always emit a real action;
+- every finding resolves to exactly one remediation record.
+
+Failures are reported as `rule-contract` issues naming the rule, the record and
+the violated declaration, and follow the existing exit-code convention
+(1 = invalid, 2 = unreadable).
+
+### Coverage as data
+
+Coverage is emitted, not asserted in prose. `list-defects --json` returns
+`{"rules": [...], "contract_state_coverage": {...}}`, and every
+`profile-summary.json` carries `by_contract_state`, `by_action_class`,
+`by_mutation_op`, `contract_state_coverage` and `uncovered_contract_states`, so a
+gap in what a profile exercises is visible rather than assumed.
 
 **Physical file integrity is observed-graph-only** in this milestone: checksum
 and missing-file defects mutate the observed `PhysicalFileRecord` view; no bytes
