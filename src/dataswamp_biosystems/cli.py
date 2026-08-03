@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -15,6 +15,16 @@ from dataswamp_biosystems.adapters.datahub import (
     build_source,
     export_datahub,
     validate_export,
+)
+from dataswamp_biosystems.baselines import (
+    BASELINE_NAMES,
+    BaselineError,
+    ObservedInput,
+    ObservedInputError,
+    baseline_infos,
+    get_baseline,
+    run_baseline,
+    write_predictions,
 )
 from dataswamp_biosystems.bundle import (
     BundleConfigError,
@@ -109,6 +119,11 @@ OBSERVED_INPUT_LABEL = "observed ground-truth directory"
 # sits at the repository root, while protecting the file still rejects an output
 # directory that is, or contains, the submission being scored.
 PREDICTIONS_INPUT_LABEL = "prediction file"
+
+# A baseline writes a single submission file rather than a directory, so the
+# default is a filename in the working directory.
+DEFAULT_BASELINE_OUTPUT = Path("predictions.jsonl")
+BASELINE_OUTPUT_LABEL = "baseline submission file"
 
 DEFAULT_BUNDLE_DIR = Path("dist") / "dataswamp-benchmark"
 DEFAULT_DATAHUB_EXPORT_DIR = Path("export") / "datahub"
@@ -662,6 +677,63 @@ def validate_observed(
     )
 
 
+def _score_or_exit(
+    observed_dir: Path,
+    submission: Path,
+    evaluation_dir: Path,
+) -> dict[str, Any]:
+    """Load ground truth, validate and score ``submission``, write the reports.
+
+    The single place the CLI performs an evaluation. ``run-baseline --evaluate``
+    and ``demo`` both come through here rather than reimplementing scoring, so
+    there is exactly one evaluator and one set of exit-code mappings.
+    """
+    try:
+        truth = load_ground_truth(observed_dir)
+    except EvaluationConfigError as exc:
+        typer.echo(f"Could not read ground truth: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    try:
+        submitted, raw = load_predictions(
+            submission,
+            known_entities=truth.known_entities,
+            known_rules=truth.rule_ids,
+        )
+    except EvaluationConfigError as exc:
+        typer.echo(f"Could not read predictions: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except PredictionValidationError as exc:
+        typer.echo(f"Predictions are invalid — {len(exc.issues)} issue(s):", err=True)
+        for issue in exc.issues:
+            typer.echo(f"  - {issue.render()}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    result = evaluate(truth, submitted, prediction_digest=prediction_digest(raw))
+    return write_evaluation(result, evaluation_dir)
+
+
+def _echo_scorecard(summary: dict[str, Any]) -> None:
+    """Print the shared four-line scorecard every scoring command ends with."""
+    micro = summary["findings"]["overall_micro"]
+    counts = micro["counts"]
+    metrics = micro["metrics"]
+
+    def show(name: str) -> str:
+        value = metrics[name]["value"]
+        return "n/a" if value is None else f"{value:.4f}"
+
+    typer.echo(f"  TP {counts['tp']}  FP {counts['fp']}  FN {counts['fn']}  TN {counts['tn']}")
+    typer.echo(
+        f"  precision {show('precision')}  recall {show('recall')}  "
+        f"specificity {show('specificity')}  F1 {show('f1')}"
+    )
+    typer.echo(
+        f"  reserved-control false positives: {summary['reserved_controls']['false_positives']}"
+    )
+    typer.echo(f"  unsafe remediations: {summary['remediation']['counts']['unsafe_actions']}")
+
+
 @app.command(name="evaluate")
 def evaluate_predictions(
     predictions: Annotated[
@@ -705,38 +777,9 @@ def evaluate_predictions(
         force=force,
     )
 
-    try:
-        truth = load_ground_truth(observed_dir)
-    except EvaluationConfigError as exc:
-        typer.echo(f"Could not read ground truth: {exc}", err=True)
-        raise typer.Exit(code=2) from exc
+    summary = _score_or_exit(observed_dir, predictions, output_dir)
 
-    try:
-        submitted, raw = load_predictions(
-            predictions,
-            known_entities=truth.known_entities,
-            known_rules=truth.rule_ids,
-        )
-    except EvaluationConfigError as exc:
-        typer.echo(f"Could not read predictions: {exc}", err=True)
-        raise typer.Exit(code=2) from exc
-    except PredictionValidationError as exc:
-        typer.echo(f"Predictions are invalid — {len(exc.issues)} issue(s):", err=True)
-        for issue in exc.issues:
-            typer.echo(f"  - {issue.render()}", err=True)
-        raise typer.Exit(code=1) from exc
-
-    result = evaluate(truth, submitted, prediction_digest=prediction_digest(raw))
-    summary = write_evaluation(result, output_dir)
-
-    micro = summary["findings"]["overall_micro"]
-    counts = micro["counts"]
-    metrics = micro["metrics"]
-
-    def show(name: str) -> str:
-        value = metrics[name]["value"]
-        return "n/a" if value is None else f"{value:.4f}"
-
+    counts = summary["findings"]["overall_micro"]["counts"]
     typer.echo(
         f"Evaluation written to {output_dir} "
         f"(profile {summary['benchmark']['profile']}, "
@@ -746,20 +789,146 @@ def evaluate_predictions(
         f"  pairs: {summary['universe']['evaluated_pairs']} "
         f"({counts['positives']} positive, {counts['negatives']} negative)"
     )
-    typer.echo(f"  TP {counts['tp']}  FP {counts['fp']}  FN {counts['fn']}  TN {counts['tn']}")
-    typer.echo(
-        f"  precision {show('precision')}  recall {show('recall')}  "
-        f"specificity {show('specificity')}  F1 {show('f1')}"
-    )
-    typer.echo(
-        f"  reserved-control false positives: {summary['reserved_controls']['false_positives']}"
-    )
+    _echo_scorecard(summary)
     typer.echo(f"  out-of-scope false positives: {summary['out_of_scope']['false_positives']}")
     typer.echo(
         f"  remediations: {summary['remediation']['counts']['submitted']} submitted, "
         f"{summary['remediation']['counts']['fully_correct']} fully correct, "
         f"{summary['remediation']['counts']['unsafe_actions']} unsafe"
     )
+
+
+@app.command(name="list-baselines")
+def list_baselines() -> None:
+    """List the reference baseline agents and the observed fields each one reads.
+
+    The read list is derived from the agents themselves, so it cannot drift away
+    from what the code actually inspects.
+    """
+    infos = baseline_infos()
+    typer.echo(f"{len(infos)} reference baseline agent(s):")
+    for info in infos:
+        typer.echo(f"  {info.name} (v{info.version})")
+        typer.echo(f"    {info.summary}")
+        if info.reads:
+            typer.echo(f"    reads: {', '.join(info.reads)}")
+        else:
+            typer.echo("    reads: nothing")
+
+
+@app.command(name="run-baseline")
+def run_baseline_command(
+    agent: Annotated[
+        str,
+        typer.Option("--agent", help=f"Baseline to run: {', '.join(BASELINE_NAMES)}."),
+    ],
+    observed_dir: Annotated[
+        Path,
+        typer.Option("--observed-dir", help="Directory containing the observed state to read."),
+    ] = DEFAULT_OBSERVED_DIR,
+    output: Annotated[
+        Path,
+        typer.Option("--output", help="JSONL file to write the submission to."),
+    ] = DEFAULT_BASELINE_OUTPUT,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Overwrite an existing submission, and a non-empty --evaluation-dir.",
+        ),
+    ] = False,
+    score: Annotated[
+        bool,
+        typer.Option("--evaluate", help="Score the submission after writing it."),
+    ] = False,
+    evaluation_dir: Annotated[
+        Path,
+        typer.Option("--evaluation-dir", help="Where --evaluate writes its reports."),
+    ] = DEFAULT_EVALUATION_DIR,
+) -> None:
+    """Run a reference baseline agent and write a prediction submission.
+
+    The agent reads ``observed-graph.json`` from ``--observed-dir`` and nothing
+    else — not the expected findings, the expected remediations, the controls,
+    the rule scope, the mutation log or the truth graph. Baselines are scored as
+    genuine participants, so a baseline that could see the answers would publish
+    a meaningless number.
+
+    Output is deterministic: predictions are emitted in ``(entity_id, rule_id)``
+    order with a stable encoding, so two runs over the same observed state
+    produce byte-identical files. No credentials, server or network access is
+    involved.
+
+    ``--evaluate`` scores the submission through the ordinary evaluator and
+    writes its reports to ``--evaluation-dir``. ``--force`` covers both outputs:
+    an existing submission file and a non-empty evaluation directory. It never
+    overrides path safety.
+
+    Exit codes: 0 = written, 1 = the submission failed evaluation's contract,
+    2 = an unknown agent, an unreadable observed state, or a refused output path.
+    """
+    try:
+        baseline = get_baseline(agent)
+    except BaselineError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    # The submission is a *file*, so the file itself is what must not overlap a
+    # protected input — protecting its parent would reject any output beside the
+    # configuration directory, which is where a user naturally puts one.
+    try:
+        ensure_safe_output_dir(
+            output,
+            protected_paths={
+                CONFIG_INPUT_LABEL: DEFAULT_CONFIG_DIR,
+                OBSERVED_INPUT_LABEL: observed_dir,
+                TRUTH_INPUT_LABEL: DEFAULT_TRUTH_DIR,
+            },
+        )
+    except UnsafeOutputDirectoryError as exc:
+        typer.echo(f"Refusing to write {output}: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    if output.exists() and not force:
+        typer.echo(f"Output file {output} already exists; pass --force to overwrite.", err=True)
+        raise typer.Exit(code=2)
+    if output.is_dir():
+        typer.echo(f"Output {output} is a directory, not a file.", err=True)
+        raise typer.Exit(code=2)
+
+    try:
+        observed = ObservedInput.load(observed_dir)
+    except ObservedInputError as exc:
+        typer.echo(f"Could not read the observed state: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    run = run_baseline(baseline, observed)
+    write_predictions(run, output)
+
+    scenario = ", ".join(f"{key} {value}" for key, value in sorted(run.scenario.items()))
+    typer.echo(
+        f"{run.info.name} v{run.info.version} wrote {run.prediction_count} prediction(s) "
+        f"to {output}."
+    )
+    typer.echo(f"  rules used: {len(run.rules_used)}")
+    if scenario:
+        typer.echo(f"  scenario: {scenario}")
+
+    if not score:
+        return
+
+    _prepare_output_dir_or_exit(
+        evaluation_dir,
+        {
+            CONFIG_INPUT_LABEL: DEFAULT_CONFIG_DIR,
+            OBSERVED_INPUT_LABEL: observed_dir,
+            PREDICTIONS_INPUT_LABEL: output,
+        },
+        force=force,
+    )
+    summary = _score_or_exit(observed_dir, output, evaluation_dir)
+    typer.echo(f"Evaluation written to {evaluation_dir}.")
+    _echo_scorecard(summary)
 
 
 @app.command(name="build-bundle")
@@ -1049,21 +1218,7 @@ def demo(
     generate_canonical(generated, config, plan)
 
     typer.echo(f"[2/5] Scoring {submission} ...")
-    try:
-        truth = load_ground_truth(observed_dir)
-        submitted, raw = load_predictions(
-            submission, known_entities=truth.known_entities, known_rules=truth.rule_ids
-        )
-    except EvaluationConfigError as exc:
-        typer.echo(f"Could not read the submission: {exc}", err=True)
-        raise typer.Exit(code=2) from exc
-    except PredictionValidationError as exc:
-        typer.echo(f"Predictions are invalid — {len(exc.issues)} issue(s):", err=True)
-        for issue in exc.issues:
-            typer.echo(f"  - {issue.render()}", err=True)
-        raise typer.Exit(code=1) from exc
-    result = evaluate(truth, submitted, prediction_digest=prediction_digest(raw))
-    summary = write_evaluation(result, evaluation_dir)
+    summary = _score_or_exit(observed_dir, submission, evaluation_dir)
 
     typer.echo(f"[3/5] Packaging a bundle into {bundle_dir} ...")
     build_bundle(
@@ -1088,13 +1243,6 @@ def demo(
     typer.echo(f"[5/5] Exporting observed DataHub metadata into {datahub_dir} ...")
     export = export_datahub(bundle_dir, datahub_dir, mode=ExportMode.OBSERVED)
 
-    micro = summary["findings"]["overall_micro"]
-    counts = micro["counts"]
-
-    def show(name: str) -> str:
-        value = micro["metrics"][name]["value"]
-        return "n/a" if value is None else f"{value:.4f}"
-
     typer.echo("")
     typer.echo("Demo complete. Output:")
     typer.echo(f"  truth graph        {truth_dir}")
@@ -1105,15 +1253,7 @@ def demo(
     typer.echo(f"  DataHub metadata   {datahub_dir}")
     typer.echo("")
     typer.echo(f"Scored submission: {submission}")
-    typer.echo(f"  TP {counts['tp']}  FP {counts['fp']}  FN {counts['fn']}  TN {counts['tn']}")
-    typer.echo(
-        f"  precision {show('precision')}  recall {show('recall')}  "
-        f"specificity {show('specificity')}  F1 {show('f1')}"
-    )
-    typer.echo(
-        f"  reserved-control false positives: {summary['reserved_controls']['false_positives']}"
-    )
-    typer.echo(f"  unsafe remediations: {summary['remediation']['counts']['unsafe_actions']}")
+    _echo_scorecard(summary)
     typer.echo(f"Bundle fingerprint: {manifest.bundle_fingerprint}")
     typer.echo(f"DataHub entities:   {export['counts']['entities']}")
 
