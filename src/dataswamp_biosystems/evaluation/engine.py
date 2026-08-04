@@ -80,6 +80,12 @@ from dataswamp_biosystems.evaluation.predictions import (
     STATUS_FINDING,
     Prediction,
 )
+from dataswamp_biosystems.observed.difficulty import (
+    DIFFICULTY_ORDER,
+    RULE_DIFFICULTIES,
+    UnknownRuleDifficultyError,
+    difficulty_for,
+)
 from dataswamp_biosystems.observed.entities import (
     NO_REMEDIATION_ACTION,
     ApprovalPolicy,
@@ -89,9 +95,33 @@ from dataswamp_biosystems.observed.entities import (
 from dataswamp_biosystems.truth import serialize
 
 EVALUATOR_VERSION = "0.1.0"
-EVALUATION_SCHEMA_VERSION = 1
+# 2 — added the ``by_difficulty`` aggregation and ``difficulty-metrics.jsonl``.
+# Nothing that existed at schema 1 changed shape or meaning.
+EVALUATION_SCHEMA_VERSION = 2
 
 STATUS_ABSENT = "absent"
+
+#: The tier bucket for a scored rule the difficulty model does not classify.
+#: Should never appear — ``validate_registry`` rejects an unclassified rule long
+#: before generation — so it is a defensive state, reported rather than hidden,
+#: and asserted empty by ``tests/evaluation/test_difficulty.py``.
+UNKNOWN_DIFFICULTY = "unknown"
+
+#: The tier buckets always present in a report, in tier order. Emitting a tier
+#: with no pairs (as ``null`` metrics over zero denominators) keeps the report
+#: shape stable across mixed and tier-restricted runs; a reader can then compare
+#: two reports without first checking which keys exist.
+REPORTED_DIFFICULTIES: tuple[str, ...] = tuple(
+    tier.value for tier in DIFFICULTY_ORDER if tier in RULE_DIFFICULTIES
+)
+
+
+def _difficulty_of(rule_id: str) -> str:
+    """Return ``rule_id``'s tier, or :data:`UNKNOWN_DIFFICULTY` if unclassified."""
+    try:
+        return difficulty_for(rule_id).value
+    except UnknownRuleDifficultyError:
+        return UNKNOWN_DIFFICULTY
 
 
 def _pair_id(entity_id: str, rule_id: str) -> str:
@@ -146,6 +176,7 @@ class EvaluationResult:
     remediation_results: list[RemediationResult] = field(default_factory=list)
     rule_metrics: list[GroupMetricRecord] = field(default_factory=list)
     category_metrics: list[GroupMetricRecord] = field(default_factory=list)
+    difficulty_metrics: list[GroupMetricRecord] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +423,64 @@ def _remediation_totals(results: list[RemediationResult]) -> dict[str, Any]:
     }
 
 
+def _rules_per_difficulty(truth: GroundTruth) -> dict[str, int]:
+    """Return ``{tier: rule count}`` for the rules this ground truth actually scopes."""
+    counts = dict.fromkeys(REPORTED_DIFFICULTIES, 0)
+    for scope in truth.scopes:
+        tier = _difficulty_of(scope.id)
+        counts[tier] = counts.get(tier, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _difficulty_blocks(
+    by_difficulty: dict[str, Counts],
+    by_difficulty_reserved: dict[str, Counts],
+    remediation_results: list[RemediationResult],
+) -> dict[str, dict[str, Any]]:
+    """Return the per-tier report: one block per benchmark difficulty tier.
+
+    Each block is the same shape as the overall report — confusion matrix,
+    metrics, reserved-control behaviour, remediation — restricted to the pairs
+    whose rule sits at that tier. The restriction is a *partition*: no pair is
+    counted twice and none is dropped, so the tier counts sum to the overall
+    matrix. Counts are summed before dividing, exactly as everywhere else; a
+    tier with no pairs reports ``null`` metrics over zero denominators rather
+    than a zero that would look like a measured failure.
+    """
+    tiers = list(REPORTED_DIFFICULTIES)
+    # The defensive bucket is reported only when something actually landed in it,
+    # so its presence in a report is itself the signal.
+    tiers.extend(sorted(set(by_difficulty) - set(tiers)))
+
+    remediation_by_tier: dict[str, list[RemediationResult]] = {tier: [] for tier in tiers}
+    for result in remediation_results:
+        remediation_by_tier.setdefault(_difficulty_of(result.rule_id), []).append(result)
+
+    blocks: dict[str, dict[str, Any]] = {}
+    for tier in tiers:
+        counts = by_difficulty.get(tier, Counts())
+        reserved = by_difficulty_reserved.get(tier, Counts())
+        remediation = _remediation_totals(remediation_by_tier.get(tier, []))
+        blocks[tier] = {
+            **metric_block(counts),
+            "reserved_controls": {
+                **metric_block(reserved),
+                "false_positives": reserved.fp,
+                "false_positive_rate": ratio(reserved.fp, reserved.negatives),
+            },
+            "remediation": {
+                "coverage": remediation["metrics"]["coverage"],
+                "correctness_given_true_positive": remediation["metrics"][
+                    "correctness_given_true_positive"
+                ],
+                "end_to_end": remediation["metrics"]["end_to_end"],
+                "unsafe_actions": remediation["counts"]["unsafe_actions"],
+                "unsafe_on_reserved_control": remediation["counts"]["unsafe_on_reserved_control"],
+            },
+        }
+    return blocks
+
+
 # ---------------------------------------------------------------------------
 # The evaluation itself.
 # ---------------------------------------------------------------------------
@@ -420,6 +509,8 @@ def evaluate(
     by_entity_kind: dict[str, Counts] = {}
     by_entity_class: dict[str, Counts] = {}
     by_control_partition: dict[str, Counts] = {}
+    by_difficulty: dict[str, Counts] = {}
+    by_difficulty_reserved: dict[str, Counts] = {}
     selective = Counts()
 
     abstained_positive = 0
@@ -432,6 +523,10 @@ def evaluate(
         selected = set(scope.selected_ids)
         category = scope.category.value
         severity = scope.severity.value
+        # Derived from the rule registry, never read from ground truth: the
+        # emitted observed state carries no difficulty field, and duplicating one
+        # there would let a stale ledger disagree with the live classification.
+        tier = _difficulty_of(rule_id)
         for entity_id in sorted(truth.population(rule_id)):
             expected_present = entity_id in selected
             prediction = by_pair.get((entity_id, rule_id))
@@ -449,6 +544,11 @@ def evaluate(
             _add(by_entity_kind, entity_kind, outcome)
             _add(by_entity_class, entity_class, outcome)
             _add(by_control_partition, "reserved" if reserved else "non-reserved", outcome)
+            # Every scored pair lands in exactly one tier, so the tier counts
+            # partition the matrix rather than resampling it.
+            _add(by_difficulty, tier, outcome)
+            if reserved:
+                _add(by_difficulty_reserved, tier, outcome)
             if abstained:
                 if expected_present:
                     abstained_positive += 1
@@ -582,6 +682,10 @@ def evaluate(
     macro_rule = macro_block(by_rule)
     reserved_counts = by_control_partition.get("reserved", Counts())
 
+    difficulty_blocks = _difficulty_blocks(
+        by_difficulty, by_difficulty_reserved, remediation_results
+    )
+
     abstention_total = abstained_positive + abstained_negative
     decided = sum(1 for p in predictions if not p.abstains)
 
@@ -613,6 +717,10 @@ def evaluate(
             "reserved_control_pairs": reserved_counts.total,
             "emitted_finding_results": len(finding_results),
             "explicit_clean_true_negatives": explicit_clean_true_negatives,
+            # How many *rules* each tier contributed to this scenario. A
+            # tier-restricted benchmark shows zeroes for the tiers it excluded,
+            # which is how a reader tells "not attempted" from "attempted badly".
+            "rules_by_difficulty": _rules_per_difficulty(truth),
         },
         "findings": {
             "overall_micro": micro,
@@ -624,6 +732,7 @@ def evaluate(
             "by_entity_kind": breakdown(by_entity_kind),
             "by_entity_class": breakdown(by_entity_class),
             "by_control_partition": breakdown(by_control_partition),
+            "by_difficulty": difficulty_blocks,
             "coarse_universes": _coarse_universes(truth, predictions),
         },
         "reserved_controls": {
@@ -673,6 +782,15 @@ def evaluate(
         )
         for name, counts in sorted(by_category.items())
     ]
+    difficulty_metrics = [
+        GroupMetricRecord(
+            id=tier,
+            group="difficulty",
+            counts=by_difficulty.get(tier, Counts()).as_dict(),
+            metrics=difficulty_blocks[tier]["metrics"],
+        )
+        for tier in sorted(difficulty_blocks)
+    ]
 
     return EvaluationResult(
         summary=summary,
@@ -680,6 +798,7 @@ def evaluate(
         remediation_results=sorted(remediation_results, key=lambda r: r.id),
         rule_metrics=rule_metrics,
         category_metrics=category_metrics,
+        difficulty_metrics=difficulty_metrics,
     )
 
 
@@ -793,6 +912,8 @@ def prediction_digest(data: bytes) -> str:
 __all__ = [
     "EVALUATOR_VERSION",
     "EVALUATION_SCHEMA_VERSION",
+    "REPORTED_DIFFICULTIES",
+    "UNKNOWN_DIFFICULTY",
     "EvaluationResult",
     "evaluate",
     "prediction_digest",

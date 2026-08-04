@@ -27,6 +27,7 @@ FINDING_RESULTS_NAME = "finding-results.jsonl"
 REMEDIATION_RESULTS_NAME = "remediation-results.jsonl"
 RULE_METRICS_NAME = "rule-metrics.jsonl"
 CATEGORY_METRICS_NAME = "category-metrics.jsonl"
+DIFFICULTY_METRICS_NAME = "difficulty-metrics.jsonl"
 EVALUATION_REPORT_NAME = "evaluation-report.md"
 
 
@@ -143,6 +144,48 @@ def render_report(result: EvaluationResult) -> str:
     lines.extend(["", "### By category", "", _TABLE_HEADER])
     for name in sorted(findings["by_category"]):
         lines.append(_metric_row(name, findings["by_category"][name]))
+    lines.extend(
+        [
+            "",
+            "### By difficulty",
+            "",
+            "Difficulty is *detection* complexity — how much evidence a detector must "
+            "relate before it can decide — derived from each rule's reasoning scope. "
+            "It is independent of severity, of the maturity profile, and of how hard "
+            "the defect is to fix. Every scored pair belongs to exactly one tier, so "
+            "these rows partition the confusion matrix above.",
+            "",
+            _TABLE_HEADER,
+        ]
+    )
+    # ``by_difficulty`` is already built in tier order (bronze, silver, gold,
+    # then any defensive bucket), so iterate it rather than re-deriving an order
+    # that could drift from the one the summary published.
+    for name, block in findings["by_difficulty"].items():
+        lines.append(_metric_row(name, block))
+    lines.extend(
+        [
+            "",
+            "Per tier: reserved-control false positives, and remediation quality on the "
+            "findings that tier's rules produced.",
+            "",
+            "| tier | rules | reserved-control FPs | reserved-control FP rate | "
+            "remediation coverage | remediation correctness | end-to-end | unsafe |",
+            "| --- | ---: | ---: | --- | --- | --- | --- | ---: |",
+        ]
+    )
+    rules_by_difficulty = universe["rules_by_difficulty"]
+    for name, block in findings["by_difficulty"].items():
+        reserved_block = block["reserved_controls"]
+        rem = block["remediation"]
+        lines.append(
+            f"| {name} | {rules_by_difficulty.get(name, 0)} | "
+            f"{reserved_block['false_positives']} | "
+            f"{_fmt(reserved_block['false_positive_rate'])} | "
+            f"{_fmt(rem['coverage'])} | {_fmt(rem['correctness_given_true_positive'])} | "
+            f"{_fmt(rem['end_to_end'])} | {rem['unsafe_actions']} |"
+        )
+
     lines.extend(["", "### By entity class", "", _TABLE_HEADER])
     for name in sorted(findings["by_entity_class"]):
         lines.append(_metric_row(name, findings["by_entity_class"][name]))
@@ -242,6 +285,7 @@ def evaluation_bytes(result: EvaluationResult) -> dict[str, bytes]:
         REMEDIATION_RESULTS_NAME: serialize.jsonl_bytes(result.remediation_results),
         RULE_METRICS_NAME: serialize.jsonl_bytes(result.rule_metrics),
         CATEGORY_METRICS_NAME: serialize.jsonl_bytes(result.category_metrics),
+        DIFFICULTY_METRICS_NAME: serialize.jsonl_bytes(result.difficulty_metrics),
     }
 
 
@@ -300,6 +344,7 @@ __all__ = [
     "REMEDIATION_RESULTS_NAME",
     "RULE_METRICS_NAME",
     "CATEGORY_METRICS_NAME",
+    "DIFFICULTY_METRICS_NAME",
     "EVALUATION_REPORT_NAME",
     "render_report",
     "evaluation_bytes",

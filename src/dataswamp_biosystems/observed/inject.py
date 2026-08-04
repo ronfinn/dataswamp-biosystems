@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from dataswamp_biosystems.company.config import CanonicalConfig
+from dataswamp_biosystems.observed.difficulty import Difficulty
 from dataswamp_biosystems.observed.engine import (
     OBSERVED_GENERATOR_VERSION,
     ObservedResult,
@@ -130,6 +131,7 @@ def inject_defects(
     profile: ObservedProfile,
     defect_seed: int,
     output_dir: Path,
+    difficulty: Difficulty | None = None,
 ) -> InjectionReport:
     """Read truth from disk, inject defects, and write the observed state.
 
@@ -146,7 +148,7 @@ def inject_defects(
 
     before = compute_truth_checksums(truth_dir)
     graph = load_truth_from_disk(truth_dir, config, plan)
-    result = generate_observed(graph, config, profile, defect_seed)
+    result = generate_observed(graph, config, profile, defect_seed, difficulty)
 
     if compute_truth_checksums(truth_dir) != before:
         raise TruthImmutabilityError("truth files changed during observed-state generation")

@@ -124,6 +124,9 @@ Also implemented:
 * End-to-end demonstration (`dataswamp demo`) and example submissions
 * Reference baseline agents with published canonical scores
   (see [baselines.md](baselines.md))
+* Benchmark difficulty tiers — bronze, silver and gold, derived from a per-rule
+  reasoning scope — with tier-restricted generation and per-tier evaluation
+  (see [difficulty-tiers.md](difficulty-tiers.md))
 
 Remaining for v0.1:
 
@@ -131,10 +134,16 @@ Remaining for v0.1:
   (see [generated-data-licensing-decision.md](generated-data-licensing-decision.md))
 * First official GitHub release
 
-Beyond v0.1, scenario packs composing profiles and defect sets into named
-benchmark cases, difficulty tiers, run-to-run comparison reporting, and
-assessment agents scored against the observed state's expected findings and
-remediations, remain future work.
+Difficulty tiers ship in two parts. Bronze, silver and gold are complete; the
+**adversarial** tier is not. Adversarial is a property of a *scenario* rather
+than of a rule — a near-miss control that looks exactly like a defect and is
+correct — so it needs a scenario layer rather than a filter over the existing
+rule catalogue. `Difficulty.ADVERSARIAL` is reserved and no rule holds it.
+
+Beyond v0.1, adversarial scenarios and near-miss controls, scenario packs
+composing profiles and defect sets into named benchmark cases, run-to-run
+comparison reporting, and assessment agents scored against the observed state's
+expected findings and remediations, remain future work.
 
 ### v0.2 — Metadata and Lineage Integrations
 

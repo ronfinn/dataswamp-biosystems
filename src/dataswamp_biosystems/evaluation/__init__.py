@@ -20,6 +20,8 @@ from __future__ import annotations
 from dataswamp_biosystems.evaluation.engine import (
     EVALUATION_SCHEMA_VERSION,
     EVALUATOR_VERSION,
+    REPORTED_DIFFICULTIES,
+    UNKNOWN_DIFFICULTY,
     EvaluationResult,
     evaluate,
     prediction_digest,
@@ -65,6 +67,7 @@ from dataswamp_biosystems.evaluation.predictions import (
 )
 from dataswamp_biosystems.evaluation.writer import (
     CATEGORY_METRICS_NAME,
+    DIFFICULTY_METRICS_NAME,
     EVALUATION_REPORT_NAME,
     EVALUATION_SUMMARY_NAME,
     FINDING_RESULTS_NAME,
@@ -78,6 +81,8 @@ from dataswamp_biosystems.evaluation.writer import (
 __all__ = [
     "EVALUATOR_VERSION",
     "EVALUATION_SCHEMA_VERSION",
+    "REPORTED_DIFFICULTIES",
+    "UNKNOWN_DIFFICULTY",
     "EvaluationResult",
     "evaluate",
     "prediction_digest",
@@ -115,6 +120,7 @@ __all__ = [
     "REMEDIATION_RESULTS_NAME",
     "RULE_METRICS_NAME",
     "CATEGORY_METRICS_NAME",
+    "DIFFICULTY_METRICS_NAME",
     "EVALUATION_REPORT_NAME",
     "render_report",
     "evaluation_bytes",

@@ -195,6 +195,21 @@ against the same canonical `demo` scenario:
 | `naive-metadata` | 65 | 0.9077 | 0.3333 | 0.9991 | 0.4876 | 0 | 0.0000 |
 | `rule-based` | 92 | 1.0000 | 0.5198 | 1.0000 | 0.6840 | 0 | 0.5198 |
 
+Broken out by **difficulty tier** — how much evidence a detector must relate
+before it can decide, which is not severity and not the maturity profile:
+
+| Baseline | bronze F1 | silver F1 | gold F1 |
+| --- | ---: | ---: | ---: |
+| `null` | 0.0000 | 0.0000 | 0.0000 |
+| `naive-metadata` | 0.9138 | 0.0000 | 0.3636 |
+| `rule-based` | 0.9839 | 0.7438 | 0.0000 |
+
+Performance is not monotonic in tier and is reported as measured: the rule-based
+agent scores zero at gold because none of the rules it re-implements is a
+cross-asset or peer-relative one, and the naive agent's gold showing is shallow
+signals coinciding with peer-relative rules rather than reasoning. See
+[docs/difficulty-tiers.md](docs/difficulty-tiers.md).
+
 The null baseline's precision is `null`, not `0.0`: it predicted nothing, so the
 denominator is empty and the quantity was never measured. The rule-based agent
 implements 20 of the 41 rules; the 21 it cannot reach from observed metadata are
@@ -281,6 +296,7 @@ published yet. The package version is `0.1.0rc1`.
 | [docs/observed-state.md](docs/observed-state.md) | Defect taxonomy, ledgers, profiles, control partition |
 | [docs/evaluation.md](docs/evaluation.md) | The prediction contract and the scoring semantics |
 | [docs/baselines.md](docs/baselines.md) | The reference baseline agents, their permitted reads and canonical scores |
+| [docs/difficulty-tiers.md](docs/difficulty-tiers.md) | Bronze/silver/gold, reasoning scopes, tier generation and per-tier scoring |
 | [docs/bundles.md](docs/bundles.md) | Bundle layout, manifest, verification, reader API |
 | [docs/datahub.md](docs/datahub.md) | URNs, entity/aspect mapping, the privilege boundary |
 | [docs/public-api.md](docs/public-api.md) | Stable vs experimental vs internal interfaces |

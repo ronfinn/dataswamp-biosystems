@@ -106,8 +106,13 @@ regulatory compliance.
 ### Known limitations
 
 - Small by design — a correctness benchmark, not a load test.
-- One estate shape and one defect taxonomy; no difficulty tiers or adversarial
-  scenarios yet.
+- One estate shape and one defect taxonomy. Difficulty tiers ship as bronze,
+  silver and gold, derived from a per-rule reasoning scope, with tier-restricted
+  generation and per-tier evaluation
+  ([difficulty-tiers.md](difficulty-tiers.md)). **Adversarial scenarios and
+  near-miss controls are not implemented** — adversarial is a property of a
+  scenario rather than of a rule, and needs a scenario layer; the enum member is
+  reserved and no rule holds it.
 - The published baselines are metadata-only and deliberately simple; none opens
   a materialized scientific file, and no LLM-backed agent ships.
 - No run-to-run comparison or regression reporting.

@@ -95,7 +95,7 @@ def test_list_defects_reports_severity_remediation_and_approval() -> None:
     seen_approval: set[str] = set()
     for row in registry_rows():
         line = lines[row["rule_id"]]
-        assert f"[{row['category']}/{row['severity']}]" in line
+        assert f"[{row['category']}/{row['severity']}/{row['difficulty']}]" in line
         assert f"remediation={row['remediation_availability']}" in line
         assert f"approval={row['approval_policy']}" in line
         if row["approver_role"] != "none":

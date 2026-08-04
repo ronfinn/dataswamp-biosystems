@@ -26,6 +26,26 @@ from dataswamp_biosystems.observed.defects import (
     registry_rows,
     validate_registry,
 )
+from dataswamp_biosystems.observed.difficulty import (
+    DIFFICULTY_BY_SCOPE,
+    DIFFICULTY_MODEL_VERSION,
+    DIFFICULTY_ORDER,
+    RULE_DIFFICULTIES,
+    RULE_REASONING_SCOPES,
+    SCOPE_ORDER,
+    Difficulty,
+    DifficultySelection,
+    ReasoningScope,
+    UnavailableDifficultyError,
+    UnknownRuleDifficultyError,
+    classification_problems,
+    difficulty_for,
+    reasoning_scope_for,
+    resolve_selection,
+    rules_at,
+    rules_by_difficulty,
+    selectable_rules,
+)
 from dataswamp_biosystems.observed.engine import (
     OBSERVED_GENERATOR_VERSION,
     OBSERVED_SCHEMA_VERSION,
@@ -71,7 +91,11 @@ from dataswamp_biosystems.observed.profiles import (
     profile_spec,
     profile_specs,
 )
-from dataswamp_biosystems.observed.validate import read_observed_meta, validate_observed
+from dataswamp_biosystems.observed.validate import (
+    read_observed_difficulty,
+    read_observed_meta,
+    validate_observed,
+)
 from dataswamp_biosystems.observed.writer import (
     CONTROLS_NAME,
     RULE_SCOPE_NAME,
@@ -80,6 +104,24 @@ from dataswamp_biosystems.observed.writer import (
 
 __all__ = [
     "DEFECTS",
+    "DIFFICULTY_BY_SCOPE",
+    "DIFFICULTY_MODEL_VERSION",
+    "DIFFICULTY_ORDER",
+    "RULE_DIFFICULTIES",
+    "RULE_REASONING_SCOPES",
+    "SCOPE_ORDER",
+    "Difficulty",
+    "DifficultySelection",
+    "ReasoningScope",
+    "UnavailableDifficultyError",
+    "UnknownRuleDifficultyError",
+    "classification_problems",
+    "difficulty_for",
+    "reasoning_scope_for",
+    "resolve_selection",
+    "rules_at",
+    "rules_by_difficulty",
+    "selectable_rules",
     "DefectDef",
     "RuleContract",
     "RULE_CONTRACTS",
@@ -120,6 +162,7 @@ __all__ = [
     "OBSERVED_SCHEMA_VERSION",
     "ObservedResult",
     "generate_observed",
+    "read_observed_difficulty",
     "read_observed_meta",
     "validate_observed",
     "write_observed",
