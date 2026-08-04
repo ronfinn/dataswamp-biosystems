@@ -15,6 +15,61 @@ entries below.
 
 ### Added
 
+- **Benchmark difficulty tiers.** Every one of the 41 defect rules is classified
+  bronze, silver or gold by a declared per-rule **reasoning scope** — what
+  evidence a detector must relate before it can decide — rather than by hand.
+  Scopes are `single-record` (bronze, 13 rules), `cross-record` (silver, 15) and
+  `cross-asset`/`peer-relative` (gold, 13). Difficulty is detection complexity
+  and is independent of severity, of the maturity profile and of remediation
+  availability; the independence is enforced by tests, not asserted. See
+  [docs/difficulty-tiers.md](docs/difficulty-tiers.md).
+- **Tier-restricted generation.** `dataswamp inject-defects --difficulty
+  bronze|silver|gold|mixed`. `--profile` and `--difficulty` are independent
+  filters that compose: the profile sets how many defects are injected, the tier
+  sets which rules may inject them. A tier and profile with an empty
+  intersection is an error rather than a silently empty benchmark.
+- **Difficulty in the rule registry surface.** `list-defects` shows
+  `[category/severity/difficulty]` per rule and a per-tier summary;
+  `list-defects --json` gains a `difficulty_coverage` block; `validate-defects`
+  fails if any rule is unclassified.
+- **Per-tier evaluation.** `summary.findings.by_difficulty` (full confusion
+  matrix, metrics, reserved-control false positives and rate, and remediation
+  coverage/correctness/end-to-end/unsafe counts per tier),
+  `summary.universe.rules_by_difficulty`, a new `difficulty-metrics.jsonl`
+  alongside the existing rule and category metric files, and a **By difficulty**
+  section in `evaluation-report.md`. Difficulty is derived from the rule
+  registry, never duplicated into emitted ground truth.
+- **Measured per-tier baseline results** for all three reference agents, pinned
+  cell by cell in `tests/baselines/test_tier_scores.py` and published in
+  [docs/difficulty-tiers.md](docs/difficulty-tiers.md) and
+  [docs/baselines.md](docs/baselines.md).
+
+### Changed
+
+- **Evaluation schema 1 → 2**, additively. Everything a schema-1 reader looked
+  for is still in the same place with the same meaning; the tier blocks and the
+  new metric file are new material.
+- `validate-observed` now recovers the generated tier from `provenance.json`, so
+  it regenerates the same benchmark it is checking.
+
+### Notes
+
+- **Adversarial scenarios are not implemented.** `Difficulty.ADVERSARIAL` exists
+  as a reserved enum member that no rule holds; the CLI does not offer it and the
+  Python API rejects it with `UnavailableDifficultyError`. Adversarial is a
+  property of a *scenario*, not of a rule, and needs the scenario layer. Issue
+  #16 remains open for that second milestone.
+- **No observed-schema, generator-version or golden-digest change.** The observed
+  schema stays at 3 and the observed generator at 1.2.0. A run without
+  `--difficulty` is byte-identical to the previous behaviour, the canonical
+  golden digests were not regenerated, and the published canonical baseline
+  scores are unchanged. `ControlRecord`, `RuleScopeRecord`, `ExpectedFinding`,
+  `ExpectedRemediation`, `observed-graph.json` and `profile-summary.json` gained
+  no difficulty field — the tier is recorded in provenance, which no digest
+  covers, and only when one was chosen.
+
+### Added (reference baseline agents)
+
 - **Reference baseline agents.** Three small, readable benchmark participants
   published so a result has something to be compared against: `null` (claims
   nothing — the recall floor and specificity ceiling), `naive-metadata` (shallow
@@ -29,7 +84,7 @@ entries below.
   reported in the documentation rather than pinned, because it is
   machine-dependent.
 
-### Notes
+### Notes (reference baseline agents)
 
 - Baselines are scored as genuine participants: each reads `observed-graph.json`
   and nothing else. The boundary is structural — one module opens one file — and

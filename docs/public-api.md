@@ -51,7 +51,7 @@ not import Python.
 | Estate manifest + sidecars | `estate_schema_version` |
 | Observed ledgers, controls, rule scope | `observed_schema_version` |
 | Prediction submissions | `schema_version` (currently `1`) |
-| Evaluation reports | `evaluation_schema_version` |
+| Evaluation reports | `evaluation_schema_version` (currently `2`) |
 | Bundle manifest + checksums | `bundle_schema_version` |
 | DataHub Metadata Change Proposals | `DATAHUB_MODEL_VERSION` |
 
@@ -110,6 +110,14 @@ Usable and documented, but the shapes are still settling:
 * **The defect registry** — `observed.DEFECTS`, `registry_rows`,
   `contract_coverage`. Rule ids are stable within a schema version; the registry
   will grow, and growth changes benchmark results.
+* **The difficulty model** — `observed.Difficulty`, `ReasoningScope`,
+  `difficulty_for`, `reasoning_scope_for`, `rules_at`, `rules_by_difficulty`,
+  `selectable_rules`, `DifficultySelection`, `resolve_selection`. The tier of a
+  given rule is stable within `DIFFICULTY_MODEL_VERSION`; that constant is bumped
+  when a reclassification makes a published tier result non-comparable.
+  `Difficulty.ADVERSARIAL` is reserved and no rule holds it — requesting it for
+  generation raises `UnavailableDifficultyError`. See
+  [docs/difficulty-tiers.md](difficulty-tiers.md).
 * **`company.load_config` and the config models** — the YAML schema is versioned
   and stable; the Python model classes are not yet frozen.
 * **`paths.ensure_safe_output_dir`** — the containment policy is deliberately

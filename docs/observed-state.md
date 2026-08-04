@@ -353,6 +353,29 @@ global cap.
 `profile-summary.json` reports the exact final distribution: totals, controls,
 and counts by category, severity, rule, modality group, and entity kind.
 
+## Difficulty tiers
+
+A **profile** sets *how many* defects are injected. A **difficulty tier** sets
+*which rules* may inject them — bronze, silver or gold, derived from each rule's
+declared reasoning scope. They are independent filters that compose, and neither
+is derived from the other; `--profile poor --difficulty gold` is a pervasive
+estate of hard-to-detect problems.
+
+```bash
+dataswamp inject-defects --profile demo --difficulty bronze --output-dir generated/observed-bronze
+```
+
+`--difficulty` defaults to `mixed`, the full rule catalogue, which is
+byte-identical to the behaviour before tiers existed. A tier restricts the rule
+set and nothing else: record schemas, the observed schema version and every file
+name are unchanged. The chosen tier is recorded in `provenance.json` — not in any
+ground-truth artefact — and `validate-observed` reads it back so it regenerates
+the same benchmark it is checking.
+
+A tier and profile with an empty intersection is an error rather than an empty
+benchmark. See [difficulty-tiers.md](difficulty-tiers.md) for the full model,
+the per-rule classification and the measured per-tier baseline results.
+
 ## Commands
 
 ```bash
@@ -361,12 +384,16 @@ dataswamp validate-defects             # validate the registry itself
 dataswamp inject-defects \
   --truth generated/truth/truth-graph.json \
   --seed 20260717 --profile demo       # derive the observed state (default output generated/observed/)
+dataswamp inject-defects \
+  --truth generated/truth --profile demo --difficulty gold \
+  --output-dir generated/observed-gold # one difficulty tier only
 dataswamp validate-observed            # re-check a generated observed state
 ```
 
 `inject-defects` defaults its output to `generated/observed/`; pass
 `--output-dir` for another location and `--force` to overwrite a non-empty one.
 `--seed` is the *defect* seed; the truth seed comes from the truth manifest.
+`--difficulty` selects a benchmark tier and defaults to `mixed`.
 
 The output directory is checked against the command's protected inputs before
 anything is staged, renamed or removed. `inject-defects` refuses an output

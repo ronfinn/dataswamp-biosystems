@@ -136,6 +136,50 @@ construction.
 
 **All three are silent on the `gold` profile**, which injects nothing. That is
 the sharpest false-positive test available, and it is a test, not a claim.
+(Note that the `gold` *profile* — a pristine estate — is unrelated to the `gold`
+*difficulty tier* below. Maturity and difficulty are different axes that happen
+to share a metal.)
+
+## Scores by difficulty tier
+
+The same three agents against a tier-restricted canonical scenario
+(`--difficulty bronze|silver|gold`, `demo` profile). Nothing was tuned; these
+agents were written before tiers existed. See
+[docs/difficulty-tiers.md](difficulty-tiers.md) for what the tiers mean.
+
+| Tier | Agent | TP | FP | FN | Precision | Recall | Specificity | F1 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| bronze (63 defects) | `null` | 0 | 0 | 63 | n/a | 0.0000 | 1.0000 | 0.0000 |
+| | `naive-metadata` | 53 | 0 | 10 | 1.0000 | 0.8413 | 1.0000 | 0.9138 |
+| | `rule-based` | 61 | 0 | 2 | 1.0000 | 0.9683 | 1.0000 | 0.9839 |
+| silver (76 defects) | `null` | 0 | 0 | 76 | n/a | 0.0000 | 1.0000 | 0.0000 |
+| | `naive-metadata` | 0 | 0 | 76 | n/a | 0.0000 | 1.0000 | 0.0000 |
+| | `rule-based` | 45 | 0 | 31 | 1.0000 | 0.5921 | 1.0000 | 0.7438 |
+| gold (62 defects) | `null` | 0 | 0 | 62 | n/a | 0.0000 | 1.0000 | 0.0000 |
+| | `naive-metadata` | 16 | 10 | 46 | 0.6154 | 0.2581 | 0.9953 | 0.3636 |
+| | `rule-based` | 0 | 0 | 62 | n/a | 0.0000 | 1.0000 | 0.0000 |
+
+**Performance is not monotonic in tier, and it is reported as measured.**
+
+The rule-based agent is near-perfect at bronze, competent at silver and scores
+**exactly zero at gold** — it re-implements a transparent subset of the rules
+against observed metadata, and none of that subset is a gold rule. Cross-asset
+and peer-relative detection is not something a small hand-written checker does by
+accident, and the tier axis is what makes that visible: the mixed F1 of 0.6840
+does not say it.
+
+The naive agent scores *higher at gold than at silver* (0.3636 versus 0.0000).
+It has not learned to reason across assets; its shallow single-field signals
+coincide with some peer-relative rules, and gold is also the only place it
+produces false positives at all — precision 0.6154 against 1.0000 at bronze.
+
+All ten false positives across every tier are on non-reserved entities; no
+baseline flags a reserved control at any tier, and none proposes an unsafe
+remediation.
+
+These numbers are pinned cell by cell in `tests/baselines/test_tier_scores.py`,
+written out by hand rather than regenerated, so a behaviour change has to be
+re-measured and re-typed.
 
 ## What the rule-based baseline covers, and what it cannot
 

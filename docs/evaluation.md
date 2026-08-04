@@ -219,8 +219,39 @@ down with a number nobody measured.
   macro recall over 3 of 41 rules can never be mistaken for one over all 41.
 
 Breakdowns are reported by rule, category, severity, entity kind, entity class
-(`asset` vs `file`), and control partition (`reserved` vs `non-reserved`). Every
-breakdown partitions the same pairs, so its cells sum to the overall matrix.
+(`asset` vs `file`), control partition (`reserved` vs `non-reserved`), and
+**difficulty** (`bronze`, `silver`, `gold`). Every breakdown partitions the same
+pairs, so its cells sum to the overall matrix.
+
+### By difficulty
+
+`findings.by_difficulty` groups results by the benchmark tier of each pair's
+rule — *detection* complexity, derived from the rule's declared reasoning scope.
+See [docs/difficulty-tiers.md](difficulty-tiers.md) for what the tiers mean and
+why they are not severity, maturity or remediation complexity.
+
+Difficulty is looked up in the rule registry, never read from ground truth: the
+emitted observed state carries no difficulty field, and duplicating one there
+would let a stale ledger disagree with the live classification.
+
+Each tier block carries more than the standard breakdown:
+
+| key | contents |
+| --- | --- |
+| `counts`, `metrics` | the standard confusion matrix and metric block |
+| `reserved_controls` | that tier's reserved-control counts, `false_positives`, and `false_positive_rate` |
+| `remediation` | `coverage`, `correctness_given_true_positive`, `end_to_end`, `unsafe_actions`, `unsafe_on_reserved_control` |
+
+`universe.rules_by_difficulty` records how many *rules* each tier contributed, so
+a tier-restricted benchmark is distinguishable from one an agent simply failed:
+zero rules is "not attempted", not "attempted badly".
+
+Bronze, silver and gold are always present, even at zero, so a report's shape
+does not depend on which scenario produced it. A tier with no pairs reports
+`null` metrics over zero denominators — an unmeasured tier is not a perfect one.
+An `unknown` key appears only if an unclassified rule reached scoring, which
+`dataswamp validate-defects` prevents; its presence in a report is itself the
+signal.
 
 ### Reserved controls
 
@@ -320,6 +351,7 @@ ROC/AUC — that would be a modelling claim this milestone has no mandate to mak
 | `remediation-results.jsonl` | one record per expected or submitted remediation decision |
 | `rule-metrics.jsonl` | per-rule counts and metrics |
 | `category-metrics.jsonl` | per-category counts and metrics |
+| `difficulty-metrics.jsonl` | per-tier counts and metrics (bronze, silver, gold) |
 | `evaluation-report.md` | the human-readable scorecard, suitable for a PR comment or CI artefact |
 | `provenance.json` | the shared environment/scenario provenance object |
 
