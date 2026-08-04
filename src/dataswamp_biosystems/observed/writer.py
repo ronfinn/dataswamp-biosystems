@@ -101,16 +101,22 @@ def write_observed(
     same staged directory so the whole bundle is swapped into place atomically.
     """
     output_dir = Path(output_dir)
+    scenario: dict[str, Any] = {
+        "defect_seed": result.meta.defect_seed,
+        "profile": result.meta.profile,
+        "truth_seed": result.meta.truth_seed,
+        "truth_generator_version": result.meta.truth_generator_version,
+    }
+    # Present only for a tier-restricted run. Provenance is the one output no
+    # digest covers, so recording the tier here says what was generated without
+    # moving a single canonical byte of the default scenario.
+    if result.difficulty is not None:
+        scenario["difficulty"] = result.difficulty.value
     provenance = provenance_bytes(
         layer="observed",
         generator_version=result.meta.generator_version,
         schema_version=result.meta.schema_version,
-        scenario={
-            "defect_seed": result.meta.defect_seed,
-            "profile": result.meta.profile,
-            "truth_seed": result.meta.truth_seed,
-            "truth_generator_version": result.meta.truth_generator_version,
-        },
+        scenario=scenario,
     )
     files = {
         **observed_bytes(result),

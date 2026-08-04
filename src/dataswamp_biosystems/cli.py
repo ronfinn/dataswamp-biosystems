@@ -68,6 +68,8 @@ from dataswamp_biosystems.evaluation import (
 from dataswamp_biosystems.examples import example_path
 from dataswamp_biosystems.observed import (
     DEFECTS,
+    DIFFICULTY_ORDER,
+    DifficultySelection,
     ObservedConfigError,
     ObservedProfile,
     ObservedValidationError,
@@ -75,7 +77,9 @@ from dataswamp_biosystems.observed import (
     contract_coverage,
     read_observed_meta,
     registry_rows,
+    resolve_selection,
     resolve_truth_dir,
+    rules_by_difficulty,
     validate_registry,
 )
 from dataswamp_biosystems.observed import (
@@ -491,10 +495,15 @@ def list_defects(
     Exit codes: 0 = printed.
     """
     rows = registry_rows()
+    tiers = rules_by_difficulty()
     if as_json:
         # Coverage travels with the rules so a consumer can see which benchmark
         # states the catalogue exercises without re-deriving it from the rows.
-        payload = {"rules": rows, "contract_state_coverage": contract_coverage()}
+        payload = {
+            "rules": rows,
+            "contract_state_coverage": contract_coverage(),
+            "difficulty_coverage": {tier.value: list(rule_ids) for tier, rule_ids in tiers.items()},
+        }
         typer.echo(json.dumps(payload, indent=2, sort_keys=True))
         return
 
@@ -513,7 +522,8 @@ def list_defects(
             flags.append(f"reason={row['non_remediable_reason']}")
         flag_text = f" [{', '.join(flags)}]"
         typer.echo(
-            f"  {row['rule_id']} [{row['category']}/{row['severity']}] {row['title']}{flag_text}"
+            f"  {row['rule_id']} [{row['category']}/{row['severity']}/"
+            f"{row['difficulty']}] {row['title']}{flag_text}"
         )
     typer.echo("Rules by category:")
     for category in sorted(by_category):
@@ -521,6 +531,11 @@ def list_defects(
     typer.echo("Rules by contract state:")
     for state, rule_ids in contract_coverage().items():
         typer.echo(f"  {state}: {len(rule_ids)}")
+    # Difficulty is detection complexity, derived from each rule's reasoning
+    # scope — printed apart from severity so the two are not read as one axis.
+    typer.echo("Rules by difficulty (reasoning complexity, not severity):")
+    for tier in DIFFICULTY_ORDER:
+        typer.echo(f"  {tier.value}: {len(tiers[tier])}")
 
 
 @app.command(name="validate-defects")
@@ -529,9 +544,10 @@ def validate_defects() -> None:
 
     Checks structural well-formedness, that every rule's remediation contract is
     internally consistent (remediation availability and approval policy are
-    independent, so neither may be inferred from the other), and that the
-    catalogue collectively covers every benchmark contract state. Requires no
-    generated benchmark output.
+    independent, so neither may be inferred from the other), that every rule
+    declares exactly one reasoning scope from which its difficulty tier is
+    derived, and that the catalogue collectively covers every benchmark contract
+    state. Requires no generated benchmark output.
 
     Exit codes: 0 = valid, 1 = the registry has structural or contract problems.
     """
@@ -545,6 +561,9 @@ def validate_defects() -> None:
     typer.echo("Contract-state coverage:")
     for state, rule_ids in contract_coverage().items():
         typer.echo(f"  {state}: {len(rule_ids)} rule(s)")
+    typer.echo("Difficulty coverage (every rule classified by reasoning scope):")
+    for tier, tier_rules in rules_by_difficulty().items():
+        typer.echo(f"  {tier.value}: {len(tier_rules)} rule(s)")
 
 
 @app.command(name="inject-defects")
@@ -561,6 +580,19 @@ def inject_defects(
         ObservedProfile,
         typer.Option("--profile", help="Maturity profile controlling the defect mix."),
     ] = ObservedProfile.DEMO,
+    difficulty: Annotated[
+        DifficultySelection,
+        typer.Option(
+            "--difficulty",
+            help=(
+                "Benchmark tier: how much evidence a detector must relate before it "
+                "can decide (bronze = one record, silver = one join, gold = several "
+                "assets or a peer comparison). This is reasoning complexity, not "
+                "severity and not maturity — use --profile for how many defects are "
+                "injected. 'mixed' is the full rule catalogue and the default."
+            ),
+        ),
+    ] = DifficultySelection.MIXED,
     config_dir: Annotated[
         Path,
         typer.Option("--config-dir", help="Directory containing the canonical configuration."),
@@ -576,12 +608,18 @@ def inject_defects(
 ) -> None:
     """Derive the observed state from an on-disk truth graph, without mutating it.
 
+    ``--profile`` and ``--difficulty`` are independent filters: the profile sets
+    how many defects are injected, the tier sets which rules may inject them. A
+    tier whose rules have nothing to draw from under the chosen profile is an
+    error rather than an empty benchmark.
+
     ``output_dir`` is replaced wholesale, so it may not be, contain, or sit
     inside the configuration directory or the truth directory it reads from.
 
     Exit codes: 0 = written, 1 = invalid config/plan, failed generation checks,
-    or a truth-immutability breach, 2 = the truth graph could not be read, or an
-    unsafe/non-empty output directory was given.
+    or a truth-immutability breach, 2 = the truth graph could not be read, an
+    empty profile/tier intersection, or an unsafe/non-empty output directory was
+    given.
     """
     config_dir = resolve_config_dir(config_dir)
     config = _load_config_or_exit(config_dir)
@@ -597,8 +635,9 @@ def inject_defects(
         force=force,
     )
 
+    tier = resolve_selection(difficulty)
     try:
-        report = run_defect_injection(truth, config, plan, profile, resolved_seed, output_dir)
+        report = run_defect_injection(truth, config, plan, profile, resolved_seed, output_dir, tier)
     except ObservedConfigError as exc:
         typer.echo(f"Could not inject defects: {exc}", err=True)
         raise typer.Exit(code=2) from exc
@@ -614,7 +653,8 @@ def inject_defects(
     totals = report.result.summary["totals"]
     typer.echo(
         f"Observed state written to {output_dir} "
-        f"(profile {profile.value}, defect seed {resolved_seed})."
+        f"(profile {profile.value}, difficulty {difficulty.value}, "
+        f"defect seed {resolved_seed})."
     )
     typer.echo(f"  defects injected: {totals['defects']}")
     typer.echo(f"  rules fired: {totals['rules_fired']} / {totals['rules_defined']}")

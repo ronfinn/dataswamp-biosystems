@@ -17,6 +17,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from dataswamp_biosystems.observed.difficulty import (
+    classification_problems,
+    difficulty_for,
+    reasoning_scope_for,
+)
 from dataswamp_biosystems.observed.entities import (
     NO_REMEDIATION_ACTION,
     ApprovalEvidence,
@@ -1750,6 +1755,10 @@ def validate_registry(defects: dict[str, DefectDef]) -> list[str]:
         problems.extend(_contract_problems(definition, prefix))
 
     problems.extend(_coverage_problems(defects))
+    # A rule whose detection difficulty is unstated cannot be tiered, so an
+    # unclassified rule is a registry error rather than something the tier
+    # filter discovers at generation time.
+    problems.extend(f"<difficulty> {problem}" for problem in classification_problems(defects))
     return sorted(problems)
 
 
@@ -1861,6 +1870,11 @@ def registry_rows() -> list[dict[str, Any]]:
                 "title": definition.title,
                 "category": definition.category.value,
                 "severity": definition.default_severity.value,
+                # Detection difficulty and the reasoning scope it is derived
+                # from, side by side: the scope is the checkable claim, the
+                # difficulty is what follows from it.
+                "reasoning_scope": reasoning_scope_for(definition.rule_id).value,
+                "difficulty": difficulty_for(definition.rule_id).value,
                 "applies_to": ",".join(definition.applies_to_kinds),
                 "modalities": ",".join(definition.applies_to_modalities),
                 "remediation_availability": definition.remediation_availability.value,

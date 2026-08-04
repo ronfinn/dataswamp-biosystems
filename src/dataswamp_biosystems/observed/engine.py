@@ -30,6 +30,10 @@ from dataswamp_biosystems.observed.defects import (
     contract_coverage,
     defects_in_order,
 )
+from dataswamp_biosystems.observed.difficulty import (
+    Difficulty,
+    selectable_rules,
+)
 from dataswamp_biosystems.observed.entities import (
     NO_REMEDIATION_ACTION,
     ChangeOp,
@@ -42,6 +46,7 @@ from dataswamp_biosystems.observed.entities import (
     ObservedMeta,
     RuleScopeRecord,
 )
+from dataswamp_biosystems.observed.errors import ObservedConfigError
 from dataswamp_biosystems.observed.index import SHARD_NAMES, GraphIndex, JsonRecord
 from dataswamp_biosystems.observed.profiles import ObservedProfile, profile_spec
 from dataswamp_biosystems.truth import ids
@@ -79,6 +84,11 @@ class ObservedResult:
     controls: list[ControlRecord]
     rule_scopes: list[RuleScopeRecord]
     summary: dict[str, Any]
+    #: The tier this run was restricted to, or ``None`` for the full catalogue.
+    #: Deliberately *not* part of :class:`ObservedMeta`: meta is serialized into
+    #: the observed graph and the profile summary, and a default run's bytes must
+    #: not move. It travels in provenance instead, which no digest covers.
+    difficulty: Difficulty | None = None
 
 
 @dataclass
@@ -448,13 +458,60 @@ def modality_group_of(index: GraphIndex, entity_id: str) -> str:
     return str(record.get("modality_group", "unknown"))
 
 
+def _require_non_empty_intersection(
+    difficulty: Difficulty,
+    profile: ObservedProfile,
+    control_fraction: float,
+    rule_scopes: list[RuleScopeRecord],
+) -> None:
+    """Fail loudly when a tier and a profile leave no rule anything to draw from.
+
+    A benchmark with an empty universe is not a hard benchmark, it is a broken
+    one: every agent scores identically on it and the report looks like a result.
+    The check runs only when a tier was explicitly requested, so the default path
+    keeps its previous behaviour — including profiles such as ``gold`` that
+    legitimately inject nothing across the *whole* catalogue.
+    """
+    if any(scope.eligible_count for scope in rule_scopes):
+        return
+    raise ObservedConfigError(
+        f"difficulty {difficulty.value!r} and profile {profile.value!r} have an empty "
+        f"intersection: none of the {len(rule_scopes)} {difficulty.value} rule(s) has an "
+        f"eligible entity (the profile reserves {control_fraction:.0%} of assets as "
+        f"controls), so no defect could be injected; choose another profile or tier "
+        f"rather than publishing a benchmark nothing can be scored against"
+    )
+
+
+def _rules_for_run(difficulty: Difficulty | None) -> list[DefectDef]:
+    """Return the definitions this run may draw from, in the fixed apply order.
+
+    ``None`` means the whole catalogue — the pre-existing behaviour, reproduced
+    exactly, including the order. A tier restricts *which* rules may fire and
+    nothing else: the per-rule selection RNG is keyed by rule id, so a rule draws
+    the same candidates whichever run it takes part in.
+    """
+    definitions = defects_in_order()
+    if difficulty is None:
+        return definitions
+    permitted = set(selectable_rules(difficulty))
+    return [d for d in definitions if d.rule_id in permitted]
+
+
 def generate_observed(
     graph: TruthGraph,
     config: CanonicalConfig,
     profile: ObservedProfile,
     defect_seed: int,
+    difficulty: Difficulty | None = None,
 ) -> ObservedResult:
-    """Derive the observed state and full defect ledger deterministically."""
+    """Derive the observed state and full defect ledger deterministically.
+
+    ``difficulty`` restricts generation to the rules at one benchmark tier —
+    *reasoning complexity*, independent of ``profile``, which controls how many
+    defects are injected. ``None`` is the full catalogue and is byte-for-byte the
+    behaviour this argument did not exist for.
+    """
     index = GraphIndex(graph, config)
     spec = profile_spec(profile)
     meta = ObservedMeta(
@@ -477,7 +534,7 @@ def generate_observed(
     eligible_rule_count: dict[str, int] = {}
     rule_scopes: list[RuleScopeRecord] = []
 
-    for definition in defects_in_order():
+    for definition in _rules_for_run(difficulty):
         rate = spec.rate_for(definition.category, definition.rule_id)
         population = definition.population(index)
         excluded = [e for e in population if _is_control(index, controls, e)]
@@ -556,6 +613,9 @@ def generate_observed(
             )
         )
 
+    if difficulty is not None:
+        _require_non_empty_intersection(difficulty, profile, spec.control_fraction, rule_scopes)
+
     control_records = _build_controls(
         index, controls, meta, spec.control_fraction, instances, mutations, eligible_rule_count
     )
@@ -571,6 +631,7 @@ def generate_observed(
         controls=control_records,
         rule_scopes=rule_scopes,
         summary=summary,
+        difficulty=difficulty,
     )
 
 
