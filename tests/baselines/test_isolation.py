@@ -25,6 +25,8 @@ from typing import Any
 import pytest
 
 from dataswamp_biosystems.baselines import (
+    ADVERSARIAL_ONLY_INPUT_FILES,
+    ALWAYS_PRESENT_FORBIDDEN_FILES,
     BASELINE_NAMES,
     FORBIDDEN_INPUT_FILES,
     PERMITTED_INPUT_FILES,
@@ -80,7 +82,12 @@ def test_the_answer_files_really_are_absent_from_the_isolated_fixture(
 ) -> None:
     """Guard the guard: the isolation fixture must actually be isolating something."""
     present = {path.name for path in real_observed_dir.iterdir()}
-    assert present >= FORBIDDEN_INPUT_FILES
+    # The canonical benchmark is not adversarial, so it carries every forbidden
+    # file except the two only an adversarial run emits. Those are asserted
+    # present against an adversarial benchmark in ``test_adversarial_scores.py``,
+    # rather than softening this assertion to "present or not".
+    assert present >= ALWAYS_PRESENT_FORBIDDEN_FILES
+    assert not present & ADVERSARIAL_ONLY_INPUT_FILES
     assert {path.name for path in observed_graph_only.iterdir()} == {OBSERVED_GRAPH_NAME}
 
 

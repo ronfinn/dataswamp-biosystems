@@ -52,21 +52,84 @@ entries below.
 - `validate-observed` now recovers the generated tier from `provenance.json`, so
   it regenerates the same benchmark it is checking.
 
+### Added (adversarial scenarios)
+
+- **The adversarial tier.** `dataswamp inject-defects --difficulty adversarial`
+  switches to a **scenario engine** that *constructs* cases rather than sampling
+  rules: it names its own targets, dresses reserved controls into near misses,
+  and scopes each rule's population to the constructed neighbourhood. Six case
+  classes, all required — `near-miss-control`, `cross-record-ambiguity`,
+  `cross-asset-inconsistency`, `overlapping-evidence`, `no-remediation` and
+  `decoy-candidate`. No ordinary defect is relabelled adversarial, and no rule
+  holds `Difficulty.ADVERSARIAL`; a run that cannot construct a required case
+  class fails naming it rather than emitting a partial tier. See
+  [docs/adversarial-scenarios.md](docs/adversarial-scenarios.md).
+- **Near-miss controls.** Clean entities deliberately made to *resemble* a
+  defect, applied only to reserved controls and always landing one principled
+  step on the valid side of the rule they mimic (equal sizes rather than
+  inverted; a count of one rather than zero; a semver prerelease rather than a
+  free-text token; restricted-and-internal rather than restricted-and-external).
+- **`scenarios.jsonl` and `scenario-transformations.jsonl`**, emitted only by an
+  adversarial run. Both are **privileged answer key**, named in
+  `FORBIDDEN_INPUT_FILES` so no baseline can open one; there is deliberately no
+  public scenario view. A `ScenarioTransformation` is deliberately *not* a
+  `MutationRecord`: a near miss must never join to a defect instance, finding or
+  remediation.
+- **A separate near-miss control invariant.** Ordinary controls keep
+  field-for-field truth equality, untouched. A near miss instead has to satisfy
+  nine itemised clauses — reserved control, absent from every `selected_ids`,
+  absent from the defect and mutation ledgers, every differing field declared,
+  no undeclared field differing, before/after matching both graphs, and the
+  emitted record still satisfying a *named executable predicate* re-run against
+  the emitted bytes. Violations name the scenario, entity, field and clause.
+- **Scenario coverage**, in a `scenarios` block of `profile-summary.json` present
+  only for an adversarial run, including `uncovered_required_case_types` — a
+  non-empty list fails generation.
+- **Scenario-aware evaluation.** An `adversarial` block in
+  `evaluation-summary.json` (always present, empty-but-shaped otherwise) and a
+  `scenario-metrics.jsonl` for adversarial benchmarks: confusion matrix and
+  metrics by case class, near-miss false-positive rate, wrong-entity and
+  wrong-rule attributions, correct abstentions, unsafe remediations against near
+  misses and correct explicit no-remediation decisions. No second scoring engine
+  — it regroups pairs the one evaluator already scored, and the case-class counts
+  sum to the tier's matrix.
+- **Measured adversarial baseline results** for all three reference agents,
+  pinned by hand in `tests/baselines/test_adversarial_scores.py` and published in
+  [docs/adversarial-scenarios.md](docs/adversarial-scenarios.md) and
+  [docs/baselines.md](docs/baselines.md). Reported as measured: the naive agent
+  is fooled by a third of the lookalikes it can see, and two case classes have
+  zero true positives across all three agents.
+
+### Changed (adversarial scenarios)
+
+- **Observed schema 3 → 4, observed generator 1.2.0 → 1.3.0**, additively. The
+  two ledgers are optional and a schema-3 directory remains readable
+  (`SUPPORTED_OBSERVED_SCHEMA_VERSIONS` is `{3, 4}`); no record that existed at
+  schema 3 changed shape or meaning.
+- `GroundTruth.known_entities` now includes collaterally-mutated entities. They
+  are neither a control nor the target of a finding, so on a scenario-restricted
+  benchmark a reasonable prediction about one would previously have been rejected
+  as a broken submission rather than scored as an out-of-scope false positive.
+- **Golden digests regenerated, deliberately and narrowly.** The only canonical
+  bytes that moved are the `generator_version` and `schema_version` fields in
+  observed `meta`, which appear in `observed-graph.json`, `profile-summary.json`
+  and `summary.md`. Every ledger and the whole truth and estate output are
+  byte-identical, so rule selection, control membership and ledger order did not
+  move; every measured baseline score is unchanged, and only the recorded
+  generator version and ground-truth fingerprint moved in the baseline fixture.
+
 ### Notes
 
-- **Adversarial scenarios are not implemented.** `Difficulty.ADVERSARIAL` exists
-  as a reserved enum member that no rule holds; the CLI does not offer it and the
-  Python API rejects it with `UnavailableDifficultyError`. Adversarial is a
-  property of a *scenario*, not of a rule, and needs the scenario layer. Issue
-  #16 remains open for that second milestone.
-- **No observed-schema, generator-version or golden-digest change.** The observed
-  schema stays at 3 and the observed generator at 1.2.0. A run without
-  `--difficulty` is byte-identical to the previous behaviour, the canonical
-  golden digests were not regenerated, and the published canonical baseline
-  scores are unchanged. `ControlRecord`, `RuleScopeRecord`, `ExpectedFinding`,
-  `ExpectedRemediation`, `observed-graph.json` and `profile-summary.json` gained
-  no difficulty field — the tier is recorded in provenance, which no digest
-  covers, and only when one was chosen.
+- **`mixed` still means the ordinary rule catalogue** — bronze, silver and gold
+  together — and never includes adversarial scenarios. Folding them in would
+  change the default benchmark's bytes and every published score with them, so an
+  all-tier mode, if ever wanted, has to be a new explicit selection.
+- **The adversarial set is a focused initial six case classes** over a small
+  constructed universe (19 scored pairs at the demo profile), not a model of
+  real-world ambiguity. Limits are listed in
+  [docs/adversarial-scenarios.md](docs/adversarial-scenarios.md#limitations).
+- **Bronze/silver/gold, the prediction schema, the evaluation schema, the bundle
+  layout and the DataHub export are unchanged.**
 
 ### Added (reference baseline agents)
 

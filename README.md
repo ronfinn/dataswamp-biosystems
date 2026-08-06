@@ -210,6 +210,22 @@ cross-asset or peer-relative one, and the naive agent's gold showing is shallow
 signals coinciding with peer-relative rules rather than reasoning. See
 [docs/difficulty-tiers.md](docs/difficulty-tiers.md).
 
+And on the **adversarial** tier — constructed cases where a clean near-miss
+control sits beside the real defect (19 scored pairs: 13 positive, 6 near-miss
+negatives):
+
+| Baseline | TP | FP | Precision | Recall | F1 | Near-miss FPs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `null` | 0 | 0 | n/a | 0.0000 | 0.0000 | 0 |
+| `naive-metadata` | 2 | 2 | 0.5000 | 0.1538 | 0.2353 | **2** |
+| `rule-based` | 7 | 0 | 1.0000 | 0.5385 | 0.7000 | 0 |
+
+The naive agent is fooled by a third of the lookalikes it can see; the
+rule-based agent resists all of them and still fails half the tier. Two case
+classes — cross-asset inconsistency and no-remediation — defeat all three, which
+is recorded rather than hidden. See
+[docs/adversarial-scenarios.md](docs/adversarial-scenarios.md).
+
 The null baseline's precision is `null`, not `0.0`: it predicted nothing, so the
 denominator is empty and the quantity was never measured. The rule-based agent
 implements 20 of the 41 rules; the 21 it cannot reach from observed metadata are
@@ -237,8 +253,9 @@ out-of-scope false positive rather than folded into the matrix.
 
 * Scale is modest by design (180 catalogue assets, ~1 800 lineage edges); it is a
   correctness benchmark, not a load test.
-* One estate shape and one defect taxonomy — no difficulty tiers, no adversarial
-  or cross-asset scenarios yet.
+* One estate shape and one defect taxonomy. All four difficulty tiers ship, but
+  the adversarial set is a focused initial six case classes over a small
+  constructed universe — not a model of real-world ambiguity.
 * The published baselines are deliberately simple and metadata-only; none opens a
   materialized scientific file, and no LLM-backed agent ships.
 * DataHub export is offline file emission; live ingestion is not implemented.
@@ -297,6 +314,7 @@ published yet. The package version is `0.1.0rc1`.
 | [docs/evaluation.md](docs/evaluation.md) | The prediction contract and the scoring semantics |
 | [docs/baselines.md](docs/baselines.md) | The reference baseline agents, their permitted reads and canonical scores |
 | [docs/difficulty-tiers.md](docs/difficulty-tiers.md) | Bronze/silver/gold, reasoning scopes, tier generation and per-tier scoring |
+| [docs/adversarial-scenarios.md](docs/adversarial-scenarios.md) | The adversarial tier: constructed cases, near-miss controls, the privilege boundary |
 | [docs/bundles.md](docs/bundles.md) | Bundle layout, manifest, verification, reader API |
 | [docs/datahub.md](docs/datahub.md) | URNs, entity/aspect mapping, the privilege boundary |
 | [docs/public-api.md](docs/public-api.md) | Stable vs experimental vs internal interfaces |

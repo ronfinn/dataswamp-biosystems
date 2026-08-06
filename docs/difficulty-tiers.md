@@ -6,10 +6,10 @@ whether the missed findings were absent fields or wrong-but-well-formed values
 that only a peer comparison exposes. This document defines the difficulty axis,
 what it deliberately is *not*, and how to use it.
 
-> **Status.** This is the first of two milestones on benchmark difficulty. It
-> ships bronze, silver and gold, tier-restricted generation, and per-tier
-> evaluation. **Adversarial scenarios are not implemented** — see
-> [Why adversarial is deferred](#why-adversarial-is-deferred).
+> **Status.** All four tiers ship. Bronze, silver and gold are produced by
+> filtering the rule registry on reasoning scope; **adversarial** is produced by
+> *constructing* scenario cases and is documented separately in
+> [`docs/adversarial-scenarios.md`](adversarial-scenarios.md).
 
 ## Contents
 
@@ -21,7 +21,7 @@ what it deliberately is *not*, and how to use it.
 - [Generating a tier](#generating-a-tier)
 - [Per-tier evaluation](#per-tier-evaluation)
 - [Measured baseline results by tier](#measured-baseline-results-by-tier)
-- [Why adversarial is deferred](#why-adversarial-is-deferred)
+- [The adversarial tier](#the-adversarial-tier)
 - [Classifying a new rule](#classifying-a-new-rule)
 - [Compatibility](#compatibility)
 
@@ -114,7 +114,13 @@ a detector must know what right looks like before it can see that this is not it
 | **bronze** | `single-record` | 13 | Is this field present and self-consistent? |
 | **silver** | `cross-record` | 15 | Does this record agree with the one attached to it? |
 | **gold** | `cross-asset`, `peer-relative` | 13 | Does this hold up against the rest of the estate? |
-| **adversarial** | — | 0 | *(reserved — not implemented)* |
+| **adversarial** | — | 0 | Which of these plausible candidates is the one that is actually wrong? |
+
+Adversarial has **no rules**, and that is not an omission. The first three tiers
+classify a *rule* by the evidence it needs; adversarial classifies a *case* by
+the situation the rule occurs in. The same rule sits at bronze in an ordinary run
+and inside an adversarial near-miss control in a constructed one. See
+[The adversarial tier](#the-adversarial-tier).
 
 Peer-relative joins cross-asset at gold rather than forming a fourth tier: both
 demand that the detector hold several entities in view at once, and neither is
@@ -318,27 +324,42 @@ These numbers are pinned cell by cell in `tests/baselines/test_tier_scores.py`,
 written out by hand rather than regenerated, so a behaviour change has to be
 re-measured and re-typed by whoever makes it.
 
-## Why adversarial is deferred
+## The adversarial tier
 
 `Difficulty.ADVERSARIAL` exists as an enum member and **no rule holds it**.
-`rules_at(Difficulty.ADVERSARIAL)` is empty, the CLI does not offer it, and
-`selectable_rules` raises `UnavailableDifficultyError` if it is requested through
-the Python API.
+`rules_at(Difficulty.ADVERSARIAL)` is empty and `selectable_rules` still raises
+`UnavailableDifficultyError` — asking "which rules are adversarial?" is the wrong
+question, so it stays an error rather than returning an empty tuple that would
+read as an answer.
 
-That is deliberate. Adversarial is a property of a *scenario*, not of a rule: the
-same rule can appear in a bronze positive case and in an adversarial near-miss
-control — an entity that looks exactly like a defect and is correct. Producing
-those needs a scenario layer that can construct near-miss controls and reason
-about reserved entities, which is the second milestone.
+Generation is instead explicit and opt-in:
+
+```bash
+uv run dataswamp inject-defects \
+  --truth generated/truth --profile demo \
+  --difficulty adversarial --output-dir generated/observed
+```
+
+That switches to the **scenario engine**, which constructs cases rather than
+sampling rules: it names its own targets, dresses reserved controls into
+near misses, and scopes each rule's population to the constructed neighbourhood.
+The full model — the six case classes, the near-miss invariant, the privilege
+boundary and the measured baseline results — is documented in
+[`docs/adversarial-scenarios.md`](adversarial-scenarios.md).
+
+### `mixed` does not mean "all tiers"
+
+`mixed` is the ordinary rule catalogue — bronze, silver and gold together — and
+**never** includes adversarial scenarios. That is a deliberate boundary. Folding
+constructed cases into the default would change the canonical benchmark's bytes
+and every published baseline score with them, so an all-tier mode, if one is ever
+wanted, has to be a new explicit selection rather than a quiet widening of this
+one. `tests/observed/test_difficulty.py` pins it.
 
 Relabelling ordinary rules "adversarial" to populate the tier would be a lie
 about what the tier means, and generating an empty adversarial benchmark would be
-worse: it would look like a result. So the member stays reserved, and requesting
-it is an error that says so.
-
-Adversarial scenarios, near-miss controls, `scenarios.jsonl` and the
-observed-state schema 3 → 4 migration are the second pull request. **Issue #16 is
-not complete.**
+worse: it would look like a result. Neither is possible — every case class is
+required, and a run that cannot construct one fails naming it.
 
 ## Classifying a new rule
 
@@ -372,27 +393,38 @@ comparable.
 
 ## Compatibility
 
-What this milestone did **not** change:
-
 | Contract | Version | Status |
 | --- | --- | --- |
-| Observed schema | 3 | unchanged |
-| Observed generator | 1.2.0 | unchanged |
+| Observed schema | 3 → **4** | additive: two optional ledgers, no existing record changed |
+| Observed generator | 1.2.0 → **1.3.0** | |
 | Prediction schema | 1 | unchanged |
-| Evaluation schema | 1 → **2** | additive only |
-| Bundle layout | unchanged | a bundle carries the new file like any other |
+| Evaluation schema | 2 | unchanged — the adversarial block is additive |
+| Bundle layout | unchanged | a bundle carries the new files like any other |
 | DataHub export | unchanged | reads `observed-graph.json` alone, as before |
 
-- The canonical mixed scenario's bytes are unchanged, and the committed golden
-  digests were not regenerated.
-- The published canonical baseline scores are unchanged.
+- Bronze, silver, gold and `mixed` select exactly what they selected before.
+- The canonical scenario's **content** is unchanged. The only canonical bytes that
+  moved are the `generator_version` and `schema_version` fields in observed
+  `meta`, which appear in `observed-graph.json`, `profile-summary.json` and
+  `summary.md`. Every ledger — `controls.jsonl`, `rule-scope.jsonl`,
+  `expected-findings.jsonl`, `expected-remediations.jsonl`,
+  `injected-defects.jsonl`, `mutation-log.jsonl` — and the whole truth and estate
+  output are byte-identical, so rule selection, control membership and ledger
+  order did not move.
+- The published canonical baseline **scores** are unchanged. Only the recorded
+  generator version and the ground-truth fingerprint moved in the fixture.
 - `ControlRecord`, `RuleScopeRecord`, `ExpectedFinding`, `ExpectedRemediation`,
   `observed-graph.json` and `profile-summary.json` gained no difficulty field.
-- An evaluation report written at schema 1 remains readable; a schema-2 report
-  contains everything a schema-1 reader looked for, in the same places.
+- A schema-3 observed directory remains readable: it simply declares no
+  scenarios, and every scenario-aware code path collapses to its previous
+  behaviour. `SUPPORTED_OBSERVED_SCHEMA_VERSIONS` is `{3, 4}`.
+- Adversarial output *requires* schema 4, because schema 3 has nowhere to put the
+  scenario ledgers (`ADVERSARIAL_MIN_SCHEMA_VERSION`).
 
 ## See also
 
+- [`docs/adversarial-scenarios.md`](adversarial-scenarios.md) — the fourth tier:
+  constructed cases, near-miss controls and the privilege boundary
 - [`docs/observed-state.md`](observed-state.md) — the imperfection engine and the
   maturity profiles difficulty composes with
 - [`docs/evaluation.md`](evaluation.md) — the scoring model the tier blocks sit in

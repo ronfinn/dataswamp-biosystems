@@ -220,8 +220,8 @@ down with a number nobody measured.
 
 Breakdowns are reported by rule, category, severity, entity kind, entity class
 (`asset` vs `file`), control partition (`reserved` vs `non-reserved`), and
-**difficulty** (`bronze`, `silver`, `gold`). Every breakdown partitions the same
-pairs, so its cells sum to the overall matrix.
+**difficulty** (`bronze`, `silver`, `gold`, `adversarial`). Every breakdown
+partitions the same pairs, so its cells sum to the overall matrix.
 
 ### By difficulty
 
@@ -233,6 +233,11 @@ why they are not severity, maturity or remediation complexity.
 Difficulty is looked up in the rule registry, never read from ground truth: the
 emitted observed state carries no difficulty field, and duplicating one there
 would let a stale ledger disagree with the live classification.
+
+The one exception is a pair belonging to a declared adversarial **scenario**,
+which is tiered `adversarial` whatever its rule's own tier — the construction is
+what makes it hard, and the rule keeps its honest tier everywhere else. Every
+scored pair still lands in exactly one tier.
 
 Each tier block carries more than the standard breakdown:
 
@@ -246,12 +251,28 @@ Each tier block carries more than the standard breakdown:
 a tier-restricted benchmark is distinguishable from one an agent simply failed:
 zero rules is "not attempted", not "attempted badly".
 
-Bronze, silver and gold are always present, even at zero, so a report's shape
-does not depend on which scenario produced it. A tier with no pairs reports
-`null` metrics over zero denominators — an unmeasured tier is not a perfect one.
-An `unknown` key appears only if an unclassified rule reached scoring, which
+All four tiers are always present, even at zero, so a report's shape does not
+depend on which scenario produced it. A tier with no pairs reports `null` metrics
+over zero denominators — an unmeasured tier is not a perfect one, and "this
+benchmark had no adversarial cases" must not look like "the agent handled them
+all". An `unknown` key appears only if an unclassified rule reached scoring, which
 `dataswamp validate-defects` prevents; its presence in a report is itself the
 signal.
+
+### Adversarial scenarios
+
+`adversarial` is an additional top-level block, always present and empty-but-
+shaped for an ordinary benchmark. It regroups pairs the same engine already
+scored — no second scoring engine exists — into the six constructed case classes,
+and reports the near-miss false-positive rate, wrong-entity and wrong-rule
+attributions, correct abstentions, unsafe remediations against near misses and
+correct explicit no-remediation decisions.
+
+Its denominators are the **constructed neighbourhood**, not the estate: pairing
+the tier's rules with every entity would manufacture thousands of free true
+negatives and drive specificity to ~1.0 for any agent, making the hardest tier
+the one that discriminates least. See
+[adversarial-scenarios.md](adversarial-scenarios.md#evaluation).
 
 ### Reserved controls
 
@@ -351,7 +372,8 @@ ROC/AUC — that would be a modelling claim this milestone has no mandate to mak
 | `remediation-results.jsonl` | one record per expected or submitted remediation decision |
 | `rule-metrics.jsonl` | per-rule counts and metrics |
 | `category-metrics.jsonl` | per-category counts and metrics |
-| `difficulty-metrics.jsonl` | per-tier counts and metrics (bronze, silver, gold) |
+| `difficulty-metrics.jsonl` | per-tier counts and metrics (bronze, silver, gold, adversarial) |
+| `scenario-metrics.jsonl` | per-case-class counts and metrics — **adversarial benchmarks only** |
 | `evaluation-report.md` | the human-readable scorecard, suitable for a PR comment or CI artefact |
 | `provenance.json` | the shared environment/scenario provenance object |
 

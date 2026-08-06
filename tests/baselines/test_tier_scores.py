@@ -20,8 +20,9 @@ from typing import Any
 import pytest
 
 from dataswamp_biosystems.baselines import (
+    ADVERSARIAL_ONLY_INPUT_FILES,
+    ALWAYS_PRESENT_FORBIDDEN_FILES,
     BASELINE_NAMES,
-    FORBIDDEN_INPUT_FILES,
     ObservedInput,
     get_baseline,
     render_predictions,
@@ -182,11 +183,18 @@ def test_tier_benchmarks_expose_no_privileged_input(
     """The anti-leakage boundary is a property of the input loader, not the mix.
 
     A tier-restricted observed state contains exactly the same forbidden files as
-    the mixed one, and a baseline must still be unable to reach any of them.
+    the mixed one, and a baseline must still be unable to reach any of them. The
+    two adversarial-only ledgers are excluded because an ordinary tier does not
+    emit them at all — that absence is itself asserted below.
     """
     observed_dir = tier_observed_dirs[tier]
-    for name in FORBIDDEN_INPUT_FILES:
+    for name in ALWAYS_PRESENT_FORBIDDEN_FILES:
         assert (observed_dir / name).exists(), f"{name} missing — the test proves nothing"
+    for name in ADVERSARIAL_ONLY_INPUT_FILES:
+        assert not (observed_dir / name).exists(), (
+            f"{name} was emitted by an ordinary tier; scenario ledgers belong to "
+            "adversarial runs alone"
+        )
     observed = ObservedInput.load(observed_dir)
     assert not hasattr(observed, "findings")
     assert not hasattr(observed, "rule_scopes")

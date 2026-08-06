@@ -90,8 +90,12 @@ def test_a_tier_run_keeps_the_current_output_contract(
 ) -> None:
     """Tier filtering changes which rules fire, never the shape of a record."""
     result = generate_observed(graph, config, ObservedProfile.DEMO, TEST_SEED, tier)
-    assert result.meta.schema_version == OBSERVED_SCHEMA_VERSION == 3
-    assert result.meta.generator_version == OBSERVED_GENERATOR_VERSION == "1.2.0"
+    assert result.meta.schema_version == OBSERVED_SCHEMA_VERSION == 4
+    assert result.meta.generator_version == OBSERVED_GENERATOR_VERSION == "1.3.0"
+    # An ordinary tier is not a scenario run, and must not acquire the scenario
+    # ledgers by being near one.
+    assert result.scenarios == []
+    assert result.transformations == []
     assert set(observed_bytes(result)) == set(observed_bytes(mixed))
     assert set(result.observed_graph) == set(mixed.observed_graph)
     assert set(result.summary) == set(mixed.summary)
@@ -300,7 +304,8 @@ def test_output_written_before_tiers_existed_still_reads_as_mixed(tmp_path: Path
     assert read_observed_difficulty(tmp_path) is None
 
 
-def test_the_cli_rejects_adversarial_as_a_generation_choice(config_dir: Path) -> None:
-    result = _cli(["inject-defects", "--difficulty", "adversarial"], "0")
+def test_the_cli_still_rejects_a_difficulty_that_is_not_a_tier(config_dir: Path) -> None:
+    """The selection enum is closed: an invented tier is rejected, not guessed at."""
+    result = _cli(["inject-defects", "--difficulty", "platinum"], "0")
     assert result.returncode != 0
-    assert "adversarial" in (result.stderr + result.stdout)
+    assert "platinum" in (result.stderr + result.stdout)

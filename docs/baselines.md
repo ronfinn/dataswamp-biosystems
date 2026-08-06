@@ -37,11 +37,15 @@ Every baseline reads **`observed-graph.json` and nothing else**.
 
 It does not read the truth graph, `expected-findings.jsonl`,
 `expected-remediations.jsonl`, `controls.jsonl`, `rule-scope.jsonl`,
-`mutation-log.jsonl`, `injected-defects.jsonl`, `profile-summary.json`, a
-truth-mode DataHub export, or any fixture derived from ground truth. Reading any
+`mutation-log.jsonl`, `injected-defects.jsonl`, `profile-summary.json`,
+`scenarios.jsonl`, `scenario-transformations.jsonl`, a truth-mode DataHub
+export, or any fixture derived from ground truth. Reading any
 of them would make the published numbers meaningless — `rule-scope.jsonl` alone
 would hand over each rule's population, which is most of the way to the answers
-by elimination.
+by elimination, and the scenario ledgers would say outright which candidate is
+the true positive and which lookalike was planted. An agent is meant to *see* a
+near miss and have to decide about it; reading the record saying it was planted
+would defeat the entire adversarial tier.
 
 This is enforced structurally rather than promised:
 
@@ -181,6 +185,32 @@ These numbers are pinned cell by cell in `tests/baselines/test_tier_scores.py`,
 written out by hand rather than regenerated, so a behaviour change has to be
 re-measured and re-typed.
 
+## Scores on the adversarial tier
+
+The same three agents against the canonical scenario at
+`--difficulty adversarial`. Nothing was tuned; these agents were written before
+scenarios existed. The universe is the constructed neighbourhood — 19 scored
+pairs, 13 positive and 6 near-miss negatives — not the whole estate, because
+pairing the tier's rules with every entity would hand every agent thousands of
+free true negatives.
+
+| Agent | TP | FP | FN | TN | Precision | Recall | Specificity | F1 | Near-miss FPs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `null` | 0 | 0 | 13 | 6 | n/a | 0.0000 | 1.0000 | 0.0000 | 0 |
+| `naive-metadata` | 2 | 2 | 11 | 4 | 0.5000 | 0.1538 | 0.6667 | 0.2353 | **2** |
+| `rule-based` | 7 | 0 | 6 | 6 | 1.0000 | 0.5385 | 1.0000 | 0.7000 | 0 |
+
+The near-miss column is the one the tier exists to produce. The naive agent
+flags a third of the deliberately-planted lookalikes; the rule-based agent flags
+none of them and still misses half the positives, because precise rules do not
+get fooled but also never reach a defect that only exists between two assets.
+Cross-asset inconsistency and no-remediation have zero true positives across all
+three agents. See
+[docs/adversarial-scenarios.md](adversarial-scenarios.md#measured-baseline-results).
+
+These numbers are pinned in `tests/baselines/test_adversarial_scores.py`, written
+out by hand rather than regenerated.
+
 ## What the rule-based baseline covers, and what it cannot
 
 It implements 20 of 41 rules:
@@ -281,7 +311,9 @@ or its tests.
   improve their scores against the canonical answers. Where a check was removed,
   the reason and its measured cost are recorded above.
 * **Scenario-bound.** Every number here belongs to one profile and one seed pair.
-  A baseline's relative standing can and will change on a different profile.
+  A baseline's relative standing can and will change on a different profile, and
+  the adversarial numbers rest on only 19 scored pairs — small enough that a
+  single case moves them visibly.
 * **Metadata-only.** None of them opens a materialized scientific file, so the
   whole file-integrity and modality-scientific end of the taxonomy is out of
   reach by construction.
