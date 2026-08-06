@@ -24,6 +24,10 @@ class ObservedIssueKind(StrEnum):
     FIDELITY = "fidelity"
     CONTAMINATION = "contamination"
     CONTROL_PARTITION = "control-partition"
+    #: A near-miss control drifted into being a real (but unrecorded) defect, or
+    #: a scenario's declared construction does not match the emitted graph.
+    NEAR_MISS = "near-miss"
+    SCENARIO = "scenario"
     RULE_CONTRACT = "rule-contract"
     INCOMPATIBILITY = "incompatibility"
     CONSISTENCY = "consistency"

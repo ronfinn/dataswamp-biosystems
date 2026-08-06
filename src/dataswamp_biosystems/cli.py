@@ -589,7 +589,11 @@ def inject_defects(
                 "can decide (bronze = one record, silver = one join, gold = several "
                 "assets or a peer comparison). This is reasoning complexity, not "
                 "severity and not maturity — use --profile for how many defects are "
-                "injected. 'mixed' is the full rule catalogue and the default."
+                "injected. 'mixed' is the full ordinary rule catalogue and the "
+                "default, and never includes adversarial scenarios. 'adversarial' is "
+                "explicit and opt-in: it switches to the scenario engine, which "
+                "constructs near-miss controls, decoys and overlapping evidence "
+                "rather than filtering rules."
             ),
         ),
     ] = DifficultySelection.MIXED,
@@ -665,6 +669,16 @@ def inject_defects(
     typer.echo(
         f"  control records: {totals['control_records']} ({totals['reserved_controls']} reserved)"
     )
+    coverage = report.result.summary.get("scenarios")
+    if coverage is not None:
+        scenario_totals = coverage["totals"]
+        typer.echo(
+            f"  adversarial scenarios: {scenario_totals['scenarios']} "
+            f"({scenario_totals['positive_scenarios']} positive, "
+            f"{scenario_totals['near_miss_controls']} near-miss control)"
+        )
+        for case_type, count in coverage["by_case_type"].items():
+            typer.echo(f"    {case_type}: {count}")
 
 
 @app.command(name="validate-observed")

@@ -49,12 +49,38 @@ from dataswamp_biosystems.observed.entities import (
 from dataswamp_biosystems.observed.errors import ObservedConfigError
 from dataswamp_biosystems.observed.index import SHARD_NAMES, GraphIndex, JsonRecord
 from dataswamp_biosystems.observed.profiles import ObservedProfile, profile_spec
+from dataswamp_biosystems.observed.scenarios import (
+    ScenarioCase,
+    ScenarioPlan,
+    ScenarioTransformation,
+    build_near_miss_cases,
+    build_positive_cases,
+    coverage_problems,
+    near_miss_ids_by_mimicked_rule,
+    plan_scenarios,
+    scenario_coverage,
+)
 from dataswamp_biosystems.truth import ids
 from dataswamp_biosystems.truth.graph import TruthGraph
 from dataswamp_biosystems.truth.rng import sub_rng
 
-OBSERVED_GENERATOR_VERSION = "1.2.0"
-OBSERVED_SCHEMA_VERSION = 3
+# 1.3.0 / schema 4 — the adversarial tier: constructed scenario cases, declared
+# near-miss transformations over reserved controls, and the two ledgers that
+# record them. Nothing that existed at schema 3 changed shape or meaning; a
+# ``mixed`` run's ledgers are byte-identical apart from the version fields in
+# ``meta``.
+OBSERVED_GENERATOR_VERSION = "1.3.0"
+OBSERVED_SCHEMA_VERSION = 4
+
+#: Schema versions this generator can still read and validate. Schema 3 output
+#: remains interpretable — it simply carries no scenario ledgers — so a v3
+#: benchmark is not invalidated by this migration.
+SUPPORTED_OBSERVED_SCHEMA_VERSIONS: frozenset[int] = frozenset({3, 4})
+
+#: The lowest schema version that can express an adversarial benchmark. A v3
+#: directory claiming ``difficulty: adversarial`` is malformed rather than merely
+#: old, because v3 has nowhere to put the scenario ledgers.
+ADVERSARIAL_MIN_SCHEMA_VERSION = 4
 
 
 def _symmetric_incompatibilities() -> dict[str, set[str]]:
@@ -84,6 +110,11 @@ class ObservedResult:
     controls: list[ControlRecord]
     rule_scopes: list[RuleScopeRecord]
     summary: dict[str, Any]
+    #: Constructed adversarial cases, and the declared field changes that build
+    #: their near-miss controls. Both are empty for every non-adversarial run, so
+    #: a default run emits neither file and its bytes cannot move.
+    scenarios: list[ScenarioCase] = field(default_factory=list)
+    transformations: list[ScenarioTransformation] = field(default_factory=list)
     #: The tier this run was restricted to, or ``None`` for the full catalogue.
     #: Deliberately *not* part of :class:`ObservedMeta`: meta is serialized into
     #: the observed graph and the profile summary, and a default run's bytes must
@@ -483,18 +514,23 @@ def _require_non_empty_intersection(
     )
 
 
-def _rules_for_run(difficulty: Difficulty | None) -> list[DefectDef]:
+def _rules_for_run(difficulty: Difficulty | None, plan: ScenarioPlan | None) -> list[DefectDef]:
     """Return the definitions this run may draw from, in the fixed apply order.
 
     ``None`` means the whole catalogue — the pre-existing behaviour, reproduced
-    exactly, including the order. A tier restricts *which* rules may fire and
-    nothing else: the per-rule selection RNG is keyed by rule id, so a rule draws
-    the same candidates whichever run it takes part in.
+    exactly, including the order. A rule-filtered tier restricts *which* rules may
+    fire and nothing else: the per-rule selection RNG is keyed by rule id, so a
+    rule draws the same candidates whichever run it takes part in.
+
+    The adversarial tier is not a filter over this table at all: its rules are
+    whichever ones its scenario classes construct with, and they are applied in
+    the same fixed catalogue order so the apply sequence stays a property of the
+    registry rather than of the scenario list.
     """
     definitions = defects_in_order()
     if difficulty is None:
         return definitions
-    permitted = set(selectable_rules(difficulty))
+    permitted = set(plan.scoped_rule_ids) if plan is not None else set(selectable_rules(difficulty))
     return [d for d in definitions if d.rule_id in permitted]
 
 
@@ -511,9 +547,15 @@ def generate_observed(
     *reasoning complexity*, independent of ``profile``, which controls how many
     defects are injected. ``None`` is the full catalogue and is byte-for-byte the
     behaviour this argument did not exist for.
+
+    :attr:`Difficulty.ADVERSARIAL` is different in kind: it is not a filter but a
+    switch to the scenario engine, which names its own targets explicitly, dresses
+    reserved controls into near misses, and scopes every rule's population to the
+    constructed neighbourhood rather than to the whole estate.
     """
     index = GraphIndex(graph, config)
     spec = profile_spec(profile)
+    adversarial = difficulty is Difficulty.ADVERSARIAL
     meta = ObservedMeta(
         generator_version=OBSERVED_GENERATOR_VERSION,
         schema_version=OBSERVED_SCHEMA_VERSION,
@@ -525,6 +567,12 @@ def generate_observed(
     )
     controls = _controls(index, spec.control_fraction, defect_seed, profile.value)
 
+    # Planned before anything is applied, so the construction is a pure function
+    # of the truth graph, the reserved partition and the seed — never of the order
+    # in which defects happened to land.
+    plan = plan_scenarios(index, controls, defect_seed=defect_seed) if adversarial else None
+    universe = plan.universe if plan is not None else None
+
     ledger = _Ledger()
     instances: list[DefectInstance] = []
     mutations: list[MutationRecord] = []
@@ -534,20 +582,32 @@ def generate_observed(
     eligible_rule_count: dict[str, int] = {}
     rule_scopes: list[RuleScopeRecord] = []
 
-    for definition in _rules_for_run(difficulty):
-        rate = spec.rate_for(definition.category, definition.rule_id)
+    for definition in _rules_for_run(difficulty, plan):
         population = definition.population(index)
+        if universe is not None:
+            # The adversarial evaluation universe is the constructed
+            # neighbourhood, not the estate. Widening it here would hand every
+            # agent thousands of true negatives it never had to reason about.
+            population = [e for e in population if e in universe]
         excluded = [e for e in population if _is_control(index, controls, e)]
         eligible = [e for e in population if not _is_control(index, controls, e)]
         for entity_id in eligible:
             eligible_rule_count[entity_id] = eligible_rule_count.get(entity_id, 0) + 1
 
-        k = round(rate * len(eligible))
         candidates: list[str] = []
-        if k > 0:
-            shuffled = list(eligible)
-            sub_rng(defect_seed, "select", profile.value, definition.rule_id).shuffle(shuffled)
-            candidates = sorted(shuffled[:k])
+        if plan is not None:
+            # Explicit, named targets — the scenario decides, not a rate. The
+            # rate is then *derived* for the ledger so a reader can still see how
+            # much of the population was drawn.
+            candidates = sorted(set(plan.selection.get(definition.rule_id, [])) & set(eligible))
+            rate = len(candidates) / len(eligible) if eligible else 0.0
+        else:
+            rate = spec.rate_for(definition.category, definition.rule_id)
+            k = round(rate * len(eligible))
+            if k > 0:
+                shuffled = list(eligible)
+                sub_rng(defect_seed, "select", profile.value, definition.rule_id).shuffle(shuffled)
+                candidates = sorted(shuffled[:k])
 
         applied_ids: list[str] = []
         for entity_id in candidates:
@@ -570,9 +630,18 @@ def generate_observed(
 
             _apply(index, ledger, changes)
             rationale = (
-                f"selected under profile '{profile.value}' for rule "
-                f"{definition.rule_id} (category '{definition.category.value}', "
-                f"rate {rate:.3f}, {len(eligible)} eligible non-control entities)"
+                (
+                    f"constructed as an adversarial scenario target under profile "
+                    f"'{profile.value}' for rule {definition.rule_id} (category "
+                    f"'{definition.category.value}', {len(eligible)} eligible "
+                    f"non-control entities in the scenario universe)"
+                )
+                if plan is not None
+                else (
+                    f"selected under profile '{profile.value}' for rule "
+                    f"{definition.rule_id} (category '{definition.category.value}', "
+                    f"rate {rate:.3f}, {len(eligible)} eligible non-control entities)"
+                )
             )
             instance, muts, finding, remediation = _emit(
                 definition,
@@ -613,14 +682,32 @@ def generate_observed(
             )
         )
 
-    if difficulty is not None:
+    if difficulty is not None and not adversarial:
         _require_non_empty_intersection(difficulty, profile, spec.control_fraction, rule_scopes)
+
+    scenarios: list[ScenarioCase] = []
+    transformations: list[ScenarioTransformation] = []
+    coverage: dict[str, Any] | None = None
+    if plan is not None:
+        scenarios, transformations = _construct_scenarios(
+            index, plan, findings, meta, defect_seed=defect_seed, profile=profile.value
+        )
+        coverage = scenario_coverage(scenarios, transformations)
+        problems = coverage_problems(coverage)
+        if problems:
+            raise ObservedConfigError(
+                f"adversarial generation under profile {profile.value!r} is incomplete: "
+                + "; ".join(problems)
+            )
 
     control_records = _build_controls(
         index, controls, meta, spec.control_fraction, instances, mutations, eligible_rule_count
     )
     observed_graph = _observed_graph(meta, index)
     summary = _build_summary(meta, index, controls, control_records, instances, mutations, ledger)
+    # Added only for an adversarial run, so no default-run byte moves.
+    if coverage is not None:
+        summary["scenarios"] = coverage
     return ObservedResult(
         meta=meta,
         observed_graph=observed_graph,
@@ -631,13 +718,56 @@ def generate_observed(
         controls=control_records,
         rule_scopes=rule_scopes,
         summary=summary,
+        scenarios=scenarios,
+        transformations=transformations,
         difficulty=difficulty,
     )
 
 
+def _construct_scenarios(
+    index: GraphIndex,
+    plan: ScenarioPlan,
+    findings: list[ExpectedFinding],
+    meta: ObservedMeta,
+    *,
+    defect_seed: int,
+    profile: str,
+) -> tuple[list[ScenarioCase], list[ScenarioTransformation]]:
+    """Apply the planned near misses and build the case ledger from what landed.
+
+    Near-miss edits are applied *after* every defect, straight onto the working
+    graph, and are recorded only as :class:`ScenarioTransformation` records. They
+    never enter the defect ledger, never anchor a :class:`DefectInstance`, and
+    never lock a mutation path, because they are not defects — the entities they
+    touch are reserved controls and stay in the negative class.
+    """
+    near_miss_cases, transformations = build_near_miss_cases(
+        plan.near_misses,
+        profile=profile,
+        defect_seed=defect_seed,
+        truth_seed=meta.truth_seed,
+    )
+    for record in transformations:
+        index.set_working_field(record.shard, record.entity_id, record.field, record.after)
+
+    findings_by_pair = {(f.entity_id, f.rule_id): f.id for f in findings}
+    positive_cases = build_positive_cases(
+        plan,
+        index,
+        findings_by_pair,
+        near_miss_ids_by_mimicked_rule(plan.near_misses),
+        profile=profile,
+        defect_seed=defect_seed,
+        truth_seed=meta.truth_seed,
+    )
+    return sorted(near_miss_cases + positive_cases, key=lambda case: case.id), transformations
+
+
 __all__ = [
+    "ADVERSARIAL_MIN_SCHEMA_VERSION",
     "OBSERVED_GENERATOR_VERSION",
     "OBSERVED_SCHEMA_VERSION",
+    "SUPPORTED_OBSERVED_SCHEMA_VERSIONS",
     "ObservedResult",
     "generate_observed",
     "modality_group_of",

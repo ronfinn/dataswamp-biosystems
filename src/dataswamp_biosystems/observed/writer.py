@@ -24,6 +24,11 @@ EXPECTED_REMEDIATIONS_NAME = "expected-remediations.jsonl"
 MUTATION_LOG_NAME = "mutation-log.jsonl"
 CONTROLS_NAME = "controls.jsonl"
 RULE_SCOPE_NAME = "rule-scope.jsonl"
+# Privileged, and emitted only by an adversarial run. Both sit on the answer-key
+# side of the boundary alongside the expected findings and the control partition:
+# they say which candidate is the true positive and what the expected decision is.
+SCENARIOS_NAME = "scenarios.jsonl"
+SCENARIO_TRANSFORMATIONS_NAME = "scenario-transformations.jsonl"
 PROFILE_SUMMARY_NAME = "profile-summary.json"
 SUMMARY_MD_NAME = "summary.md"
 TRUTH_INPUTS_NAME = "truth-inputs.json"
@@ -35,6 +40,16 @@ def observed_bytes(result: ObservedResult) -> dict[str, bytes]:
     Computed without touching the filesystem, so callers can compare against
     on-disk files or verify determinism in memory.
     """
+    scenario_files: dict[str, bytes] = {}
+    # Absent rather than empty for a non-adversarial run: an empty answer-key file
+    # is still a file, and adding one to every default run would move canonical
+    # bytes that nothing in this milestone has a reason to move.
+    if result.scenarios:
+        scenario_files[SCENARIOS_NAME] = serialize.jsonl_bytes(result.scenarios)
+    if result.transformations:
+        scenario_files[SCENARIO_TRANSFORMATIONS_NAME] = serialize.jsonl_bytes(
+            result.transformations
+        )
     return {
         OBSERVED_GRAPH_NAME: serialize.manifest_bytes(result.observed_graph),
         INJECTED_DEFECTS_NAME: serialize.jsonl_bytes(result.instances),
@@ -44,6 +59,7 @@ def observed_bytes(result: ObservedResult) -> dict[str, bytes]:
         CONTROLS_NAME: serialize.jsonl_bytes(result.controls),
         RULE_SCOPE_NAME: serialize.jsonl_bytes(result.rule_scopes),
         PROFILE_SUMMARY_NAME: serialize.manifest_bytes(result.summary),
+        **scenario_files,
     }
 
 
@@ -86,6 +102,25 @@ def _render_summary_md(result: ObservedResult) -> str:
     lines.extend(["", "## Defects by rule", ""])
     for rule_id, count in result.summary["by_rule"].items():
         lines.append(f"- {rule_id}: {count}")
+    coverage = result.summary.get("scenarios")
+    if coverage is not None:
+        totals = coverage["totals"]
+        lines.extend(
+            [
+                "",
+                "## Adversarial scenarios",
+                "",
+                f"- Scenarios: {totals['scenarios']} "
+                f"({totals['positive_scenarios']} positive, "
+                f"{totals['near_miss_controls']} near-miss control)",
+                f"- Declared near-miss transformations: {totals['transformations']}",
+                "",
+                "### By case type",
+                "",
+            ]
+        )
+        for case_type, count in coverage["by_case_type"].items():
+            lines.append(f"- {case_type}: {count}")
     lines.append("")
     return "\n".join(lines)
 
@@ -163,6 +198,8 @@ __all__ = [
     "MUTATION_LOG_NAME",
     "CONTROLS_NAME",
     "RULE_SCOPE_NAME",
+    "SCENARIOS_NAME",
+    "SCENARIO_TRANSFORMATIONS_NAME",
     "PROFILE_SUMMARY_NAME",
     "SUMMARY_MD_NAME",
     "TRUTH_INPUTS_NAME",
