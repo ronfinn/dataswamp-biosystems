@@ -19,6 +19,12 @@ meaningless:
     The injection record, including the truth ``before`` values.
 ``profile-summary.json``
     Per-rule injection counts.
+``scenarios.jsonl``, ``scenario-transformations.jsonl``
+    The adversarial answer key: which candidate is the true positive, which
+    lookalike is a deliberate near miss, what the expected detection and
+    remediation decisions are, and the privileged before values. An agent is
+    meant to *see* a near miss and have to decide about it; reading the record
+    that says it was planted would defeat the entire adversarial tier.
 
 Those names are enumerated in :data:`FORBIDDEN_INPUT_FILES` so a test can assert
 the reader never names one, and so a reviewer can see the boundary in one place.
@@ -44,6 +50,8 @@ from dataswamp_biosystems.observed.writer import (
     OBSERVED_GRAPH_NAME,
     PROFILE_SUMMARY_NAME,
     RULE_SCOPE_NAME,
+    SCENARIO_TRANSFORMATIONS_NAME,
+    SCENARIOS_NAME,
 )
 
 # The only file any baseline may read.
@@ -60,7 +68,22 @@ FORBIDDEN_INPUT_FILES: frozenset[str] = frozenset(
         MUTATION_LOG_NAME,
         PROFILE_SUMMARY_NAME,
         RULE_SCOPE_NAME,
+        SCENARIOS_NAME,
+        SCENARIO_TRANSFORMATIONS_NAME,
     }
+)
+
+# The forbidden files an *ordinary* benchmark does not contain at all — they are
+# emitted only by an adversarial run. Named separately so a test can still assert
+# "every forbidden file is really present" against the benchmark that has them,
+# instead of weakening that assertion to "present or absent, who knows".
+ADVERSARIAL_ONLY_INPUT_FILES: frozenset[str] = frozenset(
+    {SCENARIOS_NAME, SCENARIO_TRANSFORMATIONS_NAME}
+)
+
+# Forbidden files every emitted observed state carries, whatever its tier.
+ALWAYS_PRESENT_FORBIDDEN_FILES: frozenset[str] = (
+    FORBIDDEN_INPUT_FILES - ADVERSARIAL_ONLY_INPUT_FILES
 )
 
 # Shards holding a catalogue asset, and the entity kind each one denotes. These
@@ -233,6 +256,8 @@ class ObservedInput:
 
 
 __all__ = [
+    "ADVERSARIAL_ONLY_INPUT_FILES",
+    "ALWAYS_PRESENT_FORBIDDEN_FILES",
     "ASSET_SHARDS",
     "FILE_KIND",
     "FILE_SHARD",

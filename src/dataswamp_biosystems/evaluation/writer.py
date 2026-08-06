@@ -28,6 +28,9 @@ REMEDIATION_RESULTS_NAME = "remediation-results.jsonl"
 RULE_METRICS_NAME = "rule-metrics.jsonl"
 CATEGORY_METRICS_NAME = "category-metrics.jsonl"
 DIFFICULTY_METRICS_NAME = "difficulty-metrics.jsonl"
+# Emitted only when the benchmark declares adversarial scenarios, so an ordinary
+# evaluation's file set does not move.
+SCENARIO_METRICS_NAME = "scenario-metrics.jsonl"
 EVALUATION_REPORT_NAME = "evaluation-report.md"
 
 
@@ -72,6 +75,64 @@ def _weakest(blocks: dict[str, dict[str, Any]], limit: int = 5) -> list[tuple[st
     ]
     scored.sort(key=lambda row: (row[1], row[0]))
     return scored[:limit]
+
+
+def _adversarial_lines(block: dict[str, Any]) -> list[str]:
+    """Render the adversarial section, or say plainly that there was none.
+
+    Reported even when empty. "This benchmark contained no adversarial cases" and
+    "the agent handled the adversarial cases perfectly" are very different claims,
+    and a section that simply vanished would let a reader confuse them.
+    """
+    if not block["scenarios"]:
+        return [
+            "",
+            "### Adversarial scenarios",
+            "",
+            "This benchmark declares no adversarial scenarios, so the adversarial tier "
+            "is empty rather than passed. Generate one with "
+            "`dataswamp inject-defects --difficulty adversarial`.",
+        ]
+    near_miss = block["near_miss_controls"]
+    remediation = block["remediation"]
+    lines = [
+        "",
+        "### Adversarial scenarios",
+        "",
+        "Constructed cases, not sampled defects: each one places a real defect in a "
+        "neighbourhood designed to mislead, or places a clean near-miss control that "
+        "resembles one. Only pairs belonging to a declared scenario are counted here, "
+        "so the denominators are the constructed neighbourhood rather than the estate.",
+        "",
+        f"- Scenarios: {block['scenarios']} over {block['scenario_pairs']} scored pairs",
+        f"- Positive support: {block['positive_support']}",
+        f"- Near-miss negative support: {block['near_miss_negative_support']} pairs from "
+        f"{near_miss['scored_in_matrix']}/{near_miss['declared']} declared near-miss controls "
+        f"({near_miss['unscored_outside_rule_population']} sit outside their mimicked rule's "
+        "truth-derived population, so a flag on one is counted strictly as an "
+        "out-of-scope false positive rather than in the matrix)",
+        "- **Near-miss false-positive rate: "
+        f"{_fmt(near_miss['false_positive_rate'])}** "
+        f"({near_miss['false_positives']} flagged a deliberate lookalike)",
+        f"- Unsafe remediations against near misses: {near_miss['unsafe_remediations']}",
+        "- Wrong-entity predictions (right rule, wrong subject): "
+        f"{block['attribution']['wrong_entity_predictions']}",
+        "- Wrong-rule predictions (right subject, wrong rule): "
+        f"{block['attribution']['wrong_rule_predictions']}",
+        f"- Correct abstentions on clean scenario pairs: "
+        f"{block['abstention']['correct_abstentions']}",
+        "- Correct explicit no-remediation decisions: "
+        f"{remediation['correct_no_remediation']} "
+        f"({_fmt(remediation['no_remediation_correct'])} of those detected)",
+        "- Remediation correctness given a true positive: "
+        f"{_fmt(remediation['correctness_given_true_positive'])}",
+        "",
+        "By case type:",
+        "",
+        _TABLE_HEADER,
+    ]
+    lines.extend(_metric_row(name, case) for name, case in block["by_case_type"].items())
+    return lines
 
 
 def render_report(result: EvaluationResult) -> str:
@@ -186,6 +247,8 @@ def render_report(result: EvaluationResult) -> str:
             f"{_fmt(rem['end_to_end'])} | {rem['unsafe_actions']} |"
         )
 
+    lines.extend(_adversarial_lines(summary["adversarial"]))
+
     lines.extend(["", "### By entity class", "", _TABLE_HEADER])
     for name in sorted(findings["by_entity_class"]):
         lines.append(_metric_row(name, findings["by_entity_class"][name]))
@@ -279,7 +342,13 @@ def render_report(result: EvaluationResult) -> str:
 
 def evaluation_bytes(result: EvaluationResult) -> dict[str, bytes]:
     """Return the canonical bytes of every output file, keyed by filename."""
+    scenario_files = (
+        {SCENARIO_METRICS_NAME: serialize.jsonl_bytes(result.scenario_metrics)}
+        if result.scenario_metrics
+        else {}
+    )
     return {
+        **scenario_files,
         EVALUATION_SUMMARY_NAME: serialize.manifest_bytes(result.summary),
         FINDING_RESULTS_NAME: serialize.jsonl_bytes(result.finding_results),
         REMEDIATION_RESULTS_NAME: serialize.jsonl_bytes(result.remediation_results),
@@ -345,6 +414,7 @@ __all__ = [
     "RULE_METRICS_NAME",
     "CATEGORY_METRICS_NAME",
     "DIFFICULTY_METRICS_NAME",
+    "SCENARIO_METRICS_NAME",
     "EVALUATION_REPORT_NAME",
     "render_report",
     "evaluation_bytes",

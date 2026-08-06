@@ -82,7 +82,7 @@ from dataswamp_biosystems.evaluation.predictions import (
 )
 from dataswamp_biosystems.observed.difficulty import (
     DIFFICULTY_ORDER,
-    RULE_DIFFICULTIES,
+    Difficulty,
     UnknownRuleDifficultyError,
     difficulty_for,
 )
@@ -109,11 +109,11 @@ UNKNOWN_DIFFICULTY = "unknown"
 
 #: The tier buckets always present in a report, in tier order. Emitting a tier
 #: with no pairs (as ``null`` metrics over zero denominators) keeps the report
-#: shape stable across mixed and tier-restricted runs; a reader can then compare
-#: two reports without first checking which keys exist.
-REPORTED_DIFFICULTIES: tuple[str, ...] = tuple(
-    tier.value for tier in DIFFICULTY_ORDER if tier in RULE_DIFFICULTIES
-)
+#: shape stable across mixed, tier-restricted and adversarial runs; a reader can
+#: then compare two reports without first checking which keys exist.
+#: ``adversarial`` is included for exactly that reason: "this benchmark had no
+#: adversarial cases" and "the agent handled them all" must not look alike.
+REPORTED_DIFFICULTIES: tuple[str, ...] = tuple(tier.value for tier in DIFFICULTY_ORDER)
 
 
 def _difficulty_of(rule_id: str) -> str:
@@ -177,6 +177,9 @@ class EvaluationResult:
     rule_metrics: list[GroupMetricRecord] = field(default_factory=list)
     category_metrics: list[GroupMetricRecord] = field(default_factory=list)
     difficulty_metrics: list[GroupMetricRecord] = field(default_factory=list)
+    #: One row per adversarial scenario case type. Empty for a benchmark that
+    #: declares no scenarios, so an ordinary evaluation emits no extra file.
+    scenario_metrics: list[GroupMetricRecord] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +484,117 @@ def _difficulty_blocks(
     return blocks
 
 
+def _scenario_block(
+    truth: GroundTruth,
+    by_case_type: dict[str, Counts],
+    near_miss: Counts,
+    remediation_results: list[RemediationResult],
+    *,
+    wrong_entity: int,
+    wrong_rule: int,
+    correct_abstentions: int,
+) -> dict[str, Any]:
+    """Report the adversarial tier by scenario case type, and by how it was failed.
+
+    This is *reporting*, not a second scoring engine: every count here is a
+    regrouping of pairs the one engine already scored, so the case-type counts
+    sum to the adversarial tier's matrix and nothing is rescored under different
+    rules.
+
+    Only pairs that belong to a declared scenario are counted. That is the whole
+    denominator discipline of this block: the adversarial universe is the
+    constructed neighbourhood, and admitting the rest of the estate would bury a
+    dozen hard decisions under thousands of free true negatives.
+    """
+    scenario_pairs = set(truth.case_type_by_pair)
+    near_miss_ids = truth.near_miss_entity_ids
+    no_remediation_pairs = truth.no_remediation_pairs
+
+    in_scenario = [
+        result
+        for result in remediation_results
+        if (result.entity_id, result.rule_id) in scenario_pairs
+    ]
+    unsafe_on_near_miss = sum(
+        1
+        for result in in_scenario
+        if result.state is RemediationState.UNSAFE and result.entity_id in near_miss_ids
+    )
+    no_remediation_scored = [
+        result
+        for result in in_scenario
+        if (result.entity_id, result.rule_id) in no_remediation_pairs
+        and result.state in (RemediationState.SCORED, RemediationState.MISSING)
+    ]
+    no_remediation_correct = sum(1 for r in no_remediation_scored if r.no_remediation_correct)
+
+    overall = total_counts(by_case_type.values())
+    positives = sum(1 for pair in truth.scenario_positive_pairs if pair in truth.case_type_by_pair)
+
+    # A near miss is only an in-matrix negative if its entity is in the mimicked
+    # rule's *truth-derived* population. Some are not — a control dressed to look
+    # restricted was not restricted in truth, so the rule could never have drawn
+    # it. Flagging one is still counted, as an out-of-scope false positive, but it
+    # cannot enter a specificity denominator without inventing a population.
+    # Reported rather than quietly dropped: an unscored near miss is a limit on
+    # what this benchmark measured, and hiding it would overstate the coverage.
+    declared_near_misses = len(near_miss_ids)
+    scored_near_misses = len(
+        {
+            entity_id
+            for entity_id, rule_id in scenario_pairs
+            if entity_id in near_miss_ids and entity_id in truth.population(rule_id)
+        }
+    )
+    case_blocks = {
+        case_type: {
+            **metric_block(counts),
+            "counts": counts.as_dict(),
+        }
+        for case_type, counts in sorted(by_case_type.items())
+    }
+    remediation = _remediation_totals(in_scenario)
+    return {
+        "scenarios": len(truth.scenarios),
+        "scenario_pairs": overall.total,
+        "positive_support": positives,
+        "near_miss_negative_support": near_miss.negatives,
+        "confusion_matrix": overall.as_dict(),
+        **metric_block(overall),
+        "by_case_type": case_blocks,
+        "near_miss_controls": {
+            **metric_block(near_miss),
+            "declared": declared_near_misses,
+            "scored_in_matrix": scored_near_misses,
+            "unscored_outside_rule_population": declared_near_misses - scored_near_misses,
+            "false_positives": near_miss.fp,
+            # The headline adversarial number: how often the agent was fooled by
+            # a lookalike it was supposed to leave alone.
+            "false_positive_rate": ratio(near_miss.fp, near_miss.negatives),
+            "unsafe_remediations": unsafe_on_near_miss,
+        },
+        "attribution": {
+            # A single false positive can be both — right rule on the wrong
+            # entity *and* right entity under the wrong rule — so these are two
+            # lenses on the same pairs, never a partition to be summed.
+            "wrong_entity_predictions": wrong_entity,
+            "wrong_rule_predictions": wrong_rule,
+        },
+        "abstention": {"correct_abstentions": correct_abstentions},
+        "remediation": {
+            "coverage": remediation["metrics"]["coverage"],
+            "correctness_given_true_positive": remediation["metrics"][
+                "correctness_given_true_positive"
+            ],
+            "end_to_end": remediation["metrics"]["end_to_end"],
+            "unsafe_actions": remediation["counts"]["unsafe_actions"],
+            "correct_no_remediation": no_remediation_correct,
+            "no_remediation_expected": len(no_remediation_pairs),
+            "no_remediation_correct": ratio(no_remediation_correct, len(no_remediation_scored)),
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # The evaluation itself.
 # ---------------------------------------------------------------------------
@@ -511,7 +625,20 @@ def evaluate(
     by_control_partition: dict[str, Counts] = {}
     by_difficulty: dict[str, Counts] = {}
     by_difficulty_reserved: dict[str, Counts] = {}
+    by_case_type: dict[str, Counts] = {}
     selective = Counts()
+
+    # Adversarial indexes, read once. An ordinary benchmark leaves them empty and
+    # every branch below collapses to the pre-existing behaviour.
+    case_type_by_pair = truth.case_type_by_pair
+    near_miss_ids = truth.near_miss_entity_ids
+    scenario_positives = truth.scenario_positive_pairs
+    scenario_positive_rules = {rule_id for _, rule_id in scenario_positives}
+    scenario_positive_entities = {entity_id for entity_id, _ in scenario_positives}
+    near_miss_counts = Counts()
+    wrong_entity = 0
+    wrong_rule = 0
+    correct_abstentions = 0
 
     abstained_positive = 0
     abstained_negative = 0
@@ -526,7 +653,7 @@ def evaluate(
         # Derived from the rule registry, never read from ground truth: the
         # emitted observed state carries no difficulty field, and duplicating one
         # there would let a stale ledger disagree with the live classification.
-        tier = _difficulty_of(rule_id)
+        rule_tier = _difficulty_of(rule_id)
         for entity_id in sorted(truth.population(rule_id)):
             expected_present = entity_id in selected
             prediction = by_pair.get((entity_id, rule_id))
@@ -537,6 +664,14 @@ def evaluate(
             entity_class = truth.entity_class(entity_id)
             abstained = status == STATUS_ABSTAIN
             scored_pairs += 1
+
+            # A pair that belongs to a constructed case is adversarial *because
+            # of the construction*, whatever tier its rule sits at on its own.
+            # That is the whole claim of the tier, and it is applied here rather
+            # than by relabelling the rule, so the rule keeps its honest tier
+            # everywhere else.
+            case_type = case_type_by_pair.get((entity_id, rule_id))
+            tier = Difficulty.ADVERSARIAL.value if case_type is not None else rule_tier
 
             _add(by_rule, rule_id, outcome)
             _add(by_category, category, outcome)
@@ -549,6 +684,29 @@ def evaluate(
             _add(by_difficulty, tier, outcome)
             if reserved:
                 _add(by_difficulty_reserved, tier, outcome)
+            if case_type is not None:
+                _add(by_case_type, case_type, outcome)
+                if entity_id in near_miss_ids:
+                    cell = _CELL.get(outcome)
+                    if cell is not None:
+                        near_miss_counts = near_miss_counts + Counts(**{cell: 1})
+                if abstained and not expected_present:
+                    correct_abstentions += 1
+            # Attribution is deliberately *not* gated on the pair being a declared
+            # scenario pair. Flagging the right entity under a rule no case
+            # declares is exactly a wrong-rule attribution, and it would go
+            # uncounted if only declared pairs were inspected. These counters sit
+            # outside the confusion matrix, so widening what they look at cannot
+            # move a denominator.
+            if outcome is Outcome.FP and scenario_positives:
+                # Right rule, wrong subject: the agent located the problem class
+                # but attributed it to a lookalike.
+                if rule_id in scenario_positive_rules:
+                    wrong_entity += 1
+                # Right subject, wrong problem: the entity really is defective,
+                # but under a different rule.
+                if entity_id in scenario_positive_entities:
+                    wrong_rule += 1
             if abstained:
                 if expected_present:
                     abstained_positive += 1
@@ -685,6 +843,15 @@ def evaluate(
     difficulty_blocks = _difficulty_blocks(
         by_difficulty, by_difficulty_reserved, remediation_results
     )
+    scenario_block = _scenario_block(
+        truth,
+        by_case_type,
+        near_miss_counts,
+        remediation_results,
+        wrong_entity=wrong_entity,
+        wrong_rule=wrong_rule,
+        correct_abstentions=correct_abstentions,
+    )
 
     abstention_total = abstained_positive + abstained_negative
     decided = sum(1 for p in predictions if not p.abstains)
@@ -735,6 +902,10 @@ def evaluate(
             "by_difficulty": difficulty_blocks,
             "coarse_universes": _coarse_universes(truth, predictions),
         },
+        # Always present, and empty-but-shaped for an ordinary benchmark, so a
+        # reader never has to check whether the key exists before comparing two
+        # reports.
+        "adversarial": scenario_block,
         "reserved_controls": {
             **metric_block(reserved_counts),
             "false_positives": reserved_counts.fp,
@@ -792,6 +963,16 @@ def evaluate(
         for tier in sorted(difficulty_blocks)
     ]
 
+    scenario_metrics = [
+        GroupMetricRecord(
+            id=case_type,
+            group="scenario-case-type",
+            counts=counts.as_dict(),
+            metrics=metric_block(counts)["metrics"],
+        )
+        for case_type, counts in sorted(by_case_type.items())
+    ]
+
     return EvaluationResult(
         summary=summary,
         finding_results=sorted(finding_results, key=lambda r: r.id),
@@ -799,6 +980,7 @@ def evaluate(
         rule_metrics=rule_metrics,
         category_metrics=category_metrics,
         difficulty_metrics=difficulty_metrics,
+        scenario_metrics=scenario_metrics,
     )
 
 

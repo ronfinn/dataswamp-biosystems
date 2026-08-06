@@ -101,6 +101,8 @@ dataswamp-benchmark-v0.1.0/
 ├── truth/                      # verbatim copy of the truth-graph output
 ├── estate/                     # verbatim copy of the file estate
 ├── observed/                   # verbatim copy of the observed state + ground truth
+│                               #   (adversarial runs also carry scenarios.jsonl
+│                               #    and scenario-transformations.jsonl)
 ├── evaluation/                 # verbatim copy of one evaluation report (optional)
 └── adapters/
     └── datahub/                # an embedded catalogue export (optional)

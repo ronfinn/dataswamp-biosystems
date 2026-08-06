@@ -43,7 +43,11 @@ machine-readable ledger of every injected defect and its expected finding and
 remediation, emitted under git-ignored `generated/observed/` via `dataswamp
 inject-defects` — which reads the truth graph from disk, checksums it, and
 verifies it is unmodified — with `dataswamp list-defects`/`validate-defects` for
-the registry and `dataswamp validate-observed` to re-check output), and the
+the registry and `dataswamp validate-observed` to re-check output), the
+**adversarial scenario engine** (`--difficulty adversarial`, which constructs
+near-miss controls, decoys and overlapping evidence in
+`src/dataswamp_biosystems/observed/scenarios.py` and emits the privileged
+`scenarios.jsonl`/`scenario-transformations.jsonl` answer key), and the
 **evaluation engine** (a deterministic scorer in
 `src/dataswamp_biosystems/evaluation/` that consumes an emitted observed state as
 ground truth and a versioned JSONL prediction file, emitting confusion-matrix and
@@ -59,7 +63,8 @@ into one directory, committed example submissions under `examples/predictions/`,
 and the canonical `config/` tree plus those examples shipped *inside* the
 distribution so an installed package needs no checkout). See
 `docs/domain-model.md`, `docs/truth-graph-schema.md`, `docs/file-generation.md`,
-`docs/observed-state.md`, `docs/evaluation.md`, `docs/bundles.md`,
+`docs/observed-state.md`, `docs/difficulty-tiers.md`,
+`docs/adversarial-scenarios.md`, `docs/evaluation.md`, `docs/bundles.md`,
 `docs/datahub.md`, and `docs/public-api.md`.
 
 All five generation layers, and the bundle packager, are deliberately
@@ -87,6 +92,7 @@ uv run dataswamp validate-files   # validate a generated file estate
 uv run dataswamp list-defects      # list the defect registry
 uv run dataswamp validate-defects  # validate the defect registry
 uv run dataswamp inject-defects --truth generated/truth/truth-graph.json --seed 20260717 --profile demo  # derive observed state
+uv run dataswamp inject-defects --truth generated/truth --profile demo --difficulty adversarial  # the adversarial tier
 uv run dataswamp validate-observed  # validate a generated observed state
 uv run dataswamp evaluate --observed-dir generated/observed --predictions predictions.jsonl  # score an agent
 uv run dataswamp build-bundle --output-dir dist/benchmark --release v0.1.0rc1  # package a portable bundle
@@ -147,8 +153,13 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     (`controls.jsonl` + `rule-scope.jsonl`) — every asset/file left clean, so
     downstream evaluation can measure true negatives and precision.
     Mutates only JSON copies of the truth graph (never the truth entities) and
-    depends only on `company/` and `truth/`, never on DataHub. See
-    `docs/observed-state.md`.
+    depends only on `company/` and `truth/`, never on DataHub. `scenarios.py`
+    holds the **adversarial** tier: constructed case classes, near-miss
+    definitions with named executable validity predicates, the deterministic
+    plan, and coverage. A near miss is recorded as a `ScenarioTransformation`,
+    never as a `MutationRecord` — ordinary controls keep field-for-field truth
+    equality, and a near miss is held to a stricter itemised invariant instead.
+    See `docs/observed-state.md` and `docs/adversarial-scenarios.md`.
   - `evaluation/` — the deterministic scoring engine: the versioned prediction
     contract and its total validator, a read-only ground-truth loader over the
     emitted observed state, count-based metrics, the pair-level scoring engine,
@@ -282,7 +293,20 @@ referential integrity, not just happy-path execution.
 - **Never report an undefined metric as zero**, and never widen a metric's
   denominator with pairs outside the relevant rule's population — inflated true
   negatives make every agent look good and are the failure mode this benchmark
-  exists to avoid.
+  exists to avoid. The adversarial universe is the constructed neighbourhood,
+  not the estate, for exactly this reason.
+- **Never let a near-miss control be a real defect.** A near miss is applied only
+  to a *reserved* control, declares every field it touches, and must still
+  satisfy the named validity predicate of the rule it mimics. Never weaken the
+  ordinary-control equality check to accommodate one, and never relabel an
+  ordinary bronze/silver/gold defect as adversarial — the tier is a property of
+  the constructed scenario, not of a rule.
+- **Never let `mixed` include adversarial scenarios.** It means the ordinary rule
+  catalogue; folding constructed cases in would move the canonical bytes and every
+  published baseline score.
+- **Never expose `scenarios.jsonl` or `scenario-transformations.jsonl` to an
+  agent or baseline.** They are answer key, alongside the expected findings and
+  the control partition.
 - **Never let a core layer import or name DataHub.** `company/`, `truth/`,
   `estate/`, `observed/`, `evaluation/` and `bundle/` must stay
   catalogue-independent; the adapter depends on them, never the reverse.

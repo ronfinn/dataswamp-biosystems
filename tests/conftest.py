@@ -32,7 +32,8 @@ from dataswamp_biosystems.evaluation import (
     prediction_digest,
     write_evaluation,
 )
-from dataswamp_biosystems.observed.engine import generate_observed
+from dataswamp_biosystems.observed.difficulty import Difficulty
+from dataswamp_biosystems.observed.engine import ObservedResult, generate_observed
 from dataswamp_biosystems.observed.profiles import ObservedProfile
 from dataswamp_biosystems.observed.writer import write_observed
 from dataswamp_biosystems.truth import generate_truth_graph, load_generation_plan
@@ -132,4 +133,31 @@ def real_observed_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     result = generate_observed(graph, config, ObservedProfile.DEMO, CANONICAL_DEFECT_SEED)
     target = tmp_path_factory.mktemp("real-observed") / "observed"
     write_observed(result, target)
+    return target
+
+
+@pytest.fixture(scope="session")
+def adversarial_result() -> ObservedResult:
+    """The canonical scenario at the adversarial tier, generated once.
+
+    Same config, truth seed and defect seed as :func:`real_observed_dir`, so the
+    only difference between the two is the tier — which is what lets a test
+    compare them and conclude something about the tier rather than about the
+    scenario.
+    """
+    config = load_config(CONFIG_DIR)
+    plan = load_generation_plan(CONFIG_DIR)
+    graph = generate_truth_graph(config, plan, CANONICAL_TRUTH_SEED)
+    return generate_observed(
+        graph, config, ObservedProfile.DEMO, CANONICAL_DEFECT_SEED, Difficulty.ADVERSARIAL
+    )
+
+
+@pytest.fixture(scope="session")
+def adversarial_observed_dir(
+    adversarial_result: ObservedResult, tmp_path_factory: pytest.TempPathFactory
+) -> Path:
+    """The canonical adversarial benchmark, written once."""
+    target = tmp_path_factory.mktemp("adversarial-observed") / "observed"
+    write_observed(adversarial_result, target)
     return target

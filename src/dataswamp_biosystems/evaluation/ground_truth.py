@@ -16,6 +16,11 @@ re-derives it and never writes to it. Five artefacts are read:
     held-out partition.
 ``profile-summary.json``
     The scenario identity (profile, seeds, generator/schema versions).
+``scenarios.jsonl``
+    Present only for an adversarial benchmark: the constructed cases, which say
+    which pairs belong to which reasoning problem and which lookalikes are
+    deliberate near misses. Read by the *evaluator*, which is privileged; never
+    by an agent, which is not.
 
 The union of every rule population is the evaluation universe; entities that
 appear in no rule population are known to the benchmark but *outside* every
@@ -38,6 +43,7 @@ from dataswamp_biosystems.observed.entities import (
     ExpectedRemediation,
     RuleScopeRecord,
 )
+from dataswamp_biosystems.observed.scenarios import CaseType, ScenarioCase, ScenarioPolarity
 from dataswamp_biosystems.observed.writer import (
     CONTROLS_NAME,
     EXPECTED_FINDINGS_NAME,
@@ -45,18 +51,27 @@ from dataswamp_biosystems.observed.writer import (
     MUTATION_LOG_NAME,
     PROFILE_SUMMARY_NAME,
     RULE_SCOPE_NAME,
+    SCENARIOS_NAME,
 )
 from dataswamp_biosystems.truth import serialize
 
 # The artefacts whose bytes identify this ground truth, in a fixed order so the
-# fingerprint never depends on directory iteration.
+# fingerprint never depends on directory iteration. ``scenarios.jsonl`` is part
+# of the identity even where it is absent: an adversarial benchmark and an
+# ordinary one are different benchmarks, and a fingerprint that could not tell
+# them apart would let two incomparable results quote the same value.
 GROUND_TRUTH_FILES: tuple[str, ...] = (
     CONTROLS_NAME,
     EXPECTED_FINDINGS_NAME,
     EXPECTED_REMEDIATIONS_NAME,
     PROFILE_SUMMARY_NAME,
     RULE_SCOPE_NAME,
+    SCENARIOS_NAME,
 )
+
+# Artefacts a benchmark may legitimately omit. Absence is a fact about the
+# scenario (no adversarial cases), not an incomplete directory.
+OPTIONAL_GROUND_TRUTH_FILES: frozenset[str] = frozenset({SCENARIOS_NAME})
 
 # Entity kinds that denote a materialized file rather than a catalogue asset.
 FILE_ENTITY_KINDS: frozenset[str] = frozenset({"file"})
@@ -107,6 +122,61 @@ class GroundTruth:
     # Entity kinds recovered from the mutation log, for the few entities that
     # are neither a control nor the primary target of a finding.
     collateral_kinds: tuple[tuple[str, str], ...] = ()
+    #: Constructed adversarial cases; empty for an ordinary benchmark.
+    scenarios: tuple[ScenarioCase, ...] = ()
+
+    # -- adversarial indexes ---------------------------------------------------
+
+    @property
+    def is_adversarial(self) -> bool:
+        return bool(self.scenarios)
+
+    @property
+    def case_type_by_pair(self) -> dict[tuple[str, str], str]:
+        """Return ``{(entity_id, rule_id): case type}`` for every scenario pair.
+
+        A positive case claims the pairs formed by its target and each rule it
+        fires; a near miss claims the pair formed by its control and the rule it
+        *mimics* — that is precisely the pair an over-eager detector will flag,
+        and scoring it anywhere else would hide the mistake the case exists to
+        surface.
+        """
+        pairs: dict[tuple[str, str], str] = {}
+        for case in self.scenarios:
+            for entity_id in case.target_entity_ids:
+                for rule_id in case.rule_ids:
+                    pairs[(entity_id, rule_id)] = case.case_type.value
+        return pairs
+
+    @property
+    def near_miss_entity_ids(self) -> frozenset[str]:
+        return frozenset(
+            entity_id
+            for case in self.scenarios
+            if case.polarity is ScenarioPolarity.NEAR_MISS_CONTROL
+            for entity_id in case.target_entity_ids
+        )
+
+    @property
+    def scenario_positive_pairs(self) -> frozenset[tuple[str, str]]:
+        return frozenset(
+            (entity_id, rule_id)
+            for case in self.scenarios
+            if case.polarity is ScenarioPolarity.POSITIVE
+            for entity_id in case.target_entity_ids
+            for rule_id in case.rule_ids
+        )
+
+    @property
+    def no_remediation_pairs(self) -> frozenset[tuple[str, str]]:
+        """Pairs whose case requires an explicit no-action decision."""
+        return frozenset(
+            (entity_id, rule_id)
+            for case in self.scenarios
+            if case.case_type is CaseType.NO_REMEDIATION
+            for entity_id in case.target_entity_ids
+            for rule_id in case.rule_ids
+        )
 
     # -- indexes --------------------------------------------------------------
 
@@ -136,10 +206,21 @@ class GroundTruth:
 
         A prediction naming an entity outside this set is a broken submission;
         a prediction naming a known entity outside a *rule's* population is a
-        scoring outcome (out-of-scope), not a validation failure.
+        scoring outcome (out-of-scope), not a validation failure. That difference
+        is why the set has to be generous: rejecting a whole submission is a
+        judgement about the *submitter*, and it must be reserved for a prediction
+        about something the benchmark genuinely never heard of.
+
+        Collaterally-mutated entities are included for exactly that reason. They
+        are neither a control (they were touched) nor the target of a finding
+        (the rule's primary subject was another entity), so on a
+        scenario-restricted benchmark they would otherwise fall through every
+        other source and turn a reasonable prediction — the entity really does
+        look odd in the observed graph — into a rejected submission.
         """
         ids: set[str] = {control.id for control in self.controls}
         ids.update(finding.entity_id for finding in self.findings)
+        ids.update(entity_id for entity_id, _ in self.collateral_kinds)
         for scope in self.scopes:
             ids.update(scope.eligible_ids)
             ids.update(scope.control_excluded_ids)
@@ -202,7 +283,11 @@ def load_ground_truth(observed_dir: Path | str) -> GroundTruth:
     observed_dir = Path(observed_dir)
     if not observed_dir.is_dir():
         raise EvaluationConfigError(f"no observed state directory at {observed_dir}")
-    missing = [name for name in GROUND_TRUTH_FILES if not (observed_dir / name).is_file()]
+    missing = [
+        name
+        for name in GROUND_TRUTH_FILES
+        if name not in OPTIONAL_GROUND_TRUTH_FILES and not (observed_dir / name).is_file()
+    ]
     if missing:
         raise EvaluationConfigError(
             f"observed state at {observed_dir} is incomplete; missing: {', '.join(sorted(missing))}"
@@ -236,6 +321,13 @@ def load_ground_truth(observed_dir: Path | str) -> GroundTruth:
             if entity_id and kind:
                 collateral.setdefault(entity_id, kind)
 
+    scenario_path = observed_dir / SCENARIOS_NAME
+    scenarios = (
+        _parse(ScenarioCase, _read_jsonl(scenario_path), scenario_path)
+        if scenario_path.is_file()
+        else []
+    )
+
     return GroundTruth(
         scopes=tuple(sorted(scopes, key=lambda s: s.id)),
         findings=tuple(sorted(findings, key=lambda f: (f.entity_id, f.rule_id))),
@@ -245,11 +337,13 @@ def load_ground_truth(observed_dir: Path | str) -> GroundTruth:
         fingerprint=ground_truth_fingerprint(observed_dir),
         source_dir=observed_dir.as_posix(),
         collateral_kinds=tuple(sorted(collateral.items())),
+        scenarios=tuple(sorted(scenarios, key=lambda case: case.id)),
     )
 
 
 __all__ = [
     "GROUND_TRUTH_FILES",
+    "OPTIONAL_GROUND_TRUTH_FILES",
     "FILE_ENTITY_KINDS",
     "ENTITY_CLASS_ASSET",
     "ENTITY_CLASS_FILE",

@@ -218,6 +218,16 @@ estate are byte-identical across the change, and the observed graph's records
 differ only by the version bump — see [Why the canonical golden output
 changed](reproducibility.md#why-the-canonical-golden-output-changed).
 
+Adding the adversarial tier raised `schema_version` to `4` (generator version
+`1.3.0`). That release added two **optional** ledgers — `scenarios.jsonl` and
+`scenario-transformations.jsonl` — emitted only by an adversarial run, and a
+`scenarios` coverage block in `profile-summary.json` present only for one. No
+record that existed at schema 3 changed shape or meaning, a schema-3 directory
+remains readable (`SUPPORTED_OBSERVED_SCHEMA_VERSIONS` is `{3, 4}`), and the
+canonical scenario's ledgers are byte-identical across the change — only the two
+version fields in `meta` moved. See
+[adversarial-scenarios.md](adversarial-scenarios.md).
+
 ## Defect taxonomy
 
 Defects are defined in an in-code registry (`observed/defects.py`) spanning
@@ -361,6 +371,12 @@ declared reasoning scope. They are independent filters that compose, and neither
 is derived from the other; `--profile poor --difficulty gold` is a pervasive
 estate of hard-to-detect problems.
 
+`--difficulty adversarial` is different in kind: it is not a rule filter but a
+switch to the **scenario engine**, which constructs near-miss controls, decoys
+and overlapping evidence rather than sampling rules, and emits two extra
+privileged ledgers. It is explicit and opt-in; `mixed` never includes it. See
+[adversarial-scenarios.md](adversarial-scenarios.md).
+
 ```bash
 dataswamp inject-defects --profile demo --difficulty bronze --output-dir generated/observed-bronze
 ```
@@ -393,7 +409,8 @@ dataswamp validate-observed            # re-check a generated observed state
 `inject-defects` defaults its output to `generated/observed/`; pass
 `--output-dir` for another location and `--force` to overwrite a non-empty one.
 `--seed` is the *defect* seed; the truth seed comes from the truth manifest.
-`--difficulty` selects a benchmark tier and defaults to `mixed`.
+`--difficulty` selects a benchmark tier and defaults to `mixed`, which means the
+ordinary rule catalogue and never the constructed adversarial scenarios.
 
 The output directory is checked against the command's protected inputs before
 anything is staged, renamed or removed. `inject-defects` refuses an output

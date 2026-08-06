@@ -46,6 +46,8 @@ from dataswamp_biosystems.baselines.naive_agent import (
 )
 from dataswamp_biosystems.baselines.null_agent import NullBaseline
 from dataswamp_biosystems.baselines.observed_input import (
+    ADVERSARIAL_ONLY_INPUT_FILES,
+    ALWAYS_PRESENT_FORBIDDEN_FILES,
     FORBIDDEN_INPUT_FILES,
     PERMITTED_INPUT_FILES,
     ObservedEntity,
@@ -70,6 +72,8 @@ __all__ = [
     "BASELINES",
     "BASELINE_NAMES",
     "BASELINE_SCHEMA_VERSION",
+    "ADVERSARIAL_ONLY_INPUT_FILES",
+    "ALWAYS_PRESENT_FORBIDDEN_FILES",
     "FORBIDDEN_INPUT_FILES",
     "NAIVE_CHECKS",
     "PERMITTED_INPUT_FILES",

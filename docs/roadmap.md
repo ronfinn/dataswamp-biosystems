@@ -127,6 +127,9 @@ Also implemented:
 * Benchmark difficulty tiers — bronze, silver and gold, derived from a per-rule
   reasoning scope — with tier-restricted generation and per-tier evaluation
   (see [difficulty-tiers.md](difficulty-tiers.md))
+* The adversarial tier — constructed scenario cases, near-miss controls,
+  `scenarios.jsonl`, scenario-aware scoring and measured adversarial baselines
+  (see [adversarial-scenarios.md](adversarial-scenarios.md))
 
 Remaining for v0.1:
 
@@ -134,16 +137,23 @@ Remaining for v0.1:
   (see [generated-data-licensing-decision.md](generated-data-licensing-decision.md))
 * First official GitHub release
 
-Difficulty tiers ship in two parts. Bronze, silver and gold are complete; the
-**adversarial** tier is not. Adversarial is a property of a *scenario* rather
-than of a rule — a near-miss control that looks exactly like a defect and is
-correct — so it needs a scenario layer rather than a filter over the existing
-rule catalogue. `Difficulty.ADVERSARIAL` is reserved and no rule holds it.
+All four difficulty tiers now ship. Bronze, silver and gold are a filter over the
+rule catalogue; adversarial is a *constructed* set of scenario cases, because
+adversarial is a property of a scenario rather than of a rule — no rule holds
+`Difficulty.ADVERSARIAL`, and `selectable_rules` still refuses it.
 
-Beyond v0.1, adversarial scenarios and near-miss controls, scenario packs
-composing profiles and defect sets into named benchmark cases, run-to-run
-comparison reporting, and assessment agents scored against the observed state's
-expected findings and remediations, remain future work.
+The adversarial set is deliberately a **focused initial six case classes** over a
+small constructed universe, not a model of real-world ambiguity; its limits are
+listed in
+[adversarial-scenarios.md](adversarial-scenarios.md#limitations). Widening it —
+multi-field and multi-entity near misses, file- and lineage-level construction,
+and cases where the observed graph genuinely underdetermines the *finding* rather
+than only the remediation — is future work.
+
+Beyond v0.1, scenario packs composing profiles and defect sets into named
+benchmark cases, run-to-run comparison reporting, and assessment agents scored
+against the observed state's expected findings and remediations, remain future
+work.
 
 ### v0.2 — Metadata and Lineage Integrations
 

@@ -61,6 +61,10 @@ output is byte-identical.
 - **An imperfection engine** — 41 defect rules across 12 categories, six
   maturity profiles, and a machine-readable ledger of every injected defect with
   its expected finding and remediation.
+- **Four difficulty tiers** — bronze, silver and gold derived from what evidence
+  each rule needs, plus an **adversarial** tier of constructed cases: near-miss
+  controls that look like defects and are not, decoys, overlapping evidence, and
+  problems where the correct answer is an explicit no-remediation decision.
 - **A control partition** — every clean entity named, with a strict reserved
   subset held out of every rule's population, so precision and specificity are
   measurable and flagging everything is visibly penalised.
@@ -106,13 +110,15 @@ regulatory compliance.
 ### Known limitations
 
 - Small by design — a correctness benchmark, not a load test.
-- One estate shape and one defect taxonomy. Difficulty tiers ship as bronze,
-  silver and gold, derived from a per-rule reasoning scope, with tier-restricted
-  generation and per-tier evaluation
-  ([difficulty-tiers.md](difficulty-tiers.md)). **Adversarial scenarios and
-  near-miss controls are not implemented** — adversarial is a property of a
-  scenario rather than of a rule, and needs a scenario layer; the enum member is
-  reserved and no rule holds it.
+- One estate shape and one defect taxonomy. All four difficulty tiers ship:
+  bronze, silver and gold are derived from a per-rule reasoning scope
+  ([difficulty-tiers.md](difficulty-tiers.md)), and adversarial is a
+  *constructed* set of scenario cases
+  ([adversarial-scenarios.md](adversarial-scenarios.md)). The adversarial set is
+  a **focused initial six case classes** over a small constructed universe — 19
+  scored pairs at the demo profile — and is not a model of real-world ambiguity.
+  Near misses are single-field and asset-level only; no case yet leaves the
+  *finding* itself genuinely underdetermined.
 - The published baselines are metadata-only and deliberately simple; none opens
   a materialized scientific file, and no LLM-backed agent ships.
 - No run-to-run comparison or regression reporting.
