@@ -94,8 +94,12 @@ def _observed_source(reader: BundleReader) -> SourceGraph:
 
     This function is the containment boundary for truth leakage: it reads
     ``observed-graph.json`` and nothing else. The expected findings, expected
-    remediations, control partition, rule scope and mutation log are never
-    opened, so no future change to the mapping can accidentally surface them.
+    remediations, control partition, rule scope, mutation log and — for an
+    adversarial bundle — the scenario ledgers are never opened, so no future
+    change to the mapping can accidentally surface them. An adversarial bundle
+    therefore exports exactly what an ordinary one does: the near-miss *values*
+    are in the observed graph and travel with it, while the records saying they
+    were planted stay behind.
     """
     graph = reader.observed_graph()
     shards: dict[str, list[dict[str, Any]]] = {}

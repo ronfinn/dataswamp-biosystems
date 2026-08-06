@@ -22,18 +22,34 @@ in the observed graph is compared field-for-field against the truth graph. So a
 control that is deliberately mutated, dropped, duplicated, invented, or pointed
 at an unknown entity is reported as a specific, actionable control-partition
 issue rather than only as an opaque byte drift.
+
+An adversarial run adds a second, stricter partition check. Ordinary controls
+keep the field-for-field truth equality above, unchanged. A **near-miss** control
+— a clean entity deliberately dressed to resemble a defect — is instead held to
+an itemised invariant: it must be a *reserved* control, absent from every rule's
+``selected_ids``, absent from the defect and mutation ledgers, and every field
+that differs from truth must be declared by a scenario transformation whose
+before/after match the two graphs and whose emitted value still satisfies the
+named validity predicate of the rule it mimics. A near miss that drifted into
+being a real defect is therefore reported by name rather than shipping quietly in
+the negative class.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, ValidationError
 
 from dataswamp_biosystems.company.config import CanonicalConfig
 from dataswamp_biosystems.observed.defects import DEFECTS
 from dataswamp_biosystems.observed.difficulty import Difficulty
 from dataswamp_biosystems.observed.engine import (
+    ADVERSARIAL_MIN_SCHEMA_VERSION,
+    SUPPORTED_OBSERVED_SCHEMA_VERSIONS,
     ObservedResult,
     generate_observed,
     modality_group_of,
@@ -50,6 +66,12 @@ from dataswamp_biosystems.observed.errors import (
 )
 from dataswamp_biosystems.observed.index import GraphIndex
 from dataswamp_biosystems.observed.profiles import ObservedProfile
+from dataswamp_biosystems.observed.scenarios import (
+    NEAR_MISS_VALIDITY_CHECKS,
+    ScenarioCase,
+    ScenarioTransformation,
+    coverage_problems,
+)
 from dataswamp_biosystems.observed.writer import (
     CONTROLS_NAME,
     INJECTED_DEFECTS_NAME,
@@ -57,6 +79,8 @@ from dataswamp_biosystems.observed.writer import (
     OBSERVED_GRAPH_NAME,
     PROFILE_SUMMARY_NAME,
     RULE_SCOPE_NAME,
+    SCENARIO_TRANSFORMATIONS_NAME,
+    SCENARIOS_NAME,
     SUMMARY_MD_NAME,
     observed_bytes,
 )
@@ -107,6 +131,47 @@ def read_observed_difficulty(observed_dir: Path) -> Difficulty | None:
         ) from exc
 
 
+def _check_schema_compatibility(
+    observed_dir: Path, meta: dict[str, Any], difficulty: Difficulty | None
+) -> None:
+    """Refuse an observed state this build cannot interpret, with a reason.
+
+    Two separate questions, kept separate on purpose:
+
+    * **Can this build read the directory at all?** A schema outside
+      :data:`SUPPORTED_OBSERVED_SCHEMA_VERSIONS` is refused rather than guessed
+      at — regenerating it against a mismatched generator would produce a
+      confident, wrong drift report.
+    * **Is the directory internally coherent?** Schema 3 has nowhere to put the
+      scenario ledgers, so a schema-3 directory claiming ``adversarial`` is
+      malformed rather than merely old. A schema-3 directory claiming nothing is
+      perfectly fine and stays readable.
+    """
+    raw = meta.get("schema_version")
+    try:
+        schema_version = int(str(raw))
+    except (TypeError, ValueError) as exc:
+        raise ObservedConfigError(
+            f"{observed_dir / PROFILE_SUMMARY_NAME} records a non-numeric schema_version {raw!r}"
+        ) from exc
+
+    if schema_version not in SUPPORTED_OBSERVED_SCHEMA_VERSIONS:
+        raise ObservedConfigError(
+            f"observed state at {observed_dir} declares schema version "
+            f"{schema_version}, which this build cannot read; supported versions "
+            f"are {sorted(SUPPORTED_OBSERVED_SCHEMA_VERSIONS)}. Regenerate the "
+            "benchmark, or use a DataSwamp release that supports it"
+        )
+    if difficulty is Difficulty.ADVERSARIAL and schema_version < ADVERSARIAL_MIN_SCHEMA_VERSION:
+        raise ObservedConfigError(
+            f"observed state at {observed_dir} records difficulty 'adversarial' at "
+            f"schema version {schema_version}, but adversarial output requires "
+            f"schema {ADVERSARIAL_MIN_SCHEMA_VERSION}: schema {schema_version} has "
+            "no scenario ledgers to carry the constructed cases, so the directory "
+            "cannot be what it claims to be"
+        )
+
+
 def validate_observed(observed_dir: Path, graph: TruthGraph, config: CanonicalConfig) -> None:
     """Validate the observed estate under ``observed_dir`` against ``graph`` and disk.
 
@@ -121,6 +186,7 @@ def validate_observed(observed_dir: Path, graph: TruthGraph, config: CanonicalCo
     defect_seed = int(str(meta["defect_seed"]))
     truth_seed = int(str(meta["truth_seed"]))
     difficulty = read_observed_difficulty(observed_dir)
+    _check_schema_compatibility(observed_dir, meta, difficulty)
     if graph.meta.seed != truth_seed:
         issues.add(
             ObservedIssueKind.CONSISTENCY,
@@ -565,9 +631,276 @@ def _check_controls(
     reserved_ids = {
         control_id for control_id, row in on_disk.items() if row.get("reserved") is True
     }
+    # Read back from disk, exactly as the control partition is: a validator that
+    # only inspected the regenerated result would prove the generator consistent
+    # with itself and say nothing about the bytes anyone will actually consume.
+    emitted_cases = _read_models(
+        observed_dir, SCENARIOS_NAME, ScenarioCase, result.scenarios, issues
+    )
+    emitted_transformations = _read_models(
+        observed_dir,
+        SCENARIO_TRANSFORMATIONS_NAME,
+        ScenarioTransformation,
+        result.transformations,
+        issues,
+    )
+
+    by_entity: dict[str, list[ScenarioTransformation]] = {}
+    for record in emitted_transformations:
+        by_entity.setdefault(record.entity_id, []).append(record)
     _check_controls_untargeted(observed_dir, set(on_disk), issues)
-    _check_controls_unchanged(observed_dir, set(on_disk), index, issues)
+    _check_controls_unchanged(observed_dir, set(on_disk), index, issues, by_entity)
     _check_rule_scope(observed_dir, result, set(on_disk), reserved_ids, issues)
+    _check_scenarios(
+        result, emitted_cases, emitted_transformations, index, set(on_disk), reserved_ids, issues
+    )
+
+
+def _read_models[T: BaseModel](
+    observed_dir: Path,
+    name: str,
+    model: type[T],
+    expected: Sequence[T],
+    issues: ObservedIssueCollector,
+) -> list[T]:
+    """Parse one emitted scenario ledger from disk, or report why it is unusable.
+
+    An absent file is only an error when the run was supposed to produce one:
+    an ordinary benchmark emits no scenario ledgers at all, and demanding an empty
+    file from it would be demanding a byte change nothing needs.
+    """
+    path = observed_dir / name
+    if not path.exists():
+        if expected:
+            issues.add(
+                ObservedIssueKind.SCENARIO,
+                f"missing {name}, but this run constructed {len(expected)} scenario record(s)",
+                entity_kind=name,
+            )
+        return []
+    rows = _read_jsonl(observed_dir, name, issues)
+    if rows is None:
+        return []
+    parsed: list[T] = []
+    for number, row in enumerate(rows, start=1):
+        try:
+            parsed.append(model.model_validate(row))
+        except ValidationError as exc:
+            issues.add(
+                ObservedIssueKind.SCENARIO,
+                f"{name} record {number} is invalid: {exc}",
+                entity_kind=name,
+            )
+    return parsed
+
+
+def _check_scenarios(
+    result: ObservedResult,
+    cases: Sequence[ScenarioCase],
+    transformations: Sequence[ScenarioTransformation],
+    index: GraphIndex,
+    control_ids: set[str],
+    reserved_ids: set[str],
+    issues: ObservedIssueCollector,
+) -> None:
+    """Check the scenario ledger against the partitions it claims to sit in.
+
+    Two failure modes matter and are checked separately. A **near-miss** case
+    whose entity is not a reserved control, or which has leaked into a rule's
+    selection or into the defect ledger, is a positive masquerading as a negative
+    — the single worst thing that can happen to this benchmark, because it makes
+    a correct agent look wrong. A **positive** case that names no finding, or
+    names one that does not exist, is an answer key describing a construction the
+    observed graph does not contain.
+    """
+    if not cases and not transformations and not result.scenarios:
+        return
+
+    # The emitted ledger must be the one the generator produced. Checked as a set
+    # comparison rather than only through the byte tripwire so a specific record
+    # is named, not just "this file drifted".
+    expected_cases = {case.id: case.model_dump(mode="json") for case in result.scenarios}
+    emitted = {case.id: case.model_dump(mode="json") for case in cases}
+    for case_id in sorted(set(expected_cases) - set(emitted)):
+        issues.add(
+            ObservedIssueKind.SCENARIO,
+            "scenario was constructed but is not emitted",
+            entity_kind="scenario",
+            entity_id=case_id,
+        )
+    for case_id in sorted(set(emitted) - set(expected_cases)):
+        issues.add(
+            ObservedIssueKind.SCENARIO,
+            "emitted scenario was not constructed by this run",
+            entity_kind="scenario",
+            entity_id=case_id,
+        )
+
+    finding_ids = {finding.id for finding in result.findings}
+    instance_entities = {instance.entity_id for instance in result.instances}
+    mutation_entities = {mutation.entity_id for mutation in result.mutations}
+    selected: set[str] = set()
+    for scope in result.rule_scopes:
+        selected.update(scope.selected_ids)
+
+    _check_unique([case.id for case in cases], "scenario", issues)
+    _check_unique([record.id for record in transformations], "transformation", issues)
+
+    scenario_ids = {case.id for case in cases}
+    for record in transformations:
+        if record.scenario_id not in scenario_ids:
+            issues.add(
+                ObservedIssueKind.UNRESOLVED_REFERENCE,
+                f"transformation references unknown scenario {record.scenario_id!r}",
+                entity_kind="transformation",
+                entity_id=record.id,
+            )
+
+    # Evidence is resolved against *truth*, not the observed graph: for some rules
+    # the defect is precisely that the evidence record is gone.
+    truth_ids = {
+        str(row["id"])
+        for records in index.truth.values()
+        for row in records
+        if isinstance(row, dict) and "id" in row
+    }
+
+    known_transformations = {record.id for record in transformations}
+    for case in cases:
+        for evidence_id in sorted(case.evidence_entity_ids):
+            if evidence_id not in truth_ids:
+                issues.add(
+                    ObservedIssueKind.UNRESOLVED_REFERENCE,
+                    f"scenario names evidence {evidence_id!r} that resolves to no truth record",
+                    entity_kind="scenario",
+                    entity_id=case.id,
+                )
+        for transformation_ref in case.transformation_ids:
+            if transformation_ref not in known_transformations:
+                issues.add(
+                    ObservedIssueKind.UNRESOLVED_REFERENCE,
+                    f"scenario references unknown transformation {transformation_ref!r}",
+                    entity_kind="scenario",
+                    entity_id=case.id,
+                )
+        if case.is_near_miss:
+            _check_near_miss_case(
+                case,
+                control_ids,
+                reserved_ids,
+                selected,
+                instance_entities,
+                mutation_entities,
+                issues,
+            )
+            continue
+        if not case.finding_ids:
+            issues.add(
+                ObservedIssueKind.SCENARIO,
+                "positive scenario names no expected finding, so nothing it claims can be scored",
+                entity_kind="scenario",
+                entity_id=case.id,
+            )
+        for finding_ref in sorted(case.finding_ids):
+            if finding_ref not in finding_ids:
+                issues.add(
+                    ObservedIssueKind.UNRESOLVED_REFERENCE,
+                    f"scenario references unknown finding {finding_ref!r}",
+                    entity_kind="scenario",
+                    entity_id=case.id,
+                )
+        for entity_id in sorted(case.target_entity_ids):
+            if entity_id in control_ids:
+                issues.add(
+                    ObservedIssueKind.CONTAMINATION,
+                    f"positive scenario targets control entity {entity_id!r}; a case "
+                    "cannot be both the positive class and the negative class",
+                    entity_kind="scenario",
+                    entity_id=case.id,
+                )
+        for entity_id in sorted(case.decoy_entity_ids):
+            if entity_id not in reserved_ids:
+                issues.add(
+                    ObservedIssueKind.SCENARIO,
+                    f"decoy {entity_id!r} is not a reserved control; a decoy must be an "
+                    "entity no rule could have drawn, or naming it in the answer key "
+                    "is a hint about a genuine candidate",
+                    entity_kind="scenario",
+                    entity_id=case.id,
+                )
+
+    coverage = result.summary.get("scenarios")
+    if coverage is not None:
+        for problem in coverage_problems(coverage):
+            issues.add(ObservedIssueKind.SCENARIO, problem, entity_kind="coverage")
+
+
+def _check_near_miss_case(
+    case: ScenarioCase,
+    control_ids: set[str],
+    reserved_ids: set[str],
+    selected: set[str],
+    instance_entities: set[str],
+    mutation_entities: set[str],
+    issues: ObservedIssueCollector,
+) -> None:
+    """Prove a near-miss case sits wholly outside every positive partition."""
+    for entity_id in sorted(case.target_entity_ids):
+        if entity_id not in control_ids:
+            issues.add(
+                ObservedIssueKind.NEAR_MISS,
+                f"near-miss entity {entity_id!r} is not in the control partition",
+                entity_kind="scenario",
+                entity_id=case.id,
+            )
+        if entity_id not in reserved_ids:
+            issues.add(
+                ObservedIssueKind.NEAR_MISS,
+                f"near-miss entity {entity_id!r} is not a *reserved* control; a near "
+                "miss must be held out of every rule's eligible population before "
+                "selection, so that no rule could have drawn it even in principle",
+                entity_kind="scenario",
+                entity_id=case.id,
+            )
+        if entity_id in selected:
+            issues.add(
+                ObservedIssueKind.CONTAMINATION,
+                f"near-miss entity {entity_id!r} appears in a rule's selected_ids",
+                entity_kind="scenario",
+                entity_id=case.id,
+            )
+        if entity_id in instance_entities:
+            issues.add(
+                ObservedIssueKind.CONTAMINATION,
+                f"near-miss entity {entity_id!r} is the target of a defect instance",
+                entity_kind="scenario",
+                entity_id=case.id,
+            )
+        if entity_id in mutation_entities:
+            issues.add(
+                ObservedIssueKind.CONTAMINATION,
+                f"near-miss entity {entity_id!r} is the target of a defect mutation; a "
+                "near miss must be recorded as a scenario transformation, never as an "
+                "entry in the defect mutation ledger",
+                entity_kind="scenario",
+                entity_id=case.id,
+            )
+    if case.finding_ids:
+        issues.add(
+            ObservedIssueKind.NEAR_MISS,
+            "near-miss case names an expected finding; a near miss carries no finding "
+            "and every flag against it is a false positive",
+            entity_kind="scenario",
+            entity_id=case.id,
+        )
+    if not case.transformation_ids:
+        issues.add(
+            ObservedIssueKind.NEAR_MISS,
+            "near-miss case declares no transformation, so nothing distinguishes it "
+            "from an ordinary control",
+            entity_kind="scenario",
+            entity_id=case.id,
+        )
 
 
 def _check_controls_untargeted(
@@ -594,6 +927,7 @@ def _check_controls_unchanged(
     control_ids: set[str],
     index: GraphIndex,
     issues: ObservedIssueCollector,
+    transformations: dict[str, list[ScenarioTransformation]] | None = None,
 ) -> None:
     """Every control's observed record must equal its truth record, field for field.
 
@@ -601,6 +935,16 @@ def _check_controls_unchanged(
     strongest available evidence that a control survived injection untouched: it
     is the record-level equivalent of byte identity, and unlike a whole-file
     digest it names the individual control that drifted.
+
+    A **near-miss** control is the one deliberate exception, and it is not a
+    weakening of the rule above: the equality check is replaced, for that entity
+    only, by a stricter itemised one. Every differing field must be declared by a
+    scenario transformation, that transformation's ``before`` must be the truth
+    value and its ``after`` the observed value, and the observed record must still
+    satisfy the named validity predicate of the rule it mimics. Any field that
+    differs without a declaration is reported exactly as an undeclared mutation of
+    a control would be. Ordinary controls — every control not named by a
+    transformation — keep field-for-field truth equality untouched.
     """
     path = observed_dir / OBSERVED_GRAPH_NAME
     if not path.exists():
@@ -624,6 +968,7 @@ def _check_controls_unchanged(
             if isinstance(record, dict) and "id" in record:
                 by_id[str(record["id"])] = record
 
+    declared = transformations or {}
     for control_id in sorted(control_ids):
         truth_record = index.truth_record("files", control_id) or index.asset(control_id)
         if truth_record is None:
@@ -636,18 +981,109 @@ def _check_controls_unchanged(
                 entity_kind="control",
                 entity_id=control_id,
             )
-        elif observed_record != truth_record:
-            changed = sorted(
-                key
-                for key in set(observed_record) | set(truth_record)
-                if observed_record.get(key) != truth_record.get(key)
+            continue
+        changed = sorted(
+            key
+            for key in set(observed_record) | set(truth_record)
+            if observed_record.get(key) != truth_record.get(key)
+        )
+        if control_id in declared:
+            _check_near_miss(
+                control_id, truth_record, observed_record, changed, declared[control_id], issues
             )
+        elif changed:
             issues.add(
                 ObservedIssueKind.CONTROL_PARTITION,
                 f"control entity differs from truth in the observed graph: {changed}",
                 entity_kind="control",
                 entity_id=control_id,
-                field=changed[0] if changed else "",
+                field=changed[0],
+            )
+
+
+def _check_near_miss(
+    control_id: str,
+    truth_record: dict[str, Any],
+    observed_record: dict[str, Any],
+    changed: list[str],
+    records: list[ScenarioTransformation],
+    issues: ObservedIssueCollector,
+) -> None:
+    """Prove one near-miss control is still clean, field by declared field."""
+    by_field = {record.field: record for record in records}
+    scenario_ids = sorted({record.scenario_id for record in records})
+    scenario_label = ", ".join(scenario_ids)
+
+    for field_name in changed:
+        record = by_field.get(field_name)
+        if record is None:
+            issues.add(
+                ObservedIssueKind.NEAR_MISS,
+                f"near-miss control (scenario {scenario_label}) changed undeclared field "
+                f"{field_name!r}; every field a near miss touches must be declared as a "
+                "scenario transformation",
+                entity_kind="near-miss-control",
+                entity_id=control_id,
+                field=field_name,
+            )
+            continue
+        if record.before != truth_record.get(field_name):
+            issues.add(
+                ObservedIssueKind.NEAR_MISS,
+                f"scenario {record.scenario_id} declares before={record.before!r} for "
+                f"{field_name!r} but the truth graph holds "
+                f"{truth_record.get(field_name)!r}",
+                entity_kind="near-miss-control",
+                entity_id=control_id,
+                field=field_name,
+            )
+        if record.after != observed_record.get(field_name):
+            issues.add(
+                ObservedIssueKind.NEAR_MISS,
+                f"scenario {record.scenario_id} declares after={record.after!r} for "
+                f"{field_name!r} but the observed graph holds "
+                f"{observed_record.get(field_name)!r}",
+                entity_kind="near-miss-control",
+                entity_id=control_id,
+                field=field_name,
+            )
+
+    for field_name, record in sorted(by_field.items()):
+        if field_name not in changed:
+            issues.add(
+                ObservedIssueKind.NEAR_MISS,
+                f"scenario {record.scenario_id} declares a transformation of "
+                f"{field_name!r} that the observed graph does not contain; a declared "
+                "near miss that changed nothing is an empty claim in the answer key",
+                entity_kind="near-miss-control",
+                entity_id=control_id,
+                field=field_name,
+            )
+        # The claim that makes this a near miss rather than a defect: the emitted
+        # record must still be on the valid side of the rule it resembles. Checked
+        # by re-running the named predicate against the *observed* record, so the
+        # proof comes from the emitted bytes and not from the generator's word.
+        check = NEAR_MISS_VALIDITY_CHECKS.get(record.validity_check)
+        if check is None:
+            issues.add(
+                ObservedIssueKind.NEAR_MISS,
+                f"scenario {record.scenario_id} names unknown validity check "
+                f"{record.validity_check!r}, so its claim to be a near miss rather "
+                "than a defect cannot be verified",
+                entity_kind="near-miss-control",
+                entity_id=control_id,
+                field=field_name,
+            )
+        elif not check(observed_record):
+            issues.add(
+                ObservedIssueKind.NEAR_MISS,
+                f"near-miss control (scenario {record.scenario_id}) no longer satisfies "
+                f"{record.validity_condition!r}, so it would genuinely trigger "
+                f"{record.mimicked_rule_id!r}: this is an undeclared defect sitting in "
+                "the control partition, not a near miss",
+                entity_kind="near-miss-control",
+                entity_id=control_id,
+                field=field_name,
             )
 
 
