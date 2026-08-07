@@ -14,7 +14,9 @@ The checks, in the order they are applied:
 5. every declared file's size and SHA-256 match;
 6. the bundle fingerprint is the one the declared digests imply;
 7. ``checksums.sha256`` is byte-identical to what the manifest implies;
-8. the declared layers are structurally complete and mutually consistent;
+8. the declared layers are structurally complete and mutually consistent, and
+   the licensing material (notices, data licence, manifest licence block) is
+   present and states both licences;
 9. provenance agrees with the manifest, layer by layer;
 10. the ground-truth fingerprint recomputes from the bundled observed layer, and
     a bundled evaluation report was scored against that same ground truth;
@@ -25,6 +27,7 @@ The checks, in the order they are applied:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -42,10 +45,13 @@ from dataswamp_biosystems.bundle.errors import (
 )
 from dataswamp_biosystems.bundle.layout import (
     CHECKSUMS_NAME,
+    DATA_LICENSE_NAME,
     LAYER_ORDER,
     LAYER_REQUIRED_FILES,
     LAYER_REQUIRES,
+    LICENSES_NAME,
     MANIFEST_NAME,
+    README_NAME,
     Layer,
     contains_symlink,
     is_safe_relative_path,
@@ -95,6 +101,19 @@ def _read_json_file(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _spdx_identifier(statement: str) -> str | None:
+    """Return the SPDX identifier a licence statement declares, if it declares one.
+
+    Returns ``None`` rather than guessing when the statement carries no SPDX
+    line: an older or differently-worded statement is not evidence of a
+    mismatch, and verification must not invent one.
+    """
+    # Tolerant of the markdown around it (``**SPDX identifier:** `CC-BY-NC-4.0` ``)
+    # but anchored to the SPDX line, not to the prose.
+    match = re.search(r"SPDX[^\n:]*:[^\n\w]*([A-Za-z0-9.+-]+)", statement)
+    return match.group(1) if match else None
 
 
 def verify_bundle(bundle_dir: Path | str, *, strict: bool = True) -> BundleManifest:
@@ -226,6 +245,70 @@ def verify_bundle(bundle_dir: Path | str, *, strict: bool = True) -> BundleManif
             path = f"{layer.value}/{name}"
             if path not in declared:
                 issues.add(path, BundleIssueKind.STRUCTURE, detail="required layer file")
+
+    # -- 8b: licensing material ----------------------------------------------
+    # A bundle travels away from the repository, so the terms must travel with
+    # it: the notices, the licence statement itself, and a manifest block naming
+    # both licences rather than leaving one to be inferred from the other.
+    #
+    # Deliberately *self*-consistency, not agreement with this build's licence
+    # constants. A bundle published under one licence must keep verifying after
+    # the project adopts another, so the manifest is checked against the licence
+    # statement shipped beside it — which is what a consumer actually relies on
+    # — rather than against whatever the verifying build happens to believe.
+    for name in (README_NAME, LICENSES_NAME, DATA_LICENSE_NAME):
+        if name not in declared:
+            issues.add(name, BundleIssueKind.STRUCTURE, detail="required bundle metadata")
+
+    for field in ("software_license", "generated_data_license"):
+        if not str(manifest.licensing.get(field, "")).strip():
+            issues.add(
+                MANIFEST_NAME,
+                BundleIssueKind.REFERENCE,
+                detail=f"licensing.{field} is not stated",
+            )
+    for field, expected_file in (
+        ("notices_file", LICENSES_NAME),
+        ("generated_data_license_file", DATA_LICENSE_NAME),
+    ):
+        named = str(manifest.licensing.get(field, ""))
+        if named not in declared:
+            issues.add(
+                MANIFEST_NAME,
+                BundleIssueKind.REFERENCE,
+                detail=f"licensing.{field} does not name a file bundled here",
+                expected=expected_file,
+                actual=named or "<unrecorded>",
+            )
+
+    # The manifest's machine-readable identifier must be the one the shipped
+    # licence statement actually grants. Matched against that statement's own
+    # SPDX line rather than searched for anywhere in the prose: the statement
+    # necessarily *mentions* MIT (to say the software is not covered by it), so
+    # a loose search would wave through a manifest relabelling the data as MIT.
+    declared_license = str(manifest.licensing.get("generated_data_license", "")).strip()
+    licence_file = resolve_inside(bundle_dir, DATA_LICENSE_NAME)
+    if declared_license and licence_file is not None and licence_file.is_file():
+        statement = licence_file.read_text(encoding="utf-8", errors="replace")
+        granted = _spdx_identifier(statement)
+        if granted is not None and granted != declared_license:
+            issues.add(
+                MANIFEST_NAME,
+                BundleIssueKind.REFERENCE,
+                detail=(
+                    f"licensing.generated_data_license is not the licence "
+                    f"{DATA_LICENSE_NAME} grants"
+                ),
+                expected=granted,
+                actual=declared_license,
+            )
+
+    if manifest.licensing.get("contains_real_data") is not False:
+        issues.add(
+            MANIFEST_NAME,
+            BundleIssueKind.REFERENCE,
+            detail="licensing.contains_real_data must be false",
+        )
 
     # -- 9: provenance consistency -------------------------------------------
     bundle_provenance = _read_json_file(bundle_dir / PROVENANCE_NAME)

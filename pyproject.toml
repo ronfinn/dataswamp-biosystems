@@ -50,9 +50,14 @@ packages = ["src/dataswamp_biosystems"]
 # benchmark — a source checkout is a contributor convenience, not a requirement.
 # Both are copied verbatim from the tracked trees, so the packaged copy and the
 # checkout copy generate identical bytes.
+#
+# ``DATA-LICENSE.md`` ships for the same reason: every bundle carries a verbatim
+# copy of it, so an installed-only user must be able to build one without a
+# checkout, and the copy must be the same bytes the repository tracks.
 [tool.hatch.build.targets.wheel.force-include]
 "config" = "dataswamp_biosystems/_config"
 "examples/predictions" = "dataswamp_biosystems/_examples/predictions"
+"DATA-LICENSE.md" = "dataswamp_biosystems/_licenses/DATA-LICENSE.md"
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -67,6 +72,8 @@ include = [
     "CONTRIBUTING.md",
     "SECURITY.md",
     "LICENSE",
+    "DATA-LICENSE.md",
+    "COMMERCIAL-LICENSING.md",
     "pyproject.toml",
     "uv.lock",
     ".pre-commit-config.yaml",

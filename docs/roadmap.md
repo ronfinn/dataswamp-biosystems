@@ -131,10 +131,12 @@ Also implemented:
   `scenarios.jsonl`, scenario-aware scoring and measured adversarial baselines
   (see [adversarial-scenarios.md](adversarial-scenarios.md))
 
+* A designated licence for generated benchmark data — CC BY-NC 4.0, with the
+  software staying MIT and commercial permission handled separately
+  (see [ADR 0004](adr/0004-generated-data-licensing.md))
+
 Remaining for v0.1:
 
-* A designated licence for generated benchmark data
-  (see [generated-data-licensing-decision.md](generated-data-licensing-decision.md))
 * First official GitHub release
 
 All four difficulty tiers now ship. Bronze, silver and gold are a filter over the

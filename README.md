@@ -5,6 +5,7 @@
 [![CI](https://github.com/ronfinn/dataswamp-biosystems/actions/workflows/ci.yml/badge.svg)](https://github.com/ronfinn/dataswamp-biosystems/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/code%20license-MIT-green)](LICENSE)
+[![Data license](https://img.shields.io/badge/data%20license-CC%20BY--NC%204.0-lightgrey)](DATA-LICENSE.md)
 ![Project status](https://img.shields.io/badge/status-v0.1%20release%20candidate-orange)
 
 Data Swamp Biosystems generates a complete, entirely fictional oncology research
@@ -283,15 +284,27 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Licensing
 
-The **source code** in this repository is released under the
-[MIT License](LICENSE).
+| What | Licence |
+| --- | --- |
+| **Software** — everything in this repository's source tree | [MIT](LICENSE) |
+| **Official generated benchmark data** — the datasets and bundles this project distributes, from v0.1.0 onward | [CC BY-NC 4.0](DATA-LICENSE.md) (`CC-BY-NC-4.0`) |
+| **Commercial use of that generated data** | [Separate permission](COMMERCIAL-LICENSING.md) from the project owner |
 
-The licence for **generated benchmark data** has not yet been separately
-designated. This is an open decision, deliberately not pre-empted here: bundles
-declare `generated_data_license: not-separately-defined` and carry a `LICENSES.md`
-stating the position, which is the file a bundle consumer should consult. See
-[docs/generated-data-licensing-decision.md](docs/generated-data-licensing-decision.md)
-for exactly what remains to be decided and which files change once it is.
+The **software** is MIT: commercial use included, no permission needed.
+
+The **official generated benchmark data** is publicly available for
+noncommercial use — research, education, and noncommercial AI/model/agent
+evaluation — with attribution, under CC BY-NC 4.0. It is not open source, and
+this project does not describe it as such. Commercial use of that material
+requires separate permission; see [COMMERCIAL-LICENSING.md](COMMERCIAL-LICENSING.md).
+
+Data you generate yourself by running the MIT-licensed generators is outside the
+scope of the data licence. The project makes no claim over it.
+
+Every bundle carries a verbatim copy of [DATA-LICENSE.md](DATA-LICENSE.md) and
+declares `generated_data_license: CC-BY-NC-4.0` in its manifest, so a consumer
+holding only a bundle can read the terms. The rationale is recorded in
+[ADR 0004](docs/adr/0004-generated-data-licensing.md).
 
 No real patient, biological, company-confidential or third-party licensed dataset
 is included in, or required by, this project.

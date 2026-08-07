@@ -14,6 +14,7 @@ from dataswamp_biosystems import __version__
 from dataswamp_biosystems.bundle import (
     BUNDLE_SCHEMA_VERSION,
     CHECKSUMS_NAME,
+    DATA_LICENSE_NAME,
     LICENSES_NAME,
     MANIFEST_NAME,
     README_NAME,
@@ -24,6 +25,7 @@ from dataswamp_biosystems.bundle import (
     read_manifest,
 )
 from dataswamp_biosystems.evaluation.ground_truth import ground_truth_fingerprint
+from dataswamp_biosystems.licensing import data_license_path
 from dataswamp_biosystems.provenance import PROVENANCE_NAME
 from dataswamp_biosystems.truth import serialize
 
@@ -112,7 +114,17 @@ def test_manifest_records_the_contract_fields(full_bundle_dir: Path) -> None:
     assert manifest.scenario["truth"]["seed"] == 20260717
     assert manifest.scenario["observed"]["profile"] == "demo"
     assert manifest.compatibility["python_requires"] == ">=3.12"
-    assert manifest.licensing["generated_data_license"] == "not-separately-defined"
+    # The two licences are stated independently: the software is MIT, the
+    # generated data is CC BY-NC 4.0, and neither is inferable from the other.
+    assert manifest.licensing["software_license"] == "MIT"
+    assert manifest.licensing["generated_data_license"] == "CC-BY-NC-4.0"
+    assert manifest.licensing["generated_data_license_file"] == DATA_LICENSE_NAME
+    assert manifest.licensing["generated_data_license_url"] == (
+        "https://creativecommons.org/licenses/by-nc/4.0/"
+    )
+    assert manifest.licensing["generated_data_license_since"] == "v0.1.0"
+    assert "separate permission" in manifest.licensing["commercial_use"]
+    assert manifest.licensing["notices_file"] == LICENSES_NAME
     assert manifest.licensing["contains_real_data"] is False
 
 
@@ -136,7 +148,14 @@ def test_ground_truth_fingerprint_matches_the_bundled_observed_layer(
 
 
 def test_bundle_metadata_files_are_present(full_bundle_dir: Path) -> None:
-    for name in (MANIFEST_NAME, CHECKSUMS_NAME, README_NAME, LICENSES_NAME, PROVENANCE_NAME):
+    for name in (
+        MANIFEST_NAME,
+        CHECKSUMS_NAME,
+        README_NAME,
+        LICENSES_NAME,
+        DATA_LICENSE_NAME,
+        PROVENANCE_NAME,
+    ):
         assert (full_bundle_dir / name).is_file(), name
     index = json.loads((full_bundle_dir / SCHEMA_INDEX_NAME).read_text(encoding="utf-8"))
     assert index["bundle_schema_version"] == BUNDLE_SCHEMA_VERSION
@@ -148,9 +167,31 @@ def test_licences_state_the_generated_data_position_without_inventing_terms(
 ) -> None:
     text = (full_bundle_dir / LICENSES_NAME).read_text(encoding="utf-8")
     assert "MIT Licence" in text
-    assert "not separately defined" in text
+    assert "CC-BY-NC-4.0" in text
+    assert "Creative Commons Attribution-NonCommercial 4.0 International" in text
+    assert "separate permission from the project owner" in text
+    assert DATA_LICENSE_NAME in text, "the notices point at the licence shipped beside them"
     assert "No real" in text
     assert "Permission is hereby granted" not in text, "licence text is referenced, not copied"
+    assert "not separately defined" not in text
+    for stale in ("DataSwamp Community Research", "LicenseRef-DataSwamp"):
+        assert stale not in text, f"abandoned custom-licence wording resurfaced: {stale}"
+
+
+def test_bundle_ships_the_data_licence_verbatim(full_bundle_dir: Path) -> None:
+    """A consumer holding only the bundle can read the terms without the repository."""
+    shipped = (full_bundle_dir / DATA_LICENSE_NAME).read_bytes()
+    assert shipped == data_license_path().read_bytes(), "the bundled copy must not be a paraphrase"
+    text = shipped.decode("utf-8")
+    assert "CC-BY-NC-4.0" in text
+    assert "MIT" in text, "the licence statement must say the software is not covered by it"
+
+
+def test_the_readme_states_both_licences(full_bundle_dir: Path) -> None:
+    text = (full_bundle_dir / README_NAME).read_text(encoding="utf-8")
+    assert "MIT" in text
+    assert "CC-BY-NC-4.0" in text
+    assert DATA_LICENSE_NAME in text
 
 
 def test_every_bundled_file_except_the_two_anchors_is_declared(full_bundle_dir: Path) -> None:

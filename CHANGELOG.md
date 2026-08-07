@@ -46,6 +46,26 @@ entries below.
 
 ### Changed
 
+- **The generated benchmark data now has a designated licence.** The official
+  generated datasets and bundles the project distributes, from v0.1.0 onward,
+  are licensed **CC BY-NC 4.0** (SPDX `CC-BY-NC-4.0`): noncommercial research,
+  education and AI/model/agent evaluation are permitted with attribution, and
+  commercial use requires separate permission from the project owner. **The
+  software remains MIT, unchanged.** The project makes no claim over data a
+  third party generates independently by running the MIT-licensed software.
+  Nothing distributed before v0.1.0 is retroactively relicensed. New root files
+  `DATA-LICENSE.md` and `COMMERCIAL-LICENSING.md`; rationale in
+  [ADR 0004](docs/adr/0004-generated-data-licensing.md), which supersedes and
+  replaces the former open-decision document.
+
+  Bundle manifests now declare `generated_data_license: CC-BY-NC-4.0` (was
+  `not-separately-defined`) with the licence URL, starting release and
+  commercial-permission note; every bundle ships a verbatim copy of
+  `DATA-LICENSE.md`, and `verify-bundle` checks the licensing material.
+  **`BUNDLE_SCHEMA_VERSION` is unchanged** — `licensing` is an open block and
+  `generated_data_license` a free string, so this is not a schema change.
+  **Bundle fingerprints change**, because bundle bytes changed; the truth,
+  estate and observed layers are byte-identical and no golden digest moves.
 - **Evaluation schema 1 → 2**, additively. Everything a schema-1 reader looked
   for is still in the same place with the same meaning; the tier blocks and the
   new metric file are new material.
@@ -303,8 +323,10 @@ entry below describes the whole surface rather than a delta.
   validation are not implemented. No other catalogue is supported.
 - Scores are comparable only within one generator version, config fingerprint,
   profile and seed.
-- **The licence for generated benchmark data is not yet designated** — see
-  [docs/generated-data-licensing-decision.md](docs/generated-data-licensing-decision.md).
+- **The licence for generated benchmark data is not yet designated.** *(As of
+  0.1.0rc1. Superseded after this release: generated benchmark data is now
+  CC BY-NC 4.0 — see
+  [ADR 0004](docs/adr/0004-generated-data-licensing.md).)*
 
 [Unreleased]: https://github.com/ronfinn/dataswamp-biosystems/compare/main...HEAD
 [0.1.0rc1]: https://github.com/ronfinn/dataswamp-biosystems/tree/main

@@ -20,7 +20,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from dataswamp_biosystems import __version__
+from dataswamp_biosystems import __version__, licensing
 from dataswamp_biosystems.bundle.entities import (
     BUNDLE_BUILDER_VERSION,
     BUNDLE_SCHEMA_VERSION,
@@ -33,6 +33,7 @@ from dataswamp_biosystems.bundle.layout import (
     ADAPTER_MANIFEST_NAME,
     CHECKSUM_ALGORITHM,
     CHECKSUMS_NAME,
+    DATA_LICENSE_NAME,
     LAYER_ORDER,
     LAYER_REQUIRED_FILES,
     LAYER_REQUIRES,
@@ -208,8 +209,16 @@ def _render_readme(manifest: BundleManifest) -> str:
             "        print(finding.rule_id, finding.entity_id)",
             "```",
             "",
-            f"See `{LICENSES_NAME}` for licensing and `schemas/` for the schema versions",
-            "each layer was written against.",
+            "## Licensing",
+            "",
+            f"The software that produced this bundle is {licensing.SOFTWARE_LICENSE}-licensed.",
+            "This bundle's generated benchmark data is licensed under",
+            f"`{licensing.GENERATED_DATA_LICENSE}` — noncommercial use with attribution;",
+            "commercial use requires separate permission from the project owner.",
+            "",
+            f"See `{DATA_LICENSE_NAME}` for the licence statement itself, `{LICENSES_NAME}`",
+            "for the full notices, and `schemas/` for the schema versions each layer was",
+            "written against.",
             "",
         ]
     )
@@ -229,10 +238,24 @@ def _render_licenses(manifest: BundleManifest) -> str:
             "",
             "## Generated data",
             "",
-            "**Licensing for the generated benchmark data is not separately defined at this",
-            "release.** The project has not adopted a distinct data licence, and this file",
-            "does not create one. Treat the generated contents as covered by the same MIT",
-            "terms as the software unless and until the project states otherwise.",
+            "The official generated benchmark datasets and bundles distributed by the",
+            "Data Swamp Biosystems project, from release "
+            f"{licensing.GENERATED_DATA_LICENSE_SINCE} onward, are licensed under the",
+            f"**{licensing.GENERATED_DATA_LICENSE_NAME}** licence",
+            f"(SPDX identifier `{licensing.GENERATED_DATA_LICENSE}`).",
+            "",
+            "Noncommercial research, education and noncommercial AI/model/agent evaluation",
+            "are permitted with attribution. Commercial use is not granted by that licence",
+            "and requires separate permission from the project owner.",
+            "",
+            "The project's licence statement ships with this bundle as "
+            f"`{DATA_LICENSE_NAME}` — read",
+            "it for the exact scope, permissions and attribution requirement. The full",
+            f"licence text is at <{licensing.GENERATED_DATA_LICENSE_URL}>.",
+            "",
+            "This governs the official material the project distributes. It is not a claim",
+            "over data a third party generates independently by running the MIT-licensed",
+            "software themselves.",
             "",
             "## Content assurance",
             "",
@@ -439,10 +462,19 @@ def build_bundle(
         "portable_layers": [Layer.TRUTH.value, Layer.OBSERVED.value],
         "environment_scoped_layers": [Layer.ESTATE.value],
     }
-    licensing = {
-        "software_license": "MIT",
+    # The software and the data the software produces carry *different* licences,
+    # and the manifest states both explicitly so a consumer never has to infer
+    # one from the other. ``generated_data_license`` covers the official material
+    # the project distributes; it is not a claim over output a third party
+    # generates by running the MIT-licensed software themselves.
+    licensing_block = {
+        "software_license": licensing.SOFTWARE_LICENSE,
         "software_license_file": "LICENSE (source repository)",
-        "generated_data_license": "not-separately-defined",
+        "generated_data_license": licensing.GENERATED_DATA_LICENSE,
+        "generated_data_license_file": DATA_LICENSE_NAME,
+        "generated_data_license_url": licensing.GENERATED_DATA_LICENSE_URL,
+        "generated_data_license_since": licensing.GENERATED_DATA_LICENSE_SINCE,
+        "commercial_use": "requires separate permission from the project owner",
         "notices_file": LICENSES_NAME,
         "contains_real_data": False,
     }
@@ -467,7 +499,7 @@ def build_bundle(
         bundle_fingerprint="0" * 64,
         compatibility=compatibility,
         adapters=adapters,
-        licensing=licensing,
+        licensing=licensing_block,
     )
 
     # The human-readable files quote only manifest fields that are already
@@ -476,6 +508,11 @@ def build_bundle(
     sections[README_NAME] = SECTION_BUNDLE
     payload[LICENSES_NAME] = _render_licenses(base).encode("utf-8")
     sections[LICENSES_NAME] = SECTION_BUNDLE
+    # A verbatim copy of the project's canonical licence statement, so the terms
+    # travel with the bytes they govern. Copied rather than restated: there is
+    # one authoritative wording, and this is it.
+    payload[DATA_LICENSE_NAME] = licensing.data_license_text().encode("utf-8")
+    sections[DATA_LICENSE_NAME] = SECTION_BUNDLE
     payload[SCHEMA_INDEX_NAME] = serialize.manifest_bytes(_schema_index(base))
     sections[SCHEMA_INDEX_NAME] = SECTION_BUNDLE
 

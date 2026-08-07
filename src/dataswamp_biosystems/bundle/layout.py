@@ -25,6 +25,7 @@ import posixpath
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 
+from dataswamp_biosystems import licensing
 from dataswamp_biosystems.estate import writer as estate_writer
 from dataswamp_biosystems.evaluation import writer as evaluation_writer
 from dataswamp_biosystems.observed import writer as observed_writer
@@ -35,6 +36,11 @@ MANIFEST_NAME = "benchmark-manifest.json"
 CHECKSUMS_NAME = "checksums.sha256"
 README_NAME = "README.md"
 LICENSES_NAME = "LICENSES.md"
+# A byte-identical copy of the repository's canonical ``DATA-LICENSE.md``, so a
+# consumer who receives only a bundle can read the generated-data terms without
+# repository access. Copied, never paraphrased — see
+# :mod:`dataswamp_biosystems.licensing`.
+DATA_LICENSE_NAME = licensing.DATA_LICENSE_NAME
 SCHEMAS_DIRNAME = "schemas"
 SCHEMA_INDEX_NAME = f"{SCHEMAS_DIRNAME}/schema-versions.json"
 ADAPTERS_DIRNAME = "adapters"
@@ -168,6 +174,7 @@ __all__ = [
     "CHECKSUMS_NAME",
     "README_NAME",
     "LICENSES_NAME",
+    "DATA_LICENSE_NAME",
     "SCHEMAS_DIRNAME",
     "SCHEMA_INDEX_NAME",
     "ADAPTERS_DIRNAME",
