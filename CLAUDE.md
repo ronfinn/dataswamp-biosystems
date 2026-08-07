@@ -322,10 +322,16 @@ referential integrity, not just happy-path execution.
   scopes data generation.
 - Never add placeholder packages or modules for capabilities that haven't
   been designed yet.
-- **Never present generated-benchmark-data licensing as resolved.** It is an
-  open decision recorded in `docs/generated-data-licensing-decision.md`; bundles
-  declare `generated_data_license: not-separately-defined`. Do not select a
-  licence, draft licence wording, or offer a legal conclusion.
+- **Never conflate the two licences.** The software is MIT; the *official
+  generated benchmark data the project distributes* (v0.1.0 onward) is
+  CC BY-NC 4.0, and bundles declare `generated_data_license: CC-BY-NC-4.0`. See
+  `docs/adr/0004-generated-data-licensing.md` and `DATA-LICENSE.md`, which is the
+  single authoritative wording — `src/dataswamp_biosystems/licensing.py` is its
+  only programmatic source and bundles ship a verbatim copy, so never paraphrase
+  it into a second place. Never describe the generated data as "open source",
+  never claim the data licence covers output a third party generates
+  independently from the MIT software, never relicense retroactively, and never
+  invent licence terms, prices or legal conclusions beyond CC BY-NC 4.0.
 - **Never change a committed example submission by hand.** Regenerate with
   `scripts/update_example_predictions.py --confirm` and update the score tables
   in `README.md` and `examples/README.md` — they are pinned by

@@ -151,8 +151,9 @@ dependencies, Python 3.12 and 3.13).
 Not part of this release candidate, and deliberately not automated:
 
 1. Resolve the open decisions listed at the top of
-   [release-notes-v0.1.0-draft.md](release-notes-v0.1.0-draft.md) — in
-   particular the [generated-data licence](generated-data-licensing-decision.md).
+   [release-notes-v0.1.0-draft.md](release-notes-v0.1.0-draft.md). The
+   generated-data licence is settled — CC BY-NC 4.0, see
+   [ADR 0004](adr/0004-generated-data-licensing.md).
 2. Set the final version and update `CHANGELOG.md`.
 3. Tag the release commit.
 4. Create the GitHub Release from the draft release notes.

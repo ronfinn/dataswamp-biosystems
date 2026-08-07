@@ -6,11 +6,9 @@ decisions are made. Nothing here should be read as an announcement.
 
 Before publishing, resolve:
 
-1. The generated-data licence
-   ([decision document](generated-data-licensing-decision.md)).
-2. The final version — `0.1.0` rather than `0.1.0rc1` — and the corresponding
+1. The final version — `0.1.0` rather than `0.1.0rc1` — and the corresponding
    `pyproject.toml`, `__init__.py` and `tests/test_package.py` update.
-3. Whether to publish to PyPI. The "Try it" section below assumes so; if the
+2. Whether to publish to PyPI. The "Try it" section below assumes so; if the
    release ships as a GitHub artefact only, replace `pip install
    dataswamp-biosystems` with the wheel-from-checkout instructions the README
    gives.
@@ -129,11 +127,19 @@ regulatory compliance.
 
 ### Licensing
 
-Source code is MIT. **The licence for generated benchmark data is a separate,
-currently unresolved decision** — bundles declare
-`generated_data_license: not-separately-defined` and carry a `LICENSES.md`
-saying so. See the
-[decision document](generated-data-licensing-decision.md).
+Two licences, for two different things:
+
+- **Software — MIT.** Commercial use included, no permission needed.
+- **Official generated benchmark data — CC BY-NC 4.0.** The datasets and bundles
+  this project distributes, from v0.1.0 onward. Noncommercial research,
+  education and noncommercial AI/model/agent evaluation are permitted with
+  attribution; commercial use requires separate permission from the project
+  owner. Publicly available for noncommercial research — not open source.
+
+Data you generate yourself from the MIT generators is outside the scope of the
+data licence. Bundles declare `generated_data_license: CC-BY-NC-4.0` and carry a
+verbatim `DATA-LICENSE.md`. See [ADR 0004](adr/0004-generated-data-licensing.md)
+and [COMMERCIAL-LICENSING.md](../COMMERCIAL-LICENSING.md).
 
 ### Full detail
 

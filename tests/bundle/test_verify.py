@@ -14,6 +14,7 @@ import pytest
 
 from dataswamp_biosystems.bundle import (
     CHECKSUMS_NAME,
+    DATA_LICENSE_NAME,
     MANIFEST_NAME,
     BundleConfigError,
     BundleIssueKind,
@@ -230,6 +231,85 @@ def test_ground_truth_fingerprint_drift_is_detected(mutable_bundle: Path) -> Non
     with pytest.raises(BundleValidationError) as caught:
         verify_bundle(mutable_bundle)
     assert BundleIssueKind.FINGERPRINT in _kinds(caught.value)
+
+
+def test_a_bundle_stripped_of_its_data_licence_does_not_verify(mutable_bundle: Path) -> None:
+    """The licence travels with the bytes it governs, or the bundle is not valid."""
+    (mutable_bundle / DATA_LICENSE_NAME).unlink()
+    _rewrite_manifest(
+        mutable_bundle,
+        lambda payload: payload.__setitem__(
+            "files", [f for f in payload["files"] if f["path"] != DATA_LICENSE_NAME]
+        ),
+    )
+    with pytest.raises(BundleValidationError) as caught:
+        verify_bundle(mutable_bundle)
+    assert BundleIssueKind.STRUCTURE in _kinds(caught.value)
+    assert DATA_LICENSE_NAME in _files(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        # Relabelling the data as MIT contradicts the licence statement shipped
+        # beside it, which is the document a consumer actually relies on.
+        ("generated_data_license", "MIT"),
+        ("generated_data_license", "not-separately-defined"),
+        ("generated_data_license", ""),
+        ("software_license", ""),
+        # A pointer to something the bundle does not carry leaves a consumer
+        # with terms they cannot read.
+        ("generated_data_license_file", "LICENSE (source repository)"),
+        ("notices_file", ""),
+    ],
+)
+def test_a_manifest_that_misstates_a_licence_is_rejected(
+    mutable_bundle: Path, field: str, value: str
+) -> None:
+    _rewrite_manifest(
+        mutable_bundle,
+        lambda payload: payload["licensing"].__setitem__(field, value),
+    )
+    with pytest.raises(BundleValidationError) as caught:
+        verify_bundle(mutable_bundle)
+    assert BundleIssueKind.REFERENCE in _kinds(caught.value)
+
+
+def test_verification_checks_self_consistency_not_todays_licence(mutable_bundle: Path) -> None:
+    """A bundle published under one licence must keep verifying after a relicence.
+
+    The manifest is checked against the licence statement shipped *in the
+    bundle*, never against the verifying build's own constants — otherwise every
+    already-published bundle would fail the day the project changed its mind.
+    """
+    _rewrite_manifest(
+        mutable_bundle,
+        lambda payload: payload["licensing"].__setitem__("generated_data_license", "CC-BY-SA-4.0"),
+    )
+    (mutable_bundle / DATA_LICENSE_NAME).write_text(
+        "# Data licence\n\nSPDX: CC-BY-SA-4.0\n", encoding="utf-8"
+    )
+    with pytest.raises(BundleValidationError) as caught:
+        verify_bundle(mutable_bundle)
+    # The edit still breaks the checksum for the file it rewrote — that is the
+    # integrity layer doing its job — but the *licensing* invariant is satisfied,
+    # because the manifest and the shipped statement agree with each other.
+    assert BundleIssueKind.CHECKSUM_MISMATCH in _kinds(caught.value)
+    assert not [
+        issue
+        for issue in caught.value.issues
+        if issue.kind is BundleIssueKind.REFERENCE and "licensing" in issue.detail
+    ]
+
+
+def test_a_manifest_claiming_real_data_is_rejected(mutable_bundle: Path) -> None:
+    _rewrite_manifest(
+        mutable_bundle,
+        lambda payload: payload["licensing"].__setitem__("contains_real_data", True),
+    )
+    with pytest.raises(BundleValidationError) as caught:
+        verify_bundle(mutable_bundle)
+    assert BundleIssueKind.REFERENCE in _kinds(caught.value)
 
 
 def test_issues_render_the_file_and_the_invariant(mutable_bundle: Path) -> None:

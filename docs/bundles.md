@@ -96,6 +96,7 @@ dataswamp-benchmark-v0.1.0/
 ├── provenance.json             # the environment that produced the bundle
 ├── README.md                   # generated, human-readable orientation
 ├── LICENSES.md                 # licensing and content-assurance notices
+├── DATA-LICENSE.md             # verbatim copy of the generated-data licence (CC BY-NC 4.0)
 ├── schemas/
 │   └── schema-versions.json    # each layer's schema and generator version
 ├── truth/                      # verbatim copy of the truth-graph output
@@ -136,7 +137,7 @@ and [evaluation.md](evaluation.md); the bundle does not restate them.
 | `bundle_fingerprint` | SHA-256 over every declared `path:sha256` pair — quote this to cite a bundle |
 | `compatibility` | supported schema versions, minimum package version, Python requirement, reader entry point, which layers are byte-portable |
 | `adapters` | per embedded adapter: path, mode, privilege, version, counts, fingerprint |
-| `licensing` | software licence, generated-data position, notices file, `contains_real_data: false` |
+| `licensing` | `software_license: MIT`, `generated_data_license: CC-BY-NC-4.0` with its URL and starting release, the commercial-permission note, the notices and data-licence files, `contains_real_data: false` |
 | `synthetic` | always `true` |
 
 Nothing in the manifest carries a wall-clock value, which is what makes
@@ -296,13 +297,33 @@ byte-identical only within one environment fingerprint. See
 
 ## Licensing
 
+Two licences apply to two different things, and a bundle states both rather than
+letting either be inferred from the other:
+
+| What | Licence |
+| --- | --- |
+| The software that produced the bundle | MIT |
+| The generated benchmark data in the bundle | CC BY-NC 4.0 (`CC-BY-NC-4.0`) |
+
+Every bundle carries `DATA-LICENSE.md` — a **verbatim copy** of the repository's
+canonical licence statement, not a paraphrase — so a consumer holding only the
+directory can read the scope, permissions and attribution requirement without
+repository access. The manifest's `licensing` block declares
+`generated_data_license: CC-BY-NC-4.0`, the licence URL, the release the
+designation starts from, and that commercial use requires separate permission.
+`verify-bundle` checks that this material is present and consistent. The
+reasoning is in [ADR 0004](adr/0004-generated-data-licensing.md).
+
 `LICENSES.md` in every bundle records:
 
 - the **software licence** — MIT, referenced (not restated) from the source
   repository's `LICENSE`;
-- the **generated-data licence** — *not separately defined at this release*. The
-  project has not adopted a distinct data licence and the bundle does not create
-  one; the file says so plainly and points at the MIT terms in the meantime;
+- the **generated-data licence** — CC BY-NC 4.0, summarised, with a pointer to
+  the `DATA-LICENSE.md` shipped alongside it and to the licence's own full text.
+  Noncommercial use with attribution is permitted; commercial use requires
+  separate permission from the project owner. This governs the official material
+  the project distributes — it is not a claim over data a third party generates
+  independently by running the MIT-licensed software;
 - a **content assurance** that every person, institution, study, subject,
   specimen, dataset and identifier is fictional and synthetic, that no real
   patient, personal, biological, confidential or proprietary data is included,

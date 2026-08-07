@@ -36,6 +36,9 @@ REQUIRED_MEMBERS = (
     "dataswamp_biosystems/_examples/predictions/perfect.jsonl",
     "dataswamp_biosystems/_examples/predictions/partial.jsonl",
     "dataswamp_biosystems/_examples/predictions/unsafe.jsonl",
+    # Every bundle carries a verbatim copy of the data licence, so an
+    # installed-only user must have it to build one at all.
+    "dataswamp_biosystems/_licenses/DATA-LICENSE.md",
     "dataswamp_biosystems/py.typed",
     "dataswamp_biosystems/baselines/__init__.py",
     "dataswamp_biosystems/baselines/rule_agent.py",
@@ -67,7 +70,7 @@ FORBIDDEN_SUBSTRINGS = (
 
 
 @pytest.fixture(scope="module")
-def wheel_members(tmp_path_factory: pytest.TempPathFactory) -> list[str]:
+def wheel_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
     if shutil.which("uv") is None:  # pragma: no cover - environment dependent
         pytest.skip("uv is not available to build the distribution")
     out = tmp_path_factory.mktemp("dist")
@@ -82,7 +85,12 @@ def wheel_members(tmp_path_factory: pytest.TempPathFactory) -> list[str]:
         pytest.fail(f"uv build failed:\n{result.stdout}\n{result.stderr}")
     wheels = list(out.glob("*.whl"))
     assert len(wheels) == 1, f"expected exactly one wheel, got {wheels}"
-    with zipfile.ZipFile(wheels[0]) as archive:
+    return wheels[0]
+
+
+@pytest.fixture(scope="module")
+def wheel_members(wheel_path: Path) -> list[str]:
+    with zipfile.ZipFile(wheel_path) as archive:
         return archive.namelist()
 
 
@@ -116,6 +124,19 @@ def test_wheel_carries_the_whole_config_and_example_trees(wheel_members: list[st
         for path in (REPO_ROOT / "config").rglob("*.yaml")
     }
     assert packaged == tracked, f"packaged config differs from config/: {packaged ^ tracked}"
+
+
+@pytest.mark.slow
+def test_packaged_data_licence_is_byte_identical_to_the_tracked_one(wheel_path: Path) -> None:
+    """One authoritative wording, copied — never a second text to keep in sync.
+
+    A packaged copy that drifted from the tracked file would put different terms
+    in an installed user's bundles than a contributor's, which is exactly the
+    divergence shipping a copy instead of a paraphrase is meant to prevent.
+    """
+    with zipfile.ZipFile(wheel_path) as archive:
+        packaged = archive.read("dataswamp_biosystems/_licenses/DATA-LICENSE.md")
+    assert packaged == (REPO_ROOT / "DATA-LICENSE.md").read_bytes()
 
 
 @pytest.mark.slow
