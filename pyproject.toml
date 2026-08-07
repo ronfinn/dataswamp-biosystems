@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dataswamp-biosystems"
-version = "0.1.0rc1"
+version = "0.1.0"
 description = "An open, entirely fictional synthetic oncology data estate and governance benchmark. No real patient data is used."
 readme = "README.md"
 requires-python = ">=3.12"

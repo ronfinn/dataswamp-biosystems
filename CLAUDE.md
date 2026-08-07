@@ -95,7 +95,7 @@ uv run dataswamp inject-defects --truth generated/truth/truth-graph.json --seed 
 uv run dataswamp inject-defects --truth generated/truth --profile demo --difficulty adversarial  # the adversarial tier
 uv run dataswamp validate-observed  # validate a generated observed state
 uv run dataswamp evaluate --observed-dir generated/observed --predictions predictions.jsonl  # score an agent
-uv run dataswamp build-bundle --output-dir dist/benchmark --release v0.1.0rc1  # package a portable bundle
+uv run dataswamp build-bundle --output-dir dist/benchmark --release v0.1.0  # package a portable bundle
 uv run dataswamp verify-bundle dist/benchmark      # verify a bundle end to end
 uv run dataswamp export-datahub --bundle dist/benchmark --mode observed --output-dir export/datahub
 uv run dataswamp demo --output-dir ./dataswamp-demo  # the whole workflow, end to end

@@ -1,19 +1,15 @@
-# Draft release notes — v0.1.0
+# Release notes — v0.1.0
 
-**Draft. No release has been published and no tag has been created.** This file
-is prepared for copying into a GitHub Release once the remaining pre-release
-decisions are made. Nothing here should be read as an announcement.
+The final text for the v0.1.0 GitHub Release. The version is settled at `0.1.0`,
+and the package, its `__version__` and its test agree.
 
-Before publishing, resolve:
+**PyPI: not published, and not decided.** v0.1.0 is distributed as a GitHub
+Release and as a wheel built from a checkout. No `pip install
+dataswamp-biosystems` instruction appears below, and none should be added
+anywhere until the package actually exists on PyPI.
 
-1. The final version — `0.1.0` rather than `0.1.0rc1` — and the corresponding
-   `pyproject.toml`, `__init__.py` and `tests/test_package.py` update.
-2. Whether to publish to PyPI. The "Try it" section below assumes so; if the
-   release ships as a GitHub artefact only, replace `pip install
-   dataswamp-biosystems` with the wheel-from-checkout instructions the README
-   gives.
-
-Then follow [the release checklist](release-checklist.md).
+Cutting the release itself — tagging and creating the GitHub Release — follows
+[the release checklist](release-checklist.md).
 
 ---
 
@@ -34,14 +30,32 @@ and what it proposed to do about it.
 
 ### Try it
 
+Requires Python 3.12 or 3.13. Install the wheel attached to this release, or
+build one from the source:
+
 ```bash
-pip install dataswamp-biosystems
+pip install ./dataswamp_biosystems-0.1.0-py3-none-any.whl
+```
+
+Or from a checkout, with [uv](https://docs.astral.sh/uv/):
+
+```bash
+git clone https://github.com/ronfinn/dataswamp-biosystems.git
+cd dataswamp-biosystems && uv sync
+```
+
+Then:
+
+```bash
 dataswamp demo --output-dir ./dataswamp-demo
 dataswamp run-baseline --agent rule-based \
     --observed-dir ./dataswamp-demo/generated/observed \
     --output baseline.jsonl --evaluate \
     --evaluation-dir ./dataswamp-demo/baseline-evaluation
 ```
+
+From a checkout rather than an installed wheel, prefix each command with `uv
+run`.
 
 A couple of seconds, no credentials, no network, no server. Run it twice and the
 output is byte-identical.
@@ -124,6 +138,8 @@ regulatory compliance.
   catalogue.
 - Scores compare only within one generator version, config fingerprint, profile
   and seed.
+- Not published to PyPI; distribution is this GitHub Release and a wheel built
+  from a checkout.
 
 ### Licensing
 

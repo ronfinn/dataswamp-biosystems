@@ -6,7 +6,7 @@
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/code%20license-MIT-green)](LICENSE)
 [![Data license](https://img.shields.io/badge/data%20license-CC%20BY--NC%204.0-lightgrey)](DATA-LICENSE.md)
-![Project status](https://img.shields.io/badge/status-v0.1%20release%20candidate-orange)
+![Project status](https://img.shields.io/badge/status-v0.1.0-brightgreen)
 
 Data Swamp Biosystems generates a complete, entirely fictional oncology research
 data estate — programmes, studies, subjects, biospecimens, assays, pipeline runs,
@@ -53,8 +53,9 @@ canonical scenario pinned by committed golden digests.
 
 Requires Python 3.12 or 3.13.
 
-**Not on PyPI yet** — this is a release candidate and nothing has been
-published. Install from a checkout, using [uv](https://docs.astral.sh/uv/):
+**Not on PyPI** — publication has not been decided, so there is no `pip install
+dataswamp-biosystems`. Install from a checkout, using
+[uv](https://docs.astral.sh/uv/):
 
 ```bash
 git clone https://github.com/ronfinn/dataswamp-biosystems.git
@@ -119,7 +120,7 @@ dataswamp inject-defects   --truth generated/truth --seed 20260717 --profile dem
 dataswamp evaluate         --observed-dir generated/observed \
                            --predictions examples/predictions/partial.jsonl \
                            --output-dir generated/evaluation
-dataswamp build-bundle     --output-dir dist/benchmark --release v0.1.0rc1
+dataswamp build-bundle     --output-dir dist/benchmark --release v0.1.0
 dataswamp verify-bundle    dist/benchmark
 dataswamp export-datahub   --bundle dist/benchmark --mode observed --output-dir export/datahub
 ```
@@ -311,10 +312,13 @@ is included in, or required by, this project.
 
 ## Project status
 
-**v0.1 release candidate.** The end-to-end benchmark workflow is complete and
+**v0.1.0 — first release.** The end-to-end benchmark workflow is complete and
 tested; the interfaces listed in [docs/public-api.md](docs/public-api.md) are the
-ones intended to be stable at v0.1. No GitHub Release or version tag has been
-published yet. The package version is `0.1.0rc1`.
+ones stable at v0.1. The package version is `0.1.0`.
+
+Distribution is by GitHub Release and by building a wheel from a checkout. The
+project is **not** published to PyPI, and that decision has not been made — see
+[docs/release-notes-v0.1.0.md](docs/release-notes-v0.1.0.md).
 
 ## Documentation
 
@@ -333,6 +337,7 @@ published yet. The package version is `0.1.0rc1`.
 | [docs/public-api.md](docs/public-api.md) | Stable vs experimental vs internal interfaces |
 | [docs/reproducibility.md](docs/reproducibility.md) | Determinism scopes and the golden-digest contract |
 | [docs/release-checklist.md](docs/release-checklist.md) | The exact commands run before a release |
+| [docs/release-notes-v0.1.0.md](docs/release-notes-v0.1.0.md) | Release notes for v0.1.0 |
 | [docs/roadmap.md](docs/roadmap.md) | Scope, design principles, roadmap, non-goals |
 | [examples/README.md](examples/README.md) | Example submissions and how each is scored |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup and common contributor tasks |
