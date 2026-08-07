@@ -52,7 +52,12 @@ near-miss controls, decoys and overlapping evidence in
 `src/dataswamp_biosystems/evaluation/` that consumes an emitted observed state as
 ground truth and a versioned JSONL prediction file, emitting confusion-matrix and
 remediation reports under git-ignored `generated/evaluation/` via `dataswamp
-evaluate`), the **benchmark bundle** (a versioned, checksummed, portable
+evaluate`), the **run-comparison layer** (a read-only differ in
+`src/dataswamp_biosystems/comparison/` that consumes two *already-emitted*
+evaluation directories and reports metric deltas, rule-level regressions,
+control-preservation regressions and remediation changes, emitted under
+git-ignored `generated/comparison/` via `dataswamp compare-runs`), the
+**benchmark bundle** (a versioned, checksummed, portable
 directory packaged from emitted layer output by
 `src/dataswamp_biosystems/bundle/` via `dataswamp build-bundle`, checked by
 `dataswamp verify-bundle`, and read through the stable streaming `BundleReader`),
@@ -65,12 +70,13 @@ distribution so an installed package needs no checkout). See
 `docs/domain-model.md`, `docs/truth-graph-schema.md`, `docs/file-generation.md`,
 `docs/observed-state.md`, `docs/difficulty-tiers.md`,
 `docs/adversarial-scenarios.md`, `docs/evaluation.md`, `docs/bundles.md`,
-`docs/datahub.md`, and `docs/public-api.md`.
+`docs/datahub.md`, `docs/run-comparison.md`, and `docs/public-api.md`.
 
-All five generation layers, and the bundle packager, are deliberately
-catalogue-independent. The observed layer never mutates the truth graph, the
-evaluation layer mutates nothing at all, and the bundle layer copies emitted
-bytes without reinterpreting them. The DataHub adapter is the *only* place a
+All five generation layers, the comparison layer and the bundle packager are
+deliberately catalogue-independent. The observed layer never mutates the truth
+graph, the evaluation layer mutates nothing at all, the comparison layer writes
+nothing into either run it reads, and the bundle layer copies emitted bytes
+without reinterpreting them. The DataHub adapter is the *only* place a
 catalogue is named, it consumes bundles rather than generators, and no DataHub
 package is a dependency. There is no scenario-pack layer and no assessment
 agents yet.
@@ -95,6 +101,7 @@ uv run dataswamp inject-defects --truth generated/truth/truth-graph.json --seed 
 uv run dataswamp inject-defects --truth generated/truth --profile demo --difficulty adversarial  # the adversarial tier
 uv run dataswamp validate-observed  # validate a generated observed state
 uv run dataswamp evaluate --observed-dir generated/observed --predictions predictions.jsonl  # score an agent
+uv run dataswamp compare-runs --baseline generated/eval-v1 --candidate generated/eval-v2 --output-dir generated/comparison  # diff two scored runs
 uv run dataswamp build-bundle --output-dir dist/benchmark --release v0.1.0  # package a portable bundle
 uv run dataswamp verify-bundle dist/benchmark      # verify a bundle end to end
 uv run dataswamp export-datahub --bundle dist/benchmark --mode observed --output-dir export/datahub
@@ -172,6 +179,19 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     metrics are emitted as `null` with their numerator and denominator, never as
     `0.0`. Depends only on `company/`, `truth/` and `observed/`, never on
     DataHub. See `docs/evaluation.md`.
+  - `comparison/` — the deterministic run-comparison layer: the emitted-run
+    loader, the benchmark-identity compatibility gate, the delta primitives, the
+    engine, record models and the atomic writer. It is **read-only** with
+    respect to every other layer and strictly *downstream of the evaluation
+    contract*: it re-scores nothing, reads no prediction file, and never opens
+    the observed ground truth or the privileged scenario answer key — every
+    number it reports is the evaluator's own, differenced. Two runs must share
+    every benchmark-identity field or the comparison is refused with the
+    differing field named. Undefined metrics difference to `null`, never `0.0`,
+    and direction is an explicit field rather than the sign of a number. It
+    versions its own `comparison_schema_version` and changes no other layer's
+    schema. Depends only on `company/`, `truth/` and `evaluation/`, never on
+    DataHub. See `docs/run-comparison.md`.
   - `bundle/` — the versioned benchmark bundle: layout and path rules, the
     manifest models, the packager, the total verifier, and the stable streaming
     `BundleReader`. It is a *packager and reader*, never a generator: it copies
@@ -307,8 +327,15 @@ referential integrity, not just happy-path execution.
 - **Never expose `scenarios.jsonl` or `scenario-transformations.jsonl` to an
   agent or baseline.** They are answer key, alongside the expected findings and
   the control partition.
+- **Never let the comparison layer re-score, regenerate or write to an input.**
+  It consumes two emitted evaluation directories and nothing else; if a
+  comparison seems to need a fact the evaluator does not emit, add it to the
+  evaluation contract on its own terms rather than reaching past it into the
+  registry, the observed state or the answer key.
+- **Never difference two runs from different universes.** Compatibility is a
+  refusal, not a warning, and the error must name every differing field.
 - **Never let a core layer import or name DataHub.** `company/`, `truth/`,
-  `estate/`, `observed/`, `evaluation/` and `bundle/` must stay
+  `estate/`, `observed/`, `evaluation/`, `comparison/` and `bundle/` must stay
   catalogue-independent; the adapter depends on them, never the reverse.
   `tests/adapters/test_isolation.py` enforces this.
 - **Never add `acryl-datahub` (or another catalogue client) as a dependency.**

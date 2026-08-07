@@ -153,10 +153,20 @@ multi-field and multi-entity near misses, file- and lineage-level construction,
 and cases where the observed graph genuinely underdetermines the *finding* rather
 than only the remediation — is future work.
 
-Beyond v0.1, scenario packs composing profiles and defect sets into named
-benchmark cases, run-to-run comparison reporting, and assessment agents scored
-against the observed state's expected findings and remediations, remain future
-work.
+**Run-to-run comparison shipped after v0.1.0** ([#17]): `dataswamp compare-runs`
+differences two emitted evaluation directories and reports metric deltas,
+rule-level regressions, control-preservation regressions, per-tier and
+adversarial movement, and remediation changes. It refuses to compare runs from
+different universes rather than producing a meaningless delta, and applies no
+threshold — it answers what changed, not whether that is acceptable. See
+[run-comparison.md](run-comparison.md).
+
+Beyond that, scenario packs composing profiles and defect sets into named
+benchmark cases, threshold/gating policy on top of comparison, and assessment
+agents scored against the observed state's expected findings and remediations,
+remain future work.
+
+[#17]: https://github.com/ronfinn/dataswamp-biosystems/issues/17
 
 ### v0.2 — Metadata and Lineage Integrations
 
@@ -184,7 +194,7 @@ work.
 * Defect-detection tasks
 * Governance-remediation tasks
 * Expected-answer datasets
-* Agent scoring and comparison reports
+* Agent scoring and comparison reports (run comparison shipped; agent-side scoring remains)
 * Reproducible evaluation suites
 
 ### Longer-Term Possibilities

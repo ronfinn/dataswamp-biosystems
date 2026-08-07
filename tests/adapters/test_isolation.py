@@ -17,7 +17,15 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "dataswamp_biosystems"
 
 # Every layer that must remain catalogue-independent, plus the bundle packager:
 # a bundle is the adapter's *input*, so it may not depend on the adapter either.
-CORE_PACKAGES = ("company", "truth", "estate", "observed", "evaluation", "bundle")
+CORE_PACKAGES = (
+    "company",
+    "truth",
+    "estate",
+    "observed",
+    "evaluation",
+    "comparison",
+    "bundle",
+)
 
 
 def _module_paths(package: str) -> list[Path]:
