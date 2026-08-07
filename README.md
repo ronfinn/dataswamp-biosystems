@@ -41,6 +41,7 @@ and cannot be inflated by counting entities a rule never applied to.
 | Readable scientific file estate | `generate-files` / `validate-files` | [file-generation.md](docs/file-generation.md) |
 | Defect injection + control partition | `inject-defects` / `validate-observed` | [observed-state.md](docs/observed-state.md) |
 | Scoring an agent's predictions | `evaluate` | [evaluation.md](docs/evaluation.md) |
+| Comparing two scored runs | `compare-runs` | [run-comparison.md](docs/run-comparison.md) |
 | Portable, checksummed bundles | `build-bundle` / `verify-bundle` | [bundles.md](docs/bundles.md) |
 | DataHub metadata export (offline) | `export-datahub` | [datahub.md](docs/datahub.md) |
 | Reference baseline agents | `run-baseline` / `list-baselines` | [baselines.md](docs/baselines.md) |
@@ -120,6 +121,9 @@ dataswamp inject-defects   --truth generated/truth --seed 20260717 --profile dem
 dataswamp evaluate         --observed-dir generated/observed \
                            --predictions examples/predictions/partial.jsonl \
                            --output-dir generated/evaluation
+dataswamp compare-runs     --baseline generated/evaluation-v1 \
+                           --candidate generated/evaluation-v2 \
+                           --output-dir generated/comparison
 dataswamp build-bundle     --output-dir dist/benchmark --release v0.1.0
 dataswamp verify-bundle    dist/benchmark
 dataswamp export-datahub   --bundle dist/benchmark --mode observed --output-dir export/datahub
@@ -146,6 +150,7 @@ flowchart TD
     O["observed/ — defects + answer key + control partition"]
     P["predictions.jsonl — an agent's claims"]
     V["evaluation/ — confusion matrix, remediation scoring"]
+    R["comparison/ — deltas + regressions between two runs"]
     B["bundle/ — versioned, checksummed, portable"]
     D["adapters/datahub/ — Metadata Change Proposals"]
 
@@ -153,6 +158,7 @@ flowchart TD
     T --> O
     O --> V
     P --> V
+    V --> R
     T --> B
     E --> B
     O --> B
@@ -160,11 +166,13 @@ flowchart TD
     B --> D
 ```
 
-The five generation layers and the bundle packager are **catalogue-independent**:
-they know nothing about DataHub or any other consumer. The adapter depends on
-them, never the reverse, and takes no catalogue client as a dependency — a rule
-enforced by a test. The observed layer never mutates the truth graph; the
-evaluator mutates nothing at all; the bundler copies emitted bytes verbatim.
+The five generation layers, the comparison layer and the bundle packager are
+**catalogue-independent**: they know nothing about DataHub or any other
+consumer. The adapter depends on them, never the reverse, and takes no catalogue
+client as a dependency — a rule enforced by a test. The observed layer never
+mutates the truth graph; the evaluator mutates nothing at all; the comparison
+layer writes nothing into either run it reads; the bundler copies emitted bytes
+verbatim.
 
 ## Example evaluation results
 
@@ -261,7 +269,8 @@ out-of-scope false positive rather than folded into the matrix.
 * The published baselines are deliberately simple and metadata-only; none opens a
   materialized scientific file, and no LLM-backed agent ships.
 * DataHub export is offline file emission; live ingestion is not implemented.
-* No run-to-run comparison or regression reporting yet.
+* Run comparison reports what changed between two scored runs; it applies no
+  threshold and does not gate CI.
 
 See [docs/roadmap.md](docs/roadmap.md) for what is planned, and
 [docs/public-api.md](docs/public-api.md) for which interfaces are stable.
@@ -329,6 +338,7 @@ project is **not** published to PyPI, and that decision has not been made — se
 | [docs/file-generation.md](docs/file-generation.md) | Scientific file formats, profiles and placeholders |
 | [docs/observed-state.md](docs/observed-state.md) | Defect taxonomy, ledgers, profiles, control partition |
 | [docs/evaluation.md](docs/evaluation.md) | The prediction contract and the scoring semantics |
+| [docs/run-comparison.md](docs/run-comparison.md) | Comparing two scored runs: compatibility, delta semantics, regression reports |
 | [docs/baselines.md](docs/baselines.md) | The reference baseline agents, their permitted reads and canonical scores |
 | [docs/difficulty-tiers.md](docs/difficulty-tiers.md) | Bronze/silver/gold, reasoning scopes, tier generation and per-tier scoring |
 | [docs/adversarial-scenarios.md](docs/adversarial-scenarios.md) | The adversarial tier: constructed cases, near-miss controls, the privilege boundary |

@@ -25,7 +25,7 @@ validate-config
 generate-truth      validate-truth
 generate-files      validate-files
 inject-defects      validate-observed
-evaluate
+evaluate            compare-runs
 build-bundle        verify-bundle
 export-datahub
 demo
@@ -52,6 +52,7 @@ not import Python.
 | Observed ledgers, controls, rule scope, scenarios | `observed_schema_version` (currently `4`; `{3, 4}` readable) |
 | Prediction submissions | `schema_version` (currently `1`) |
 | Evaluation reports | `evaluation_schema_version` (currently `2`) |
+| Comparison reports | `comparison_schema_version` (currently `1`) |
 | Bundle manifest + checksums | `bundle_schema_version` |
 | DataHub Metadata Change Proposals | `DATAHUB_MODEL_VERSION` |
 
@@ -74,6 +75,15 @@ from dataswamp_biosystems.evaluation import (
     GroundTruth, load_ground_truth,
     evaluate, prediction_digest, write_evaluation,
     EvaluationError, EvaluationConfigError, PredictionValidationError,
+)
+
+# Comparing two emitted evaluation runs.
+from dataswamp_biosystems.comparison import (
+    EvaluationRun, load_run,
+    compare_runs, ComparisonResult, write_comparison,
+    benchmark_identity, check_compatible,
+    COMPARISON_SCHEMA_VERSION, COMPARATOR_VERSION,
+    ComparisonError, ComparisonConfigError, IncompatibleRunsError,
 )
 
 # Running a reference baseline agent against an observed state.
@@ -153,7 +163,11 @@ Stated plainly, so nobody builds on a promise that was never made:
 * **Scientific validity.** The generated data is structurally realistic and
   scientifically meaningless. It must not be used to develop or validate
   analytical or clinical methods.
-* **Cross-version score comparison.** Scores are only comparable within one
+* **Cross-version score comparison.** `compare-runs` enforces this rather than
+  documenting it: two runs must share a ground-truth fingerprint, profile,
+  seeds, observed generator/schema versions, evaluator and prediction schema
+  versions, and universe shape, or the comparison is refused with the differing
+  field named. Scores are only comparable within one
   generator version, config fingerprint, profile and seed. The provenance and
   bundle manifest record all four so a comparison can be checked.
 * **Live catalogue ingestion.** The DataHub adapter emits files offline. It does

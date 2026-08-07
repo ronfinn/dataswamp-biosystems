@@ -48,6 +48,13 @@ from dataswamp_biosystems.company import (
     load_config,
     resolve_config_dir,
 )
+from dataswamp_biosystems.comparison import (
+    ComparisonConfigError,
+    IncompatibleRunsError,
+    compare_runs,
+    load_run,
+    write_comparison,
+)
 from dataswamp_biosystems.estate import (
     EstateConfigError,
     EstateValidationError,
@@ -113,6 +120,12 @@ DEFAULT_TRUTH_DIR = Path("generated") / "truth"
 DEFAULT_ESTATE_DIR = Path("generated") / "estate"
 DEFAULT_OBSERVED_DIR = Path("generated") / "observed"
 DEFAULT_EVALUATION_DIR = Path("generated") / "evaluation"
+DEFAULT_COMPARISON_DIR = Path("generated") / "comparison"
+
+# Both evaluation directories a comparison reads are protected inputs: a
+# comparison must never be able to replace a run it is differencing.
+BASELINE_INPUT_LABEL = "baseline evaluation directory"
+CANDIDATE_INPUT_LABEL = "candidate evaluation directory"
 
 # The observed state is a required *input* to evaluation, so it joins the config
 # and truth directories as a protected path — an evaluation run must never be
@@ -850,6 +863,109 @@ def evaluate_predictions(
         f"{summary['remediation']['counts']['fully_correct']} fully correct, "
         f"{summary['remediation']['counts']['unsafe_actions']} unsafe"
     )
+
+
+@app.command(name="compare-runs")
+def compare_evaluation_runs(
+    baseline: Annotated[
+        Path,
+        typer.Option("--baseline", help="Directory containing the baseline evaluation."),
+    ],
+    candidate: Annotated[
+        Path,
+        typer.Option("--candidate", help="Directory containing the candidate evaluation."),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Directory to write the comparison into."),
+    ] = DEFAULT_COMPARISON_DIR,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite a non-empty output directory."),
+    ] = False,
+) -> None:
+    """Compare two emitted evaluation runs and report what changed.
+
+    Consumes what ``dataswamp evaluate`` already wrote: it re-scores nothing,
+    reads no prediction file and never opens the observed ground truth, so the
+    numbers reported are the evaluator's own, differenced. Both input
+    directories are read-only.
+
+    The two runs must describe the same benchmark universe. If any identity
+    field differs — ground-truth fingerprint, profile, either seed, the observed
+    or evaluator versions, or the derived universe shape — the comparison is
+    refused and every differing field is named. Differencing metrics across
+    universes produces a number that looks meaningful and is not.
+
+    A regression does **not** fail this command: it answers what changed, and
+    applies no threshold or policy gate.
+
+    ``output_dir`` is replaced wholesale, so it may not be, contain, or sit
+    inside either evaluation directory — ``--force`` overrides only the
+    non-empty check, never path safety.
+
+    Exit codes: 0 = compared, 1 = the runs are not comparable, 2 = an evaluation
+    directory could not be read, or an unsafe/non-empty output directory was
+    given.
+    """
+    _prepare_output_dir_or_exit(
+        output_dir,
+        {
+            BASELINE_INPUT_LABEL: baseline,
+            CANDIDATE_INPUT_LABEL: candidate,
+        },
+        force=force,
+    )
+
+    try:
+        left = load_run(baseline)
+        right = load_run(candidate)
+    except ComparisonConfigError as exc:
+        typer.echo(f"Could not read evaluation output: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    try:
+        result = compare_runs(left, right)
+    except IncompatibleRunsError as exc:
+        typer.echo(
+            f"Refusing to compare — {len(exc.mismatches)} benchmark identity field(s) differ:",
+            err=True,
+        )
+        for mismatch in exc.mismatches:
+            typer.echo(f"  - {mismatch.render()}", err=True)
+        typer.echo("Two runs must score the same universe for a delta to mean anything.", err=True)
+        raise typer.Exit(code=1) from exc
+
+    summary = write_comparison(result, output_dir)
+    headline = summary["headline"]
+
+    typer.echo(
+        f"Comparison written to {output_dir} "
+        f"(profile {summary['benchmark']['profile']}, "
+        f"{headline['pairs_changed']} pair(s) changed)."
+    )
+    if summary["runs"]["identical_submission"]:
+        typer.echo("  the two runs scored an identical submission")
+    typer.echo(
+        f"  findings: {headline['newly_solved']} newly solved, "
+        f"{headline['newly_broken']} newly broken"
+    )
+    typer.echo(
+        f"  control false positives: {headline['new_control_false_positives']} new "
+        f"({headline['new_reserved_control_false_positives']} on reserved controls), "
+        f"{headline['resolved_control_false_positives']} resolved"
+    )
+    typer.echo(
+        f"  rules: {headline['rules_regressed']} regressed, {headline['rules_improved']} improved"
+    )
+    typer.echo(
+        f"  remediations: {headline['remediations_changed']} changed "
+        f"({headline['remediations_regressed']} regressed)"
+    )
+    for name in sorted(summary["dimensions"]):
+        delta = summary["dimensions"][name]
+        rendered = "n/a" if delta["delta"] is None else f"{delta['delta']:+.4f}"
+        typer.echo(f"  {name}: {rendered} ({delta['direction']})")
 
 
 @app.command(name="list-baselines")
