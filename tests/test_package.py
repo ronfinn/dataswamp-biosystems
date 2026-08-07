@@ -9,4 +9,4 @@ def test_package_imports() -> None:
 
 def test_version_is_defined_string() -> None:
     assert isinstance(dataswamp_biosystems.__version__, str)
-    assert dataswamp_biosystems.__version__ == "0.1.0rc1"
+    assert dataswamp_biosystems.__version__ == "0.1.0"

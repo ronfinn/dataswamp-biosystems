@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-This project is at a v0.1 release candidate. Only the current `main` branch is
+This project is at v0.1.0, its first release. Only the current `main` branch is
 supported; there are no maintained older versions and no backports.
 
 ## Reporting a vulnerability

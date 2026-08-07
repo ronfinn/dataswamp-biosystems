@@ -13,6 +13,23 @@ entries below.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.1.0] — 2026-08-07
+
+**First official release.** It promotes `0.1.0rc1` unchanged in behaviour and
+adds the work merged since it: the difficulty tiers, the adversarial scenario
+engine, the reference baseline agents, and the generated-data licensing
+decision. The whole benchmark workflow ships — generate a synthetic estate,
+derive a defective observed view of it with a published answer key, score a
+submission, package a portable bundle and export catalogue metadata — all
+deterministic, offline and free of any real data.
+
+The `0.1.0rc1` entry below describes the parts of that surface that were already
+in place; this entry describes what changed after it. Nothing is claimed here
+that the release does not do: there is no live catalogue ingestion, no LLM-backed
+agent, no run-to-run comparison and no PyPI package.
+
 ### Added
 
 - **Benchmark difficulty tiers.** Every one of the 41 defect rules is classified
@@ -181,6 +198,31 @@ entries below.
 - The baselines are **not** production-quality governance agents, and no LLM
   provider integration ships in this milestone.
 
+### Known limitations at 0.1.0
+
+Superseding the `0.1.0rc1` list below, which is kept as written at the time:
+
+- The canonical scenario is deliberately small (180 catalogue assets, ~1 800
+  lineage edges): a correctness benchmark, not a load test.
+- One estate shape and one defect taxonomy. All four difficulty tiers ship, but
+  the adversarial set is a focused initial six case classes over a small
+  constructed universe (19 scored pairs at the demo profile), with single-field,
+  asset-level near misses only.
+- The published baselines are metadata-only and deliberately simple; none opens a
+  materialized scientific file, and no LLM-backed agent ships.
+- No run-to-run comparison or regression reporting.
+- DataHub export is offline file emission only; no live ingestion, no round-trip
+  validation, no other catalogue.
+- Scores are comparable only within one generator version, config fingerprint,
+  profile and seed.
+- **Not published to PyPI.** Distribution is by GitHub Release and by building a
+  wheel from a checkout.
+
+### Reproducibility at 0.1.0
+
+The golden digests are unchanged from the adversarial-scenario regeneration
+recorded above; no canonical bytes moved in preparing this release.
+
 ## [0.1.0rc1] — 2026-08-03
 
 First release candidate. The end-to-end benchmark workflow is complete: generate
@@ -328,5 +370,6 @@ entry below describes the whole surface rather than a delta.
   CC BY-NC 4.0 — see
   [ADR 0004](docs/adr/0004-generated-data-licensing.md).)*
 
-[Unreleased]: https://github.com/ronfinn/dataswamp-biosystems/compare/main...HEAD
-[0.1.0rc1]: https://github.com/ronfinn/dataswamp-biosystems/tree/main
+[Unreleased]: https://github.com/ronfinn/dataswamp-biosystems/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ronfinn/dataswamp-biosystems/releases/tag/v0.1.0
+[0.1.0rc1]: https://github.com/ronfinn/dataswamp-biosystems/tree/0a68cc92809a0e0d6403db0631a4b818cd2bb394

@@ -135,9 +135,10 @@ Also implemented:
   software staying MIT and commercial permission handled separately
   (see [ADR 0004](adr/0004-generated-data-licensing.md))
 
-Remaining for v0.1:
-
-* First official GitHub release
+**v0.1 is complete.** Everything scoped for it is implemented, and the package is
+versioned `0.1.0`. What remains is the mechanical act of publishing: tagging the
+release commit and creating the GitHub Release. PyPI publication is a separate,
+undecided question.
 
 All four difficulty tiers now ship. Bronze, silver and gold are a filter over the
 rule catalogue; adversarial is a *constructed* set of scenario cases, because

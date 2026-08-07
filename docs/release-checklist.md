@@ -1,7 +1,7 @@
 # Release checklist
 
 The exact commands run before cutting a release, in order. Every one of them has
-been run against this release candidate.
+been run against the commit being released.
 
 Run from a clean checkout of the commit you intend to release, with a clean
 working tree.
@@ -148,15 +148,16 @@ dependencies, Python 3.12 and 3.13).
 
 ## 12. Only then — publish
 
-Not part of this release candidate, and deliberately not automated:
+Deliberately not automated, and deliberately separate from the release-prep
+commit:
 
-1. Resolve the open decisions listed at the top of
-   [release-notes-v0.1.0-draft.md](release-notes-v0.1.0-draft.md). The
-   generated-data licence is settled — CC BY-NC 4.0, see
-   [ADR 0004](adr/0004-generated-data-licensing.md).
-2. Set the final version and update `CHANGELOG.md`.
-3. Tag the release commit.
-4. Create the GitHub Release from the draft release notes.
-5. Publish to PyPI, if and when that is decided.
+1. Set the final version and update `CHANGELOG.md` — done in the release-prep
+   pull request, so that the exact commit to be tagged is already correct.
+2. Tag the release commit.
+3. Create the GitHub Release from
+   [release-notes-v0.1.0.md](release-notes-v0.1.0.md), attaching the wheel and
+   sdist built in step 3 above.
+4. Publish to PyPI, if and when that is decided. Until it is, no documentation
+   may show `pip install dataswamp-biosystems`.
 
-Steps 3–5 have **not** been performed for `0.1.0rc1`.
+For `0.1.0`, step 1 is complete. Steps 2–4 have **not** been performed.
