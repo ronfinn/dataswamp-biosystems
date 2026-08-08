@@ -382,6 +382,24 @@ referential integrity, not just happy-path execution.
   `SERVER_DERIVED_ASPECT` is exempt from containment only, never from fidelity,
   and never for an entity the export did not contain. Both need a justification
   and a paired test, and both move `NORMALIZATION_VERSION`.
+- **Never respond to a red live canary before classifying it.** Every live
+  discrepancy gets a verdict first: **A** DataSwamp bug, **B** genuine
+  server-derived/server-owned metadata, **C** upstream DataHub API/aspect-model
+  change, or **D** infrastructure/transient failure. Only **B** may widen
+  normalization, and only with all six requirements (real-run evidence,
+  derivability justification, forgiveness test, paired test, version bump,
+  changelog entry). The rest.li/OpenAPI dialect mismatch was **A**, a bug in our
+  own transport — never record a DataSwamp bug as normalization drift. **D**
+  never justifies a normalization change: keep the artifacts and re-run first.
+  The decision tree is in `docs/datahub.md`; never disable, skip or unpin the
+  canary to make it green.
+- **Never widen `DATAHUB_MODEL_VERSION`'s upper bound without a tested
+  compatibility point above it.** The range is a declared target for the emitted
+  *payload* shape, never a tested range and never a statement about the live REST
+  endpoints. A changelog, a schema reading or "the shape has been stable" is not
+  evidence. Keep the declared range and the tested point coherent — the tested
+  point must lie inside the range. See
+  `docs/adr/0006-compatibility-points-not-ranges.md`.
 - **Never claim a DataHub compatibility point that was not run.**
   `VERIFIED_DATAHUB_VERSION`, the `live-datahub` workflow's pin and the pin in
   `docs/datahub.md` move together or not at all

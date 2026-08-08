@@ -24,6 +24,8 @@ from dataswamp_biosystems.adapters.datahub.client import (
     LIVE_SUPPORT,
     VERIFIED_DATAHUB_VERSION,
 )
+from dataswamp_biosystems.adapters.datahub.mapping import DATAHUB_MODEL_VERSION
+from dataswamp_biosystems.adapters.datahub.normalize import NORMALIZATION_VERSION
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "live-datahub.yml"
@@ -103,3 +105,94 @@ def test_no_repository_secret_or_catalogue_token_is_used(workflow_text: str) -> 
     """
     assert "secrets." not in workflow_text
     assert not re.search(r"^\s*DATAHUB_GMS_TOKEN\s*:", workflow_text, re.MULTILINE)
+
+
+# --------------------------------------------------------- the policy's invariants
+#
+# ADR 0006 says a compatibility claim is backed by a named release that was
+# actually tested. Three things could quietly break that without any test
+# noticing, so those three — and only those — are enforced here. The policy
+# itself is prose in docs/datahub.md and is deliberately not asserted line by
+# line; brittle prose tests would be their own kind of drift.
+
+
+def _version_tuple(text: str) -> tuple[int, ...]:
+    """Parse a dotted version, tolerating a leading ``v`` and trailing suffixes."""
+    cleaned = text.strip().lstrip("vV")
+    parts: list[int] = []
+    for chunk in cleaned.split("."):
+        digits = re.match(r"\d+", chunk)
+        if digits is None:
+            break
+        parts.append(int(digits.group()))
+    return tuple(parts)
+
+
+def _pad(version: tuple[int, ...], width: int) -> tuple[int, ...]:
+    return version + (0,) * (width - len(version))
+
+
+def test_the_tested_point_lies_inside_the_declared_model_range() -> None:
+    """The declared target and the tested point must not become incoherent.
+
+    ``DATAHUB_MODEL_VERSION`` is a declared target for the emitted payload shape;
+    ``VERIFIED_DATAHUB_VERSION`` is the one release the live path actually ran
+    against. The range being broader than the evidence is expected and
+    documented. The range *excluding* the one release we tested would mean the
+    project is claiming compatibility with a set of releases it has never run,
+    while the release it has run sits outside that claim — which is incoherent
+    in a way no reader could be expected to catch.
+    """
+    verified = _version_tuple(VERIFIED_DATAHUB_VERSION)
+    assert verified, VERIFIED_DATAHUB_VERSION
+
+    for clause in (part.strip() for part in DATAHUB_MODEL_VERSION.split(",")):
+        matched = re.match(r"([<>=!]+)\s*(.+)", clause)
+        assert matched is not None, f"unparseable version clause {clause!r}"
+        operator, bound_text = matched.groups()
+        bound = _version_tuple(bound_text)
+        width = max(len(verified), len(bound))
+        left, right = _pad(verified, width), _pad(bound, width)
+        if operator == ">=":
+            assert left >= right, f"{VERIFIED_DATAHUB_VERSION} violates {clause}"
+        elif operator == ">":
+            assert left > right, f"{VERIFIED_DATAHUB_VERSION} violates {clause}"
+        elif operator == "<":
+            assert left < right, f"{VERIFIED_DATAHUB_VERSION} violates {clause}"
+        elif operator == "<=":
+            assert left <= right, f"{VERIFIED_DATAHUB_VERSION} violates {clause}"
+        else:  # pragma: no cover - a new operator is a deliberate change
+            raise AssertionError(f"unhandled version operator {operator!r} in {clause!r}")
+
+
+def test_the_triage_policy_and_its_adr_are_reachable() -> None:
+    """A policy nobody can find is not a policy.
+
+    The canary's failure output, the module docstrings and CLAUDE.md all point
+    readers at these two anchors; a rename that breaks them would leave the
+    guidance stranded exactly when it is needed.
+    """
+    if not DOCS.is_file():
+        pytest.skip("not a checkout: docs are not shipped in the distribution")
+    adr = REPO_ROOT / "docs" / "adr" / "0006-compatibility-points-not-ranges.md"
+    assert adr.is_file()
+
+    docs = DOCS.read_text(encoding="utf-8")
+    assert "## When the canary goes red" in docs
+    assert "#### `DATAHUB_MODEL_VERSION` policy" in docs
+    assert "0006-compatibility-points-not-ranges.md" in docs
+
+
+def test_the_changelog_states_the_normalization_version_in_force() -> None:
+    """Guards the specific staleness this policy was written after finding.
+
+    The changelog claimed ``normalization_version`` 1 for some time after the
+    contract had moved to 2. A stored report records the version it ran under,
+    so a changelog that names the wrong one makes those reports harder to read,
+    not easier.
+    """
+    changelog = REPO_ROOT / "CHANGELOG.md"
+    if not changelog.is_file():
+        pytest.skip("not a checkout: the changelog is not shipped in the distribution")
+    text = changelog.read_text(encoding="utf-8")
+    assert f"`normalization_version` 1 → {NORMALIZATION_VERSION}" in text

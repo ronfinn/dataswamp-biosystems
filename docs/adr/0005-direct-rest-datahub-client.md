@@ -93,3 +93,18 @@ one file.
   exception, and never written to a file.
 - The first tested real-server compatibility point is future work, tracked
   separately from the offline-provable core.
+
+## Addendum (2026-08-08)
+
+Both halves of the mitigation named above now exist, and the deferred *"documented
+drift policy"* is discharged by
+[ADR 0006](0006-compatibility-points-not-ranges.md) together with
+[docs/datahub.md § When the canary goes red](../datahub.md#when-the-canary-goes-red).
+
+The first tested compatibility point is DataHub **v1.7.0**. Establishing it
+immediately vindicated the trade this ADR accepted and refined it in one respect:
+the live path originally paired an OpenAPI-dialect payload with the rest.li
+ingestion endpoint, which a real server rejected. The endpoint isolation this ADR
+mandates worked exactly as intended — the fix touched `client.py` and nothing
+else — and every endpoint now belongs to one API family. The decision recorded
+here is unchanged: no catalogue client was added.
