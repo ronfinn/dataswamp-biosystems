@@ -11,6 +11,11 @@ enforced by a test, not merely documented.
 
 - [Why no DataHub SDK dependency](#why-no-datahub-sdk-dependency)
 - [Exporting](#exporting)
+- [Live ingestion](#live-ingestion)
+- [Round-trip validation](#round-trip-validation)
+- [What normalization forgives, and why](#what-normalization-forgives-and-why)
+- [Containment scope](#containment-scope)
+- [The leak probes](#the-leak-probes)
 - [Observed versus truth mode](#observed-versus-truth-mode)
 - [Deterministic URNs](#deterministic-urns)
 - [The mapping](#the-mapping)
@@ -267,15 +272,232 @@ offline:
 Repeat exports are asserted byte-identical, and the committed fixtures pin the
 whole payload against mapping drift.
 
+## Live ingestion
+
+The live path sits strictly downstream of the emitted export:
+
+```text
+bundle → export-datahub → emitted export → ingest-datahub → verify-ingestion
+```
+
+`ingest-datahub` consumes an **emitted export directory**, never a bundle. It
+does not regenerate metadata, reopen a generator, reinterpret a bundle or
+consult the benchmark answer key. That matters for more than tidiness: if
+ingestion could re-derive the payload, "the catalogue matches what we sent"
+would be comparing a computation against itself.
+
+```bash
+export DATAHUB_GMS_URL=https://datahub.example.com/api/gms
+export DATAHUB_GMS_TOKEN=...          # only if your instance needs one
+
+dataswamp ingest-datahub --export-dir export/datahub --dry-run
+dataswamp ingest-datahub --export-dir export/datahub --yes
+```
+
+Four things are checked before a byte leaves the process: the payload passes the
+offline validator, every digest in `export-manifest.json` recomputes, no
+`(URN, aspect)` pair appears twice, and the manifest's privilege flag agrees with
+its declared mode. A modified export is refused — transmitting metadata that no
+longer matches the manifest it was published with would put unattributable
+content into somebody's catalogue.
+
+Transmission is **pure transport**: nothing synthesizes, enriches, rewrites or
+remaps a proposal. Every proposal is an `UPSERT`, so a second ingestion converges
+on one estate rather than producing a second copy, and that idempotence is tested.
+
+**`--dry-run` performs zero network activity.** It reads and verifies the export,
+resolves non-secret configuration, builds the transmission batches and reports
+them. It opens no socket and makes no health or connectivity check — a dry run
+that contacts a server is not a dry run — and a test poisons every socket entry
+point to prove it.
+
+**Credentials come from the environment and nowhere else.** `DATAHUB_GMS_URL` and
+`DATAHUB_GMS_TOKEN`. The token is never a command-line option (that would leak it
+into shell history and process listings), never in a `repr`, never interpolated
+into an exception, and never written to a file. Tests assert each of those.
+
+**A truth-mode export is hard to transmit by accident.** It carries the benchmark
+answer key, so `--yes` alone is not enough: `--i-understand-this-is-ground-truth`
+is required as well, and the command prints a privileged warning either way.
+
+No receipt file is written. It would be redundant — the emitted export *is* the
+record of what was transmitted, by the contract above, and `verify-ingestion`
+reads it directly rather than trusting a log this command wrote about itself.
+
+Exit codes: `0` transmitted (or planned), `1` the export is valid but
+transmission was refused for want of confirmation, `2` the export could not be
+read or the catalogue could not be reached.
+
+## Round-trip validation
+
+```bash
+dataswamp verify-ingestion \
+  --export-dir export/datahub \
+  --output-dir generated/roundtrip
+```
+
+Four claims are judged and reported **separately**, never collapsed into one
+opaque pass/fail — a catalogue that is missing aspects has a different problem
+from one that mutated them, and both differ from one holding entities nobody
+sent it:
+
+| Claim | What it proves |
+| --- | --- |
+| **completeness** | every `(URN, aspect)` in the export is retrievable from the catalogue |
+| **fidelity** | each retrieved aspect is semantically equal to the emitted one, under the versioned normalization contract, with precise recursive field paths on any difference |
+| **containment** | the catalogue holds no DataSwamp aspect or entity the export did not contain, within the scope below |
+| **non-leakage** | an `observed` export left no ground-truth marker in the catalogue |
+
+All supported emitted aspects are round-tripped, not a hand-selected subset.
+Versioned and timeseries aspects are read through their separate endpoints;
+timeseries aspects are compared on their latest value only, because the adapter
+emits exactly one run event per quality check and cannot produce a series.
+
+Output:
+
+```text
+generated/roundtrip/
+├── roundtrip-report.json   the four claims, their counts, and the contracts in force
+├── discrepancies.jsonl     one record per disagreement, canonically ordered
+├── leak-findings.jsonl     one record per ground-truth marker found — empty on success
+└── provenance.json         the usual environment provenance
+```
+
+`leak-findings.jsonl` is written even when empty: "the probes ran and found
+nothing" and "the probes never ran" are different statements, and a missing file
+cannot distinguish them. No wall-clock value appears anywhere, so two identical
+round-trips write identical bytes. The recorded endpoint is passed through a
+redactor, so a token embedded in a GMS URL never reaches the file.
+
+Exit codes: `0` clean, `1` discrepancies or leak findings were reported, `2` the
+export could not be read, the catalogue could not be reached, or an unsafe or
+non-empty output directory was given.
+
+### Live compatibility is experimental
+
+The `datahub_model_version` range describes the emitted **payload** shape, which
+committed fixtures pin. It says nothing about the REST endpoints the live path
+uses, and must not be read as though it did. Those endpoints have not yet been
+exercised against a real DataHub release in this repository, so every round-trip
+report records `live_support` as *experimental, contract-level*. The first tested
+compatibility point comes from a separate, optional live integration job.
+
+## What normalization forgives, and why
+
+This is the highest-risk part of the live path, and the risk is not a bug — it is
+**erosion**. When a live round-trip fails, the cheapest possible fix is to add
+the offending field to the ignore list and watch the check go green. Do that a
+few times and fidelity validation becomes a function that always returns
+"identical", which is worse than having no check at all, because it looks like
+evidence.
+
+Three rules hold the line.
+
+**The ignore list is narrow, versioned and justified.** Every entry names the
+field, states why the *server* rather than DataSwamp owns it, and carries two
+tests: one showing the field is normalized away, and a **paired** one showing
+that an adjacent field which is not on the list still surfaces as a difference.
+`normalization_version` is recorded in every report, so a stored report stays
+interpretable — and the report embeds the rules themselves, not merely a number.
+
+At version 1 the list holds exactly one entry:
+
+| Field | Justification |
+| --- | --- |
+| `systemMetadata` | Server-owned ingestion provenance (run id, observation time, registry name and version). DataSwamp never sends it — the export fixtures pin that — so its presence in a readback is definitionally the server's own annotation. It also changes on every ingestion by design, so comparing it would make the idempotence claim untestable. |
+
+The list is deliberately close to empty. That is not an oversight: this ships
+with no evidence from a real DataHub server, and inventing forgiveness rules for
+behaviour nobody has observed is exactly the erosion described above. Additions
+are earned by evidence from the live integration job.
+
+**Unknown additions are differences.** A field the server adds that is not on the
+list is reported as a mutation, not silently dropped. The default is suspicion;
+forgiveness is opt-in and reviewed.
+
+**Order-insensitivity is per-field, not global.** A list is compared as a
+multiset only where DataHub's model genuinely has no ordering semantics:
+
+| Aspect | Unordered field | Why |
+| --- | --- | --- |
+| `ownership` | `owners` | a set of (owner, type) associations; no owner is "first" |
+| `globalTags` | `tags` | an asset carries tags, not a tag list |
+| `glossaryTerms` | `terms` | likewise a set of term associations |
+| `domains` | `domains` | set membership |
+| `upstreamLineage` | `upstreams` | lineage is an edge set |
+| `dataProductProperties` | `assets` | a product's membership set |
+
+Notably **absent**: `subTypes.typeNames`, where the first element is
+conventionally the primary subtype, so a reordering is a real semantic change and
+is reported as one.
+
+## Containment scope
+
+A DataSwamp benchmark gets ingested into somebody's DataHub, alongside their real
+estate. Reporting one of their datasets as a "DataSwamp extra" would be a false
+accusation about their data, so namespace-wide enumeration is permitted **only**
+where a URN unambiguously identifies DataSwamp ownership. Where it does not,
+coverage is reported as *unavailable* rather than guessed at.
+
+| Entity family | Extra-entity coverage | Why |
+| --- | --- | --- |
+| `dataset` | **scanned** | the platform *and* the dataset-name namespace are both ours |
+| `dataProduct` | **scanned** | namespaced by the DataSwamp platform id |
+| `domain` | **scanned** | namespaced by the DataSwamp platform id |
+| `glossaryNode` | **scanned** | namespaced by the DataSwamp platform id |
+| `glossaryTerm` | **scanned** | namespaced by the DataSwamp platform id |
+| `corpGroup` | unavailable | a bare team id with no namespace; a group of the same name in the user's own directory is indistinguishable from ours |
+| `tag` | unavailable | a bare tag name with no namespace |
+| `container` | unavailable | identity is an opaque GUID, which carries no evidence of who created it |
+| `assertion` | unavailable | identity is an opaque GUID, likewise |
+
+Extra **aspects** are detected for every family, because that check is scoped to
+URNs the export itself contained and needs no enumeration. Moving a family from
+*unavailable* to *scanned* is a claim about URN uniqueness and deserves the same
+scrutiny as widening the normalization ignore list.
+
+## The leak probes
+
+For an `observed` export, non-leakage is proven **structurally** rather than by
+consulting the answer key:
+
+1. the emitted export already passed `validate_export(..., OBSERVED)`, which
+   fails on any truth-only property or the privileged tag;
+2. ingestion verifies the export's digests and transmits **exactly** the emitted
+   proposal set — a test reconstructs the transmitted bodies and asserts they
+   equal `mcps.jsonl`;
+3. readback proves semantic equivalence to that transmitted set;
+4. server-side probes check universal forbidden markers, drawn from the emitted
+   **export contract itself**: any custom property beginning
+   `dataswamp_truth_`, and the `dataswamp-privileged-truth-export` tag URN.
+
+The probes never open the bundle, the defect ledgers, the rule scope, the
+scenarios, the expected findings or remediations, or the control partition.
+Strengthening a probe by consulting the answer key would make the live commands
+privileged, and the entire point of an observed export is that verifying it needs
+no privilege. An isolation test enforces that boundary against the source.
+
+A detector never observed to fire is not evidence of anything, so a test ingests
+a **privileged truth export**, judges it as though it were observed, and asserts
+that both probes fire — using only the emitted export contract, not the benchmark
+answer key.
+
 ## Limitations
 
-- **Emitter only.** There is no live-instance ingestion, no authenticated remote
-  push and no round-trip read-back from a server in this milestone; the recipe
-  hands that step to DataHub's own tooling, where it belongs.
+- **Live GMS support is experimental.** The REST endpoints have not been
+  exercised against a pinned real DataHub release in this repository. See
+  [live compatibility is experimental](#live-compatibility-is-experimental) and
+  [ADR 0005](adr/0005-direct-rest-datahub-client.md).
 - **No SDK model validation.** Payloads are validated against this adapter's own
   documented contract and committed fixtures, not against DataHub's PDL schemas.
   A DataHub release that changes an aspect's shape would be caught at ingestion,
   not here.
+- **Timeseries aspects are compared on their latest value.** The adapter emits
+  one run event per quality check, so there is no series to verify.
+- **Extra-entity enumeration is client-side.** GMS offers no server-side
+  namespace filter on the enumeration endpoint, so the whole entity type is
+  listed and narrowed by URN prefix. On a very large instance that is the
+  expensive part of a verification.
 - **One fabric.** A synthetic benchmark has a single environment; everything is
   emitted under `PROD`.
 - **Container GUIDs are ours, not DataHub's.** They are deterministic and

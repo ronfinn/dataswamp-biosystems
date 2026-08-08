@@ -124,6 +124,22 @@ that binding by recomputing every payload checksum against the manifest.
 The fixture also records the **config fingerprint**, so a configuration edit is
 reported as a configuration change rather than an unexplained digest failure.
 
+### What the golden contract deliberately does not cover
+
+The DataHub **round-trip report** directory (`roundtrip-report.json`,
+`discrepancies.jsonl`, `leak-findings.jsonl`) is excluded from the golden
+digests, and not because it is nondeterministic — it carries no wall-clock value,
+and two identical round-trips write identical bytes, which a test asserts.
+
+It is excluded because it is a function of a *live catalogue's* state as well as
+this project's. Pinning it would be pinning somebody else's server, and a digest
+that moves whenever a DataHub instance is reconfigured teaches people to
+regenerate the fixture without reading it — exactly the habit the golden
+contract exists to prevent. What the report does pin is its own interpretability:
+it embeds `roundtrip_schema_version`, `normalization_version` and the full
+normalization contract, so a stored report stays readable without the source tree
+that produced it.
+
 ### Why this catches what regenerate-and-compare cannot
 
 `validate-truth`, `validate-files` and `validate-observed` regenerate output and

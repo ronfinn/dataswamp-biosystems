@@ -62,7 +62,11 @@ directory packaged from emitted layer output by
 `src/dataswamp_biosystems/bundle/` via `dataswamp build-bundle`, checked by
 `dataswamp verify-bundle`, and read through the stable streaming `BundleReader`),
 and the **DataHub adapter** (a deterministic Metadata Change Proposal emitter in
-`src/dataswamp_biosystems/adapters/datahub/` via `dataswamp export-datahub`), and
+`src/dataswamp_biosystems/adapters/datahub/` via `dataswamp export-datahub`, plus
+a **live path** strictly downstream of that emitted export — `dataswamp
+ingest-datahub` transmits it verbatim to a running catalogue and `dataswamp
+verify-ingestion` reads it back and reports completeness, fidelity, containment
+and observed-mode non-leakage as four separate claims), and
 the **release surface** (a `dataswamp demo` command running the whole workflow
 into one directory, committed example submissions under `examples/predictions/`,
 and the canonical `config/` tree plus those examples shipped *inside* the
@@ -105,6 +109,8 @@ uv run dataswamp compare-runs --baseline generated/eval-v1 --candidate generated
 uv run dataswamp build-bundle --output-dir dist/benchmark --release v0.1.0  # package a portable bundle
 uv run dataswamp verify-bundle dist/benchmark      # verify a bundle end to end
 uv run dataswamp export-datahub --bundle dist/benchmark --mode observed --output-dir export/datahub
+uv run dataswamp ingest-datahub --export-dir export/datahub --dry-run   # plan only; opens no socket
+uv run dataswamp verify-ingestion --export-dir export/datahub --output-dir generated/roundtrip
 uv run dataswamp demo --output-dir ./dataswamp-demo  # the whole workflow, end to end
 uv run pytest                  # run tests
 uv run ruff check .            # lint
@@ -343,6 +349,21 @@ referential integrity, not just happy-path execution.
   network and no credentials; keep it that way.
 - **Never leak ground truth into an observed DataHub export.** The observed
   source graph reads the observed graph alone; do not widen it.
+- **Never let the live DataHub path open a privileged artefact.** `ingest-datahub`
+  and `verify-ingestion` consume an emitted export; they must never read the
+  bundle, defect ledgers, rule scope, scenarios, expected findings or
+  remediations, or the control partition — not even to strengthen a leak probe.
+  `tests/adapters/test_isolation.py` enforces this.
+- **Never widen the normalization ignore list to make a failing round-trip
+  green.** Each entry needs a justification, a test proving the field is
+  forgiven, and a paired test proving an adjacent non-ignored mutation is still
+  caught; bump `NORMALIZATION_VERSION` when the rules change. An ignore list that
+  grows on failure turns fidelity validation into a function that always passes.
+- **Never report an unrelated catalogue entity as a DataSwamp extra**, and never
+  claim live DataHub compatibility the endpoints have not been tested against.
+  Where a family's URNs cannot settle ownership, report coverage as unavailable.
+- **Never accept a GMS token as a CLI argument**, and never write one into a log,
+  report, exception or provenance record.
 - **Never let the bundle layer regenerate or rewrite what it packages**, and
   never let an adapter write inside the bundle it reads.
 - Never generate scientific/synthetic datasets until a task explicitly

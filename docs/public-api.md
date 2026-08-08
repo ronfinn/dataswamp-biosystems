@@ -28,6 +28,7 @@ inject-defects      validate-observed
 evaluate            compare-runs
 build-bundle        verify-bundle
 export-datahub
+ingest-datahub      verify-ingestion
 demo
 ```
 
@@ -55,6 +56,7 @@ not import Python.
 | Comparison reports | `comparison_schema_version` (currently `1`) |
 | Bundle manifest + checksums | `bundle_schema_version` |
 | DataHub Metadata Change Proposals | `DATAHUB_MODEL_VERSION` |
+| DataHub round-trip reports | `roundtrip_schema_version` (currently `1`) |
 
 Each declares its own version, and a reader that meets an unsupported version is
 told so rather than best-effort parsing it.
@@ -97,6 +99,13 @@ from dataswamp_biosystems.baselines import (
 # Emitting DataHub metadata from a verified bundle.
 from dataswamp_biosystems.adapters.datahub import ExportMode, export_datahub
 
+# Ingesting an emitted export into a live catalogue, and verifying the result.
+from dataswamp_biosystems.adapters.datahub import (
+    DataHubClient, DataHubAdapterError, DataHubConfigError, DataHubTransportError,
+    load_export, plan_ingestion, execute_ingestion, read_back,
+    compare, write_roundtrip, ROUNDTRIP_SCHEMA_VERSION, NORMALIZATION_VERSION,
+)
+
 # The package version.
 from dataswamp_biosystems import __version__
 ```
@@ -136,6 +145,15 @@ Usable and documented, but the shapes are still settling:
   shapes are stable within `SCENARIO_MODEL_VERSION`; the set of constructed case
   classes will grow, and growth changes adversarial results. See
   [docs/adversarial-scenarios.md](adversarial-scenarios.md).
+* **The DataHub live path** — `DataHubClient`, `load_export`, `plan_ingestion`,
+  `execute_ingestion`, `read_back`, `compare`, `write_roundtrip`, and the
+  normalization and containment tables. The report shape is versioned by
+  `roundtrip_schema_version`, and the forgiveness rules by
+  `NORMALIZATION_VERSION`. Live GMS support is **experimental,
+  contract-level**: the REST endpoints have not yet been exercised against a
+  pinned real DataHub release, and every emitted report says so in its
+  `live_support` field. See [docs/datahub.md](datahub.md) and
+  [ADR 0005](adr/0005-direct-rest-datahub-client.md).
 * **`company.load_config` and the config models** — the YAML schema is versioned
   and stable; the Python model classes are not yet frozen.
 * **`paths.ensure_safe_output_dir`** — the containment policy is deliberately
@@ -170,5 +188,8 @@ Stated plainly, so nobody builds on a promise that was never made:
   field named. Scores are only comparable within one
   generator version, config fingerprint, profile and seed. The provenance and
   bundle manifest record all four so a comparison can be checked.
-* **Live catalogue ingestion.** The DataHub adapter emits files offline. It does
-  not talk to a server, and round-trip validation is not implemented.
+* **A verified live DataHub compatibility point.** `ingest-datahub` and
+  `verify-ingestion` do talk to a server, and round-trip validation is
+  implemented and offline-testable — but the REST endpoints they use have not
+  been exercised against a pinned real DataHub release in this repository. Treat
+  live support as experimental until a report says otherwise.
