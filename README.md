@@ -44,6 +44,7 @@ and cannot be inflated by counting entities a rule never applied to.
 | Comparing two scored runs | `compare-runs` | [run-comparison.md](docs/run-comparison.md) |
 | Portable, checksummed bundles | `build-bundle` / `verify-bundle` | [bundles.md](docs/bundles.md) |
 | DataHub metadata export (offline) | `export-datahub` | [datahub.md](docs/datahub.md) |
+| DataHub live ingestion + round-trip | `ingest-datahub` / `verify-ingestion` | [datahub.md](docs/datahub.md) |
 | Reference baseline agents | `run-baseline` / `list-baselines` | [baselines.md](docs/baselines.md) |
 | The whole workflow, end to end | `demo` | below |
 
@@ -127,6 +128,17 @@ dataswamp compare-runs     --baseline generated/evaluation-v1 \
 dataswamp build-bundle     --output-dir dist/benchmark --release v0.1.0
 dataswamp verify-bundle    dist/benchmark
 dataswamp export-datahub   --bundle dist/benchmark --mode observed --output-dir export/datahub
+```
+
+Push that export into a running DataHub and prove the catalogue holds exactly
+what was sent. Credentials come from the environment only, and `--dry-run`
+performs no network activity at all:
+
+```bash
+export DATAHUB_GMS_URL=https://datahub.example.com/api/gms
+dataswamp ingest-datahub    --export-dir export/datahub --dry-run
+dataswamp ingest-datahub    --export-dir export/datahub --yes
+dataswamp verify-ingestion  --export-dir export/datahub --output-dir generated/roundtrip
 ```
 
 Run a reference baseline against the same benchmark and score it in one step:
@@ -268,7 +280,9 @@ out-of-scope false positive rather than folded into the matrix.
   constructed universe — not a model of real-world ambiguity.
 * The published baselines are deliberately simple and metadata-only; none opens a
   materialized scientific file, and no LLM-backed agent ships.
-* DataHub export is offline file emission; live ingestion is not implemented.
+* DataHub live ingestion and round-trip validation ship, but the REST endpoints
+  they use have not been verified against a pinned real DataHub release; live
+  support is experimental and every round-trip report records that.
 * Run comparison reports what changed between two scored runs; it applies no
   threshold and does not gate CI.
 
@@ -285,8 +299,11 @@ information, or production schemas copied from any real organisation. Any
 resemblance to a real organisation, person, programme or study is unintended.
 
 Generation is offline: no command in the documented workflow requires a network,
-a credential or a server, and the DataHub recipe reads credentials from
-environment variables rather than embedding them. Provenance records the
+a credential or a server. The two live DataHub commands are the sole exception,
+and they are opt-in: they read `DATAHUB_GMS_URL` and `DATAHUB_GMS_TOKEN` from the
+environment only — never from the command line — and never write a token into a
+report, a log or an exception. The generated DataHub recipe likewise references
+credentials through environment variables rather than embedding them. Provenance records the
 dependency and platform identity needed to interpret a reproducibility claim,
 and deliberately records no hostname, username, path or wall-clock time.
 
@@ -343,7 +360,7 @@ project is **not** published to PyPI, and that decision has not been made — se
 | [docs/difficulty-tiers.md](docs/difficulty-tiers.md) | Bronze/silver/gold, reasoning scopes, tier generation and per-tier scoring |
 | [docs/adversarial-scenarios.md](docs/adversarial-scenarios.md) | The adversarial tier: constructed cases, near-miss controls, the privilege boundary |
 | [docs/bundles.md](docs/bundles.md) | Bundle layout, manifest, verification, reader API |
-| [docs/datahub.md](docs/datahub.md) | URNs, entity/aspect mapping, the privilege boundary |
+| [docs/datahub.md](docs/datahub.md) | URNs, entity/aspect mapping, the privilege boundary, live ingestion and round-trip validation |
 | [docs/public-api.md](docs/public-api.md) | Stable vs experimental vs internal interfaces |
 | [docs/reproducibility.md](docs/reproducibility.md) | Determinism scopes and the golden-digest contract |
 | [docs/release-checklist.md](docs/release-checklist.md) | The exact commands run before a release |

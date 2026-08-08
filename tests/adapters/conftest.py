@@ -13,11 +13,22 @@ proves the adapter behaves on the actual benchmark.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
 
-from dataswamp_biosystems.adapters.datahub import ExportMode, SourceGraph
+from dataswamp_biosystems.adapters.datahub import (
+    ADAPTER_VERSION,
+    DATAHUB_MODEL_VERSION,
+    EXPORT_MANIFEST_NAME,
+    MCPS_JSONL_NAME,
+    ExportMode,
+    SourceGraph,
+    build_mcps,
+    export_datahub,
+)
+from dataswamp_biosystems.truth import serialize
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 MINI_OBSERVED_FIXTURE = FIXTURE_DIR / "mini-observed-mcps.jsonl"
@@ -134,4 +145,83 @@ def mini_truth() -> SourceGraph:
         mode=ExportMode.TRUTH,
         shards=MINI_SHARDS,
         expected_finding_rules={"ds-alpha": ["RULE-ONE", "RULE-TWO"]},
+    )
+
+
+@pytest.fixture(scope="session")
+def observed_export_dir(full_bundle_dir: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A real emitted observed export — the live path's only input."""
+    target = tmp_path_factory.mktemp("live-observed") / "export"
+    export_datahub(full_bundle_dir, target, mode=ExportMode.OBSERVED)
+    return target
+
+
+@pytest.fixture(scope="session")
+def truth_export_dir(full_bundle_dir: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A real emitted *privileged* truth export.
+
+    Used to prove the observed leak probes can actually fire. A detector never
+    observed to fire is not evidence of anything.
+    """
+    target = tmp_path_factory.mktemp("live-truth") / "export"
+    export_datahub(full_bundle_dir, target, mode=ExportMode.TRUTH)
+    return target
+
+
+@pytest.fixture
+def copied_export(observed_export_dir: Path, tmp_path: Path) -> Path:
+    """A writable copy of the observed export, for tamper tests."""
+    target = tmp_path / "export"
+    shutil.copytree(observed_export_dir, target)
+    return target
+
+
+def write_test_export(target: Path, mcps: list[dict], *, mode: ExportMode) -> Path:
+    """Write a minimal but *genuine* export directory for the live-path tests.
+
+    Mirrors the layout ``export_datahub`` writes — the same canonical JSONL and
+    the same manifest digest contract — over a small hand-built payload, so the
+    round-trip tests are not paying for the whole canonical estate on every
+    perturbation. The tests that must exercise the real emitted artefact use
+    ``observed_export_dir`` and ``truth_export_dir`` instead.
+    """
+    target.mkdir(parents=True, exist_ok=True)
+    payload = "".join(f"{serialize.canonical_json(mcp)}\n" for mcp in mcps).encode("utf-8")
+    serialize.write_bytes(target / MCPS_JSONL_NAME, payload)
+    manifest = {
+        "adapter_version": ADAPTER_VERSION,
+        "datahub_model_version": DATAHUB_MODEL_VERSION,
+        "mode": mode.value,
+        "privileged": mode is ExportMode.TRUTH,
+        "bundle": {"bundle_fingerprint": "test", "benchmark_release": "v-test", "layers": []},
+        "files": {MCPS_JSONL_NAME: serialize.digest(payload)},
+        "synthetic": True,
+    }
+    serialize.write_bytes(target / EXPORT_MANIFEST_NAME, serialize.manifest_bytes(manifest))
+    return target
+
+
+@pytest.fixture(scope="session")
+def mini_export_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A small emitted observed export, for the fast perturbation tests."""
+    return write_test_export(
+        tmp_path_factory.mktemp("mini-observed-export") / "export",
+        build_mcps(SourceGraph(mode=ExportMode.OBSERVED, shards=MINI_SHARDS)),
+        mode=ExportMode.OBSERVED,
+    )
+
+
+@pytest.fixture(scope="session")
+def mini_truth_export_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A small emitted *privileged* truth export, for the leak-probe proof."""
+    return write_test_export(
+        tmp_path_factory.mktemp("mini-truth-export") / "export",
+        build_mcps(
+            SourceGraph(
+                mode=ExportMode.TRUTH,
+                shards=MINI_SHARDS,
+                expected_finding_rules={"ds-alpha": ["RULE-ONE"]},
+            )
+        ),
+        mode=ExportMode.TRUTH,
     )

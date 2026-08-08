@@ -135,10 +135,9 @@ Also implemented:
   software staying MIT and commercial permission handled separately
   (see [ADR 0004](adr/0004-generated-data-licensing.md))
 
-**v0.1 is complete.** Everything scoped for it is implemented, and the package is
-versioned `0.1.0`. What remains is the mechanical act of publishing: tagging the
-release commit and creating the GitHub Release. PyPI publication is a separate,
-undecided question.
+**v0.1 is complete and released.** Everything scoped for it is implemented, the
+package is versioned `0.1.0`, and the release is tagged and published. PyPI
+publication remains a separate, undecided question.
 
 All four difficulty tiers now ship. Bronze, silver and gold are a filter over the
 rule catalogue; adversarial is a *constructed* set of scenario cases, because
@@ -167,10 +166,27 @@ agents scored against the observed state's expected findings and remediations,
 remain future work.
 
 [#17]: https://github.com/ronfinn/dataswamp-biosystems/issues/17
+[#27]: https://github.com/ronfinn/dataswamp-biosystems/issues/27
+[#28]: https://github.com/ronfinn/dataswamp-biosystems/issues/28
+[#29]: https://github.com/ronfinn/dataswamp-biosystems/issues/29
 
 ### v0.2 — Metadata and Lineage Integrations
 
-* DataHub live ingestion and round-trip validation
+* DataHub live ingestion and round-trip validation — **the offline-testable core
+  has shipped** ([#27]): `dataswamp ingest-datahub` transmits an emitted DataHub
+  export to a running catalogue, and `dataswamp verify-ingestion` reads it back
+  and judges completeness, fidelity, containment and observed-mode non-leakage
+  as four separately-reported claims. It adds no dependency — the client is
+  standard-library REST, with every endpoint confined to one module (see
+  [ADR 0005](adr/0005-direct-rest-datahub-client.md)) — and the whole contract is
+  provable offline against a local fake GMS.
+
+  Live GMS support is **experimental, contract-level**: the REST endpoints have
+  not yet been exercised against a pinned real DataHub release, and every
+  round-trip report records that rather than overstating it. An optional live
+  Quickstart integration job ([#28]) will establish the first tested
+  compatibility point, and a drift-canary and model-version policy ([#29])
+  governs what a failure there means. See [datahub.md](datahub.md).
 * OpenMetadata integration
 * OpenLineage event export
 * Neo4j graph export

@@ -10,11 +10,22 @@ import typer
 
 from dataswamp_biosystems import __version__
 from dataswamp_biosystems.adapters.datahub import (
+    DEFAULT_BATCH_SIZE,
+    DataHubClient,
+    DataHubConfigError,
+    DataHubTransportError,
     ExportMode,
+    LoadedExport,
     build_mcps,
     build_source,
+    compare,
+    execute_ingestion,
     export_datahub,
+    load_export,
+    plan_ingestion,
+    read_back,
     validate_export,
+    write_roundtrip,
 )
 from dataswamp_biosystems.baselines import (
     BASELINE_NAMES,
@@ -144,6 +155,7 @@ BASELINE_OUTPUT_LABEL = "baseline submission file"
 
 DEFAULT_BUNDLE_DIR = Path("dist") / "dataswamp-benchmark"
 DEFAULT_DATAHUB_EXPORT_DIR = Path("export") / "datahub"
+DEFAULT_ROUNDTRIP_DIR = Path("generated") / "roundtrip"
 
 # The demo writes every layer, the bundle and the export beneath one directory,
 # so a new user has a single thing to look at — and a single thing to delete.
@@ -1322,6 +1334,187 @@ def export_datahub_command(
     typer.echo(f"  aspects: {counts['aspects']}")
     for entity_type, count in counts["by_entity_type"].items():
         typer.echo(f"    {entity_type}: {count}")
+
+
+def _load_export_or_exit(export_dir: Path) -> LoadedExport:
+    """Read and fully verify an emitted DataHub export, or exit with code 2."""
+    try:
+        return load_export(export_dir)
+    except DataHubConfigError as exc:
+        typer.echo(f"Could not read the DataHub export: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+
+@app.command(name="ingest-datahub")
+def ingest_datahub_command(
+    export_dir: Annotated[
+        Path,
+        typer.Option("--export-dir", help="Directory containing an emitted DataHub export."),
+    ] = DEFAULT_DATAHUB_EXPORT_DIR,
+    batch_size: Annotated[
+        int,
+        typer.Option("--batch-size", help="Proposals per transmitted batch."),
+    ] = DEFAULT_BATCH_SIZE,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Report what would be sent. Performs no network activity."),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Confirm transmission to the configured catalogue."),
+    ] = False,
+    privileged_ack: Annotated[
+        bool,
+        typer.Option(
+            "--i-understand-this-is-ground-truth",
+            help="Required to transmit a privileged truth-mode export.",
+        ),
+    ] = False,
+) -> None:
+    """Transmit an emitted DataHub export to a live catalogue.
+
+    The export is verified first — digests, payload validity, proposal
+    uniqueness and privilege mode — and then transmitted verbatim. Nothing is
+    regenerated, no bundle is opened and no benchmark ground truth is consulted:
+    the emitted export is the whole input.
+
+    ``--dry-run`` performs **no network activity at all**. It reads and verifies
+    the export, builds the transmission batches and reports them; it opens no
+    socket and makes no health or connectivity check.
+
+    Credentials are read from the environment only, never from the command
+    line: ``DATAHUB_GMS_URL`` and, if your instance needs one,
+    ``DATAHUB_GMS_TOKEN``.
+
+    Exit codes: 0 = transmitted (or planned, for a dry run), 1 = the export is
+    valid but transmission was refused for want of confirmation, 2 = the export
+    could not be read or the catalogue could not be reached.
+    """
+    export = _load_export_or_exit(export_dir)
+    try:
+        plan = plan_ingestion(export, batch_size)
+    except DataHubConfigError as exc:
+        typer.echo(f"Cannot plan ingestion: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(f"DataHub export {export_dir} (mode {export.mode.value}) verified.")
+    typer.echo(f"  proposals: {plan.proposal_count}")
+    typer.echo(f"  batches: {len(plan.batches)} of at most {batch_size}")
+    typer.echo(f"  payload digest: {export.payload_digest}")
+
+    if dry_run:
+        typer.echo("Dry run: nothing was transmitted and no connection was opened.")
+        return
+
+    if export.privileged:
+        typer.echo("", err=True)
+        typer.echo(
+            "PRIVILEGED EXPORT: this payload carries benchmark ground truth. Ingesting it "
+            "into a shared catalogue publishes the answer key.",
+            err=True,
+        )
+        if not privileged_ack:
+            typer.echo(
+                "Refusing to transmit a truth-mode export without "
+                "--i-understand-this-is-ground-truth.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+    if not yes:
+        typer.echo(
+            "Refusing to transmit without --yes: ingestion writes to a system outside this "
+            "repository.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        client = DataHubClient.from_environment()
+        sent = execute_ingestion(plan, client)
+    except DataHubConfigError as exc:
+        typer.echo(f"Cannot reach a catalogue: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except DataHubTransportError as exc:
+        typer.echo(f"Ingestion failed: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(f"Transmitted {sent} proposal(s) to {client.endpoint}.")
+    typer.echo("Every proposal is an UPSERT, so re-running this command converges.")
+
+
+@app.command(name="verify-ingestion")
+def verify_ingestion_command(
+    export_dir: Annotated[
+        Path,
+        typer.Option("--export-dir", help="Directory containing the emitted DataHub export."),
+    ] = DEFAULT_DATAHUB_EXPORT_DIR,
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Directory to write the round-trip report into."),
+    ] = DEFAULT_ROUNDTRIP_DIR,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite a non-empty output directory."),
+    ] = False,
+) -> None:
+    """Read a catalogue back and compare it against an emitted DataHub export.
+
+    Four claims are judged and reported separately: completeness (every
+    proposal is retrievable), fidelity (each aspect is semantically unchanged
+    under the versioned normalization contract), containment (no DataSwamp
+    aspect or entity the export never contained) and — for an observed export —
+    non-leakage of benchmark ground truth.
+
+    The export is the only statement of what should be there. No bundle, defect
+    ledger, rule scope, scenario, expected finding or control partition is
+    opened, so this command is unprivileged by construction.
+
+    Exit codes: 0 = clean, 1 = discrepancies or leak findings were reported,
+    2 = the export could not be read, the catalogue could not be reached, or an
+    unsafe/non-empty output directory was given.
+    """
+    _prepare_output_dir_or_exit(
+        output_dir,
+        {
+            CONFIG_INPUT_LABEL: DEFAULT_CONFIG_DIR,
+            DATAHUB_EXPORT_INPUT_LABEL: export_dir,
+        },
+        force=force,
+    )
+    export = _load_export_or_exit(export_dir)
+
+    try:
+        client = DataHubClient.from_environment()
+        readback = read_back(export, client)
+    except DataHubConfigError as exc:
+        typer.echo(f"Cannot reach a catalogue: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except DataHubTransportError as exc:
+        typer.echo(f"Readback failed: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    result = compare(list(export.proposals), readback, export.mode)
+    report = write_roundtrip(output_dir, result, export, client.endpoint)
+
+    typer.echo(f"Round-trip report written to {output_dir}.")
+    for name, claim in report["claims"].items():
+        typer.echo(f"  {name}: {claim['status']}")
+    total = report["discrepancies"]["total"]
+    leaks = report["claims"]["non-leakage"]["findings"]
+    typer.echo(f"  discrepancies: {total}")
+    typer.echo(f"  leak findings: {leaks}")
+    unavailable = sorted(
+        family
+        for family, coverage in report["claims"]["containment"]["entity_family_coverage"].items()
+        if coverage != "scanned"
+    )
+    if unavailable:
+        typer.echo(
+            "  extra-entity coverage unavailable for: " + ", ".join(unavailable),
+        )
+    if total or leaks:
+        raise typer.Exit(code=1)
 
 
 @app.command(name="demo")
