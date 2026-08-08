@@ -453,11 +453,14 @@ None, and this is structural rather than a promise. The pinned compose sets
 set. The instance is throwaway and local to the runner. No repository secret and
 no third-party catalogue is involved.
 
-One value *is* generated: the published compose file cannot be run bare, because
-`system-update` refuses to start without `authentication.tokenService.signingKey`
-(the `datahub` CLI normally supplies this from a generated local secrets file).
-The job generates a random per-run value, masks it, and destroys the instance
-holding it.
+Two values *are* generated. The published compose file cannot be run bare: it
+interpolates `DATAHUB_TOKEN_SERVICE_SIGNING_KEY` and `DATAHUB_TOKEN_SERVICE_SALT`
+into both GMS and `system-update` with no defaults, and `system-update` exits 1
+with `authentication.tokenService.signingKey must be set and not be empty` when
+they are missing. The `datahub` CLI normally supplies them from a local secrets
+file it generates on first run. The job generates random per-run values, masks
+them, and destroys the instance holding them — so no value in this repository is
+ever a live signing key.
 
 ### The live test suite
 

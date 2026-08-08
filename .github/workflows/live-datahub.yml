@@ -127,16 +127,24 @@ jobs:
           # stack rather than only the DataHub images.
           grep -E "^\s+image:" "$RUN_DIR/docker-compose.yml" | sort -u | tee -a "$RUN_DIR/pinned-versions.txt"
 
-      # The published compose file cannot be run bare: `system-update` refuses to
-      # start with "authentication.tokenService.signingKey must be set and not be
-      # empty". The `datahub` CLI normally supplies this from a generated local
-      # secrets file. This is a throwaway value for an instance that is destroyed
-      # at the end of the job, and it is masked so it cannot reach the log.
-      - name: Generate a throwaway instance secret
+      # The published compose file cannot be run bare. It interpolates
+      # DATAHUB_TOKEN_SERVICE_SIGNING_KEY and DATAHUB_TOKEN_SERVICE_SALT into
+      # both GMS and system-update without defaults, and system-update exits 1
+      # with "authentication.tokenService.signingKey must be set and not be
+      # empty" when they are absent. The `datahub` CLI normally supplies them
+      # from a local secrets file it generates on first run.
+      #
+      # These are throwaway values for an instance destroyed at the end of the
+      # job. They are masked, so they cannot reach the log even in a `docker
+      # compose config` dump, and they are generated per run rather than
+      # hardcoded, so no value in this repository is ever a live signing key.
+      - name: Generate throwaway instance secrets
         run: |
-          secret="$(openssl rand -hex 32)"
-          echo "::add-mask::$secret"
-          echo "DATAHUB_SECRET=$secret" >> "$GITHUB_ENV"
+          for name in DATAHUB_TOKEN_SERVICE_SIGNING_KEY DATAHUB_TOKEN_SERVICE_SALT; do
+            value="$(openssl rand -hex 32)"
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
 
       # `--wait` blocks until every service is healthy *and* fails immediately if
       # a dependency exits non-zero, so a broken upstream image costs seconds
