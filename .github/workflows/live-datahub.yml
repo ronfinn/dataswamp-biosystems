@@ -68,14 +68,20 @@ jobs:
       DATAHUB_GMS_URL: http://localhost:8080
       # Isolated from any other compose project that might exist on the runner.
       COMPOSE_PROJECT_NAME: dataswamp-live
-      # Outside the checkout: generation replaces a whole directory, and a
-      # generated tree inside the repository is a trap waiting for the next
-      # command that treats the checkout as a protected input.
-      DEMO_DIR: ${{ runner.temp }}/live-demo
-      RUN_DIR: ${{ runner.temp }}/live-run
 
     steps:
       - uses: actions/checkout@v4
+
+      # Outside the checkout: generation replaces a whole directory, and a
+      # generated tree inside the repository is a trap waiting for the next
+      # command that treats the checkout as a protected input. Set here rather
+      # than in the job's `env:`, where the `runner` context does not exist.
+      - name: Choose working directories
+        run: |
+          {
+            echo "DEMO_DIR=$RUNNER_TEMP/live-demo"
+            echo "RUN_DIR=$RUNNER_TEMP/live-run"
+          } >> "$GITHUB_ENV"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
