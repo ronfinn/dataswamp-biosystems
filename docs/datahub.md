@@ -377,10 +377,117 @@ non-empty output directory was given.
 
 The `datahub_model_version` range describes the emitted **payload** shape, which
 committed fixtures pin. It says nothing about the REST endpoints the live path
-uses, and must not be read as though it did. Those endpoints have not yet been
-exercised against a real DataHub release in this repository, so every round-trip
-report records `live_support` as *experimental, contract-level*. The first tested
-compatibility point comes from a separate, optional live integration job.
+uses, and must not be read as though it did. Every round-trip report therefore
+records `live_support` separately, and it names the one release the endpoints
+have actually been exercised against rather than a supported range.
+
+## The live integration job
+
+`.github/workflows/live-datahub.yml` stands up a real DataHub Quickstart, runs
+the whole live path against it, and asserts zero discrepancies and zero leak
+findings. It is what turns "the contract is right" into "the contract is right
+*against DataHub `v1.7.0`*".
+
+### The pin
+
+| | |
+| --- | --- |
+| DataHub release | **`v1.7.0`** (published 2026-08-04) |
+| Compose file | `docker/quickstart/docker-compose.quickstart-profile.yml`, fetched at that tag |
+| Profile | `quickstart-backend` — GMS, MySQL, Kafka, OpenSearch. No frontend; this path speaks REST. |
+| Everything else | Pinned inside that generated compose file (`mysql:8.2`, `confluentinc/cp-kafka:8.2.2`, `opensearchproject/opensearch:2.19.3`) |
+
+Fetching the compose file *at the release tag* is what makes the pin total: the
+non-DataHub images carry their own fixed tags inside it, so one version string
+pins the entire stack. The resolved image list is written into the job's uploaded
+artifact, so a past run's exact stack is recoverable from the run itself.
+
+A named release is the entire point. "Whatever is latest" would make a green run
+unfalsifiable — it could not distinguish a contract that still holds from one
+that was quietly rewritten to match. Bumping the pin is a deliberate commit with
+a diff, and [#29](https://github.com/ronfinn/dataswamp-biosystems/issues/29)
+owns the policy for when and how.
+
+### Why it is not a required check
+
+Quickstart is fourteen images and several minutes of startup. As a merge gate it
+would be red often enough — upstream image pushes, registry hiccups, runner
+memory — to train reviewers to click past it, and a check everyone ignores
+detects nothing. As a scheduled canary a red run is informative: DataHub drifted.
+
+It runs weekly, on `workflow_dispatch`, and on a pull request **labelled**
+`live-datahub` for when an adapter change deserves a real server before it
+merges. It never runs on an unlabelled PR and never runs in a fork.
+
+### What it actually does
+
+```
+dataswamp demo                          # bundle + observed export, offline
+dataswamp ingest-datahub --dry-run      # verify the export; opens no socket
+docker compose up -d --wait             # bounded: --wait-timeout 780
+curl $DATAHUB_GMS_URL/health            # bounded: 60 × 5s on the *mapped* port
+dataswamp ingest-datahub --yes
+dataswamp verify-ingestion              # exits 1 on any discrepancy or leak
+pytest -m live                          # the same claims, plus a negative control
+docker compose down -v                  # if: always()
+```
+
+Both waits are bounded and they check different things. `--wait` asks the
+containers whether they consider themselves healthy on the compose network, and
+fails immediately if a dependency exits non-zero, so a broken upstream image
+costs seconds instead of the full timeout. The `curl` loop then proves GMS
+answers on the *mapped* port from the runner, which is what the adapter actually
+talks to. The job's own timeout is 25 minutes.
+
+"Zero discrepancies and zero leak findings" is `verify-ingestion`'s exit status,
+not a grep over its output. The report directory uploads on success **and** on
+failure — a red canary is worth much more with its evidence attached — alongside
+`docker compose ps`, container logs and the resolved image pins. Teardown is
+`if: always()` and takes the volumes with it, so one run's state can never reach
+the next.
+
+### Credentials
+
+None, and this is structural rather than a promise. The pinned compose sets
+`METADATA_SERVICE_AUTH_ENABLED: 'false'` on GMS, so `DATAHUB_GMS_TOKEN` is never
+set. The instance is throwaway and local to the runner. No repository secret and
+no third-party catalogue is involved.
+
+One value *is* generated: the published compose file cannot be run bare, because
+`system-update` refuses to start without `authentication.tokenService.signingKey`
+(the `datahub` CLI normally supplies this from a generated local secrets file).
+The job generates a random per-run value, masks it, and destroys the instance
+holding it.
+
+### The live test suite
+
+`tests/adapters/test_live_datahub.py`, marked `live` and deselected by default
+(`addopts = ["-m", "not live"]`); it also skips outright when `DATAHUB_GMS_URL`
+is unset, so an explicit `-m live` with no server says why rather than erroring.
+Point `DATAHUB_GMS_URL` at your own throwaway instance to run it locally.
+
+It re-asserts only the claims whose truth depends on the *server*:
+retrievability of every emitted aspect including the timeseries one — which the
+fake GMS cannot really test, since it serves both storage paths from one store —
+fidelity under normalization, idempotent upsert, extra-entity scanning and
+observed non-leakage. Perturbation coverage stays offline, where faults can be
+planted precisely.
+
+One test is live-specific and load-bearing. A comparison of nothing against
+nothing is also "clean", so a suite of green assertions against an empty
+catalogue would look exactly like success. `test_a_withheld_proposal_is_reported
+_as_an_extra_aspect` withholds one proposal from the *sent* side of an otherwise
+identical comparison and requires the real readback to report that exact aspect
+as extra — which it can only do if the server genuinely returned it.
+
+### If the live job goes red
+
+Diagnose before touching anything. A live failure is evidence, and the cheapest
+response to it — adding the offending field to the normalization ignore list —
+is the one that destroys the check's value. See
+[what normalization forgives](#what-normalization-forgives-and-why); the ignore
+list has an evidentiary bar and a paired-test requirement precisely so that a
+red canary cannot be silenced by editing it.
 
 ## What normalization forgives, and why
 
@@ -484,9 +591,11 @@ answer key.
 
 ## Limitations
 
-- **Live GMS support is experimental.** The REST endpoints have not been
-  exercised against a pinned real DataHub release in this repository. See
-  [live compatibility is experimental](#live-compatibility-is-experimental) and
+- **Live GMS support is verified against exactly one release.** The REST
+  endpoints have been exercised against DataHub `v1.7.0` and nothing else. That
+  is a compatibility *point*, not a range: no claim is made about older or newer
+  releases, and none should be inferred. See
+  [the live integration job](#the-live-integration-job) and
   [ADR 0005](adr/0005-direct-rest-datahub-client.md).
 - **No SDK model validation.** Payloads are validated against this adapter's own
   documented contract and committed fixtures, not against DataHub's PDL schemas.

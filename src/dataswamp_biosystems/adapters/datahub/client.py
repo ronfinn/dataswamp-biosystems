@@ -19,13 +19,14 @@ constructor argument the CLI can pass from ``argv``, never rendered by
 written to any file. A token in ``argv`` leaks into shell history and process
 listings; a token in an exception leaks into CI logs and issue reports.
 
-**Compatibility is experimental at this version.** The offline
+**Compatibility is a point, not a range.** The offline
 ``DATAHUB_MODEL_VERSION`` range describes the emitted *payload* shape, which is
 pinned by committed fixtures. It says nothing about these REST endpoints, which
-have not yet been exercised against a real server in this repository. The first
-tested compatibility point is established by the live integration job; until
-then :data:`LIVE_SUPPORT` records the honest status, and it is written into
-every round-trip report.
+are exercised against exactly one real release —
+:data:`VERIFIED_DATAHUB_VERSION` — by the ``live-datahub`` workflow. Nothing is
+claimed about any other release. :data:`LIVE_SUPPORT` records that status and is
+written into every round-trip report, so a stored report never overstates its
+evidence.
 """
 
 from __future__ import annotations
@@ -49,9 +50,18 @@ from dataswamp_biosystems.adapters.datahub.errors import (
 GMS_URL_ENV = "DATAHUB_GMS_URL"
 GMS_TOKEN_ENV = "DATAHUB_GMS_TOKEN"
 
+# The one DataHub release these REST endpoints have actually been exercised
+# against, by the `live-datahub` workflow. A *point*, not a range: nothing is
+# claimed about any other release, and `tests/adapters/test_live_pin.py` fails if
+# this and the workflow's pin ever disagree, so the claim cannot outlive the
+# evidence for it.
+VERIFIED_DATAHUB_VERSION = "v1.7.0"
+
 # How much of DataHub's live API this adapter claims to have verified. Written
 # into every round-trip report so a stored report never overstates its evidence.
-LIVE_SUPPORT = "experimental: contract-level, not yet verified against a pinned DataHub release"
+LIVE_SUPPORT = (
+    f"experimental: contract-level, verified against DataHub {VERIFIED_DATAHUB_VERSION} only"
+)
 
 # --------------------------------------------------------------------------
 # Endpoints. Nothing outside this module may name one.
@@ -353,6 +363,7 @@ __all__ = [
     "GMS_URL_ENV",
     "GMS_TOKEN_ENV",
     "LIVE_SUPPORT",
+    "VERIFIED_DATAHUB_VERSION",
     "INGEST_PATH",
     "ENTITY_PATH",
     "SCROLL_PATH",

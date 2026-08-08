@@ -66,7 +66,9 @@ and the **DataHub adapter** (a deterministic Metadata Change Proposal emitter in
 a **live path** strictly downstream of that emitted export — `dataswamp
 ingest-datahub` transmits it verbatim to a running catalogue and `dataswamp
 verify-ingestion` reads it back and reports completeness, fidelity, containment
-and observed-mode non-leakage as four separate claims), and
+and observed-mode non-leakage as four separate claims, verified against a pinned
+real DataHub Quickstart by the optional, non-blocking `live-datahub` workflow),
+and
 the **release surface** (a `dataswamp demo` command running the whole workflow
 into one directory, committed example submissions under `examples/predictions/`,
 and the canonical `config/` tree plus those examples shipped *inside* the
@@ -359,6 +361,16 @@ referential integrity, not just happy-path execution.
   forgiven, and a paired test proving an adjacent non-ignored mutation is still
   caught; bump `NORMALIZATION_VERSION` when the rules change. An ignore list that
   grows on failure turns fidelity validation into a function that always passes.
+  This applies with full force when the *live* job goes red: diagnose first, and
+  triage a genuine normalization or model-version question under its own issue.
+- **Never claim a DataHub compatibility point that was not run.**
+  `VERIFIED_DATAHUB_VERSION`, the `live-datahub` workflow's pin and the pin in
+  `docs/datahub.md` move together or not at all
+  (`tests/adapters/test_live_pin.py`). It is a point, never a range. Never make
+  the live job a required check, never let it run on `push` or on an unlabelled
+  pull request, and never give it a repository secret or point it at a
+  third-party catalogue — it stands up its own throwaway instance with
+  metadata-service auth disabled.
 - **Never report an unrelated catalogue entity as a DataSwamp extra**, and never
   claim live DataHub compatibility the endpoints have not been tested against.
   Where a family's URNs cannot settle ownership, report coverage as unavailable.

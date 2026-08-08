@@ -1,0 +1,204 @@
+# The first tested compatibility point against a real DataHub release.
+#
+# Everything in `ci.yml` proves the DataHub contract offline against a fake GMS.
+# That is what keeps it fast, hermetic and merge-blocking. A fake GMS cannot,
+# however, discover that the model of DataHub encoded in it is wrong — only a
+# real server can. This job exists for that, and for nothing else.
+#
+# It is deliberately **not** a required check. Quickstart is fourteen images,
+# Elasticsearch/OpenSearch, Kafka and MySQL, and several minutes of startup; as
+# a merge gate it would be red often enough to train reviewers to ignore it,
+# which is exactly how a canary stops being one. As a scheduled canary its red
+# means something: DataHub drifted, and #29 decides what to do about it.
+#
+# The instance is throwaway and local to the runner, with metadata-service auth
+# disabled by the pinned compose file itself, so no repository secret and no
+# third-party catalogue is involved anywhere in this job.
+name: live-datahub
+
+on:
+  workflow_dispatch:
+    inputs:
+      datahub_version:
+        description: "DataHub release to verify against (a git tag of datahub-project/datahub)."
+        required: false
+        default: v1.7.0
+  schedule:
+    # Weekly, early Monday UTC. Frequent enough to catch drift while it is still
+    # one release away, rare enough that a broken upstream is not a daily alarm.
+    - cron: "23 5 * * 1"
+  # Opt-in per pull request, by applying the `live-datahub` label. A change to
+  # the adapter's live path can then be checked against a real server *before*
+  # it merges rather than by the next canary. It stays opt-in and stays out of
+  # the required checks: labelling a PR is a deliberate act, and an unlabelled
+  # PR never starts a container.
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+# A serial queue: two Quickstart instances on one runner would be fine, but two
+# runs reporting a compatibility point for different releases would not be.
+concurrency:
+  group: live-datahub
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: live DataHub round-trip
+    # Forks get no value from burning ~20 minutes of runner time on somebody
+    # else's canary, and the scheduled trigger would otherwise fire in every one.
+    if: >-
+      github.repository == 'ronfinn/dataswamp-biosystems'
+      && (github.event_name != 'pull_request'
+          || contains(github.event.pull_request.labels.*.name, 'live-datahub'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      # The pin. This is the whole point of the job: a *named* release the live
+      # path is verified against, not "whatever is latest". Bumping it is a
+      # deliberate act with a diff, which is what makes the compatibility
+      # statement in docs/datahub.md mean something.
+      DATAHUB_VERSION: ${{ inputs.datahub_version || 'v1.7.0' }}
+      # Read by DataHubClient.from_environment(). DATAHUB_GMS_TOKEN is
+      # deliberately never set: the pinned compose disables metadata-service
+      # auth, so this job needs no credential at all.
+      DATAHUB_GMS_URL: http://localhost:8080
+      # Isolated from any other compose project that might exist on the runner.
+      COMPOSE_PROJECT_NAME: dataswamp-live
+      # Outside the checkout: generation replaces a whole directory, and a
+      # generated tree inside the repository is a trap waiting for the next
+      # command that treats the checkout as a protected input.
+      DEMO_DIR: ${{ runner.temp }}/live-demo
+      RUN_DIR: ${{ runner.temp }}/live-run
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-groups --python 3.12
+
+      - name: Record the pin
+        run: |
+          mkdir -p "$RUN_DIR"
+          {
+            echo "datahub_version=$DATAHUB_VERSION"
+            echo "compose_ref=https://raw.githubusercontent.com/datahub-project/datahub/$DATAHUB_VERSION/docker/quickstart/docker-compose.quickstart-profile.yml"
+            echo "adapter_commit=$GITHUB_SHA"
+          } | tee "$RUN_DIR/pinned-versions.txt"
+
+      # Offline, and first: generating the export costs seconds, while standing
+      # up Quickstart costs minutes. If the benchmark cannot emit a valid export
+      # there is no reason to boot a catalogue to find that out.
+      - name: Generate a benchmark bundle and an observed DataHub export
+        run: uv run --frozen dataswamp demo --output-dir "$DEMO_DIR"
+
+      # Verifies digests, payload validity, proposal uniqueness and privilege
+      # mode, and opens no socket. Proves the export is transmissible before any
+      # network failure can be blamed for it not being.
+      - name: Verify the export offline (opens no socket)
+        run: uv run --frozen dataswamp ingest-datahub --export-dir "$DEMO_DIR/export/datahub" --dry-run
+
+      - name: Fetch the pinned Quickstart compose file
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUN_DIR"
+          curl -fsSL --retry 3 --retry-delay 5 \
+            "https://raw.githubusercontent.com/datahub-project/datahub/$DATAHUB_VERSION/docker/quickstart/docker-compose.quickstart-profile.yml" \
+            -o "$RUN_DIR/docker-compose.yml"
+          # Every non-DataHub image (Kafka, MySQL, OpenSearch) is pinned inside
+          # this generated file, so fetching it at the release tag pins the whole
+          # stack rather than only the DataHub images.
+          grep -E "^\s+image:" "$RUN_DIR/docker-compose.yml" | sort -u | tee -a "$RUN_DIR/pinned-versions.txt"
+
+      # The published compose file cannot be run bare: `system-update` refuses to
+      # start with "authentication.tokenService.signingKey must be set and not be
+      # empty". The `datahub` CLI normally supplies this from a generated local
+      # secrets file. This is a throwaway value for an instance that is destroyed
+      # at the end of the job, and it is masked so it cannot reach the log.
+      - name: Generate a throwaway instance secret
+        run: |
+          secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$secret"
+          echo "DATAHUB_SECRET=$secret" >> "$GITHUB_ENV"
+
+      # `--wait` blocks until every service is healthy *and* fails immediately if
+      # a dependency exits non-zero, so a broken upstream image costs seconds
+      # rather than the full timeout. The `quickstart-backend` profile omits the
+      # frontend: this job speaks to GMS over REST and never opens the UI.
+      - name: Start DataHub Quickstart
+        working-directory: ${{ env.RUN_DIR }}
+        run: docker compose --profile quickstart-backend up -d --wait --wait-timeout 780
+
+      # `--wait` proves the containers consider themselves healthy on the compose
+      # network. This proves GMS is reachable on the mapped port from the runner,
+      # which is the thing the adapter actually talks to, and is bounded.
+      - name: Wait for GMS to answer on the mapped port
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if curl -fsS --max-time 5 "$DATAHUB_GMS_URL/health" > /dev/null; then
+              echo "GMS healthy on $DATAHUB_GMS_URL after ${attempt} attempt(s)."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "GMS did not become reachable on $DATAHUB_GMS_URL within 300s." >&2
+          exit 1
+
+      - name: Ingest the observed export
+        run: uv run --frozen dataswamp ingest-datahub --export-dir "$DEMO_DIR/export/datahub" --yes
+
+      # Exits 1 on any discrepancy or leak finding, so "zero discrepancies and
+      # zero leak findings" is the step's own exit status rather than a grep over
+      # its output. The report is uploaded either way — a red canary is worth far
+      # more with its evidence attached.
+      - name: Verify the round trip
+        run: |
+          uv run --frozen dataswamp verify-ingestion \
+            --export-dir "$DEMO_DIR/export/datahub" \
+            --output-dir "$RUN_DIR/roundtrip"
+
+      # The same claims asserted structurally, plus the live-only negative
+      # control that proves the readback returns the server's data rather than
+      # an empty set that would compare clean against anything.
+      - name: Run the live test suite
+        env:
+          DATASWAMP_LIVE_EXPORT_DIR: ${{ env.DEMO_DIR }}/export/datahub
+        run: uv run --frozen pytest -q -m live tests/adapters/test_live_datahub.py
+
+      - name: Collect diagnostics
+        if: always()
+        working-directory: ${{ env.RUN_DIR }}
+        run: |
+          mkdir -p diagnostics
+          docker compose --profile quickstart-backend ps --all > diagnostics/compose-ps.txt 2>&1 || true
+          docker compose --profile quickstart-backend logs --no-color --tail 2000 \
+            > diagnostics/compose-logs.txt 2>&1 || true
+
+      - name: Upload the round-trip report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-datahub-${{ env.DATAHUB_VERSION }}-${{ github.run_id }}
+          path: ${{ env.RUN_DIR }}
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Unconditional, and `-v`: the instance is throwaway, and leaving its
+      # volumes behind would let one run's state reach the next one, which is
+      # precisely the kind of contamination this job exists to detect.
+      - name: Tear down DataHub Quickstart
+        if: always()
+        working-directory: ${{ env.RUN_DIR }}
+        run: docker compose --profile quickstart-backend down -v --remove-orphans || true
