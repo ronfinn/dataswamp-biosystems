@@ -39,10 +39,11 @@ adapter testable with no server, no network and no credentials, and leaves users
 free to install whichever DataHub client their instance requires.
 
 The targeted metadata model is recorded in every export manifest as
-`datahub_model_version` (currently `>=0.13,<2`). The aspect names and payload
-shapes used here are the file-source representation of those aspects, which has
-been stable across that range. Drift is caught by committed fixtures rather than
-by a version pin: `tests/adapters/fixtures/*.jsonl` pin the complete emitted
+`datahub_model_version` (currently `>=0.13,<2`). This is a **declared target for
+the emitted payload shape, not a tested range** — exactly one release inside it
+has ever been run against, and the rules for moving it are in the
+[`DATAHUB_MODEL_VERSION` policy](#datahub_model_version-policy). Drift is caught
+by committed fixtures rather than by a version pin: `tests/adapters/fixtures/*.jsonl` pin the complete emitted
 payload for a small hand-written source graph, so any mapping change appears as a
 reviewable diff. Regenerate them deliberately:
 
@@ -559,14 +560,177 @@ to **asynchronous** ingestion, and the adapter pins `async=false`. Reading back
 an asynchronously-accepted write is a race, and a round-trip built on one would
 report completeness failures that come and go.
 
-### If the live job goes red
+## When the canary goes red
 
-Diagnose before touching anything. A live failure is evidence, and the cheapest
-response to it — adding the offending field to the normalization ignore list —
-is the one that destroys the check's value. See
-[what normalization forgives](#what-normalization-forgives-and-why); the ignore
-list has an evidentiary bar and a paired-test requirement precisely so that a
-red canary cannot be silenced by editing it.
+Diagnose before touching anything. A live failure is *evidence*, and the cheapest
+response to it — adding the offending field to the normalization ignore list — is
+the one that destroys the check's value. The architectural rule behind this
+section is [ADR 0006](adr/0006-compatibility-points-not-ranges.md): **the verdict
+is chosen from evidence before the fix is chosen.**
+
+This is not hypothetical caution. The first two live runs both went red and had
+*opposite* correct responses:
+
+| Run | Symptom | Verdict | Correct response |
+| --- | --- | --- | --- |
+| 1 | `HTTP 500 RequiredFieldNotPresentException: Field "value" is required` | **A — DataSwamp bug** | Fix the transport. Normalization untouched. |
+| 2 | 4,398 discrepancies | **B — server-derived metadata** | `NORMALIZATION_VERSION` 1 → 2, with justifications and paired tests. |
+
+Run 1 was a rest.li/OpenAPI dialect mismatch in our own client. **It was not
+normalization drift and must never be recorded as such** — no aspect shape
+changed, no server behaviour changed, and no emitted byte was wrong. Widening
+the ignore list would have papered over a bug in our code. Run 2 changed no
+DataSwamp behaviour at all; the server was adding derived metadata it computes
+from what we sent.
+
+### The decision tree
+
+Work top to bottom. The first branch whose evidence test passes is the verdict.
+
+```
+Did the job fail before `verify-ingestion` produced a report?
+├─ yes → is the failure in image pull, container health, timeout, or the runner?
+│         ├─ yes → D. Infrastructure / transient
+│         └─ no  → A. DataSwamp bug (the CLI itself failed)
+└─ no  → inspect discrepancies.jsonl
+
+    Are there MISSING aspects, or a non-2xx from ingestion?
+    ├─ yes → A. DataSwamp bug, unless the aspect/endpoint no longer exists
+    │         upstream → C. Upstream DataHub change
+    └─ no  → for each discrepancy, ask: did DataSwamp send a value here?
+
+        MUTATED with sent ≠ ABSENT  (a value we sent came back different)
+          → A if our encoding altered it; otherwise C. NEVER B.
+        MUTATED with sent = ABSENT  (a field we never sent appeared)
+          → B if the server can derive it from what we sent; else C.
+        EXTRA-ASPECT on a URN we sent
+          → B if server-derived; else C.
+        EXTRA-ENTITY
+          → never B. Someone else wrote to our namespace, or our URN
+            construction changed → A.
+```
+
+### A — DataSwamp bug
+
+**Marker:** the emitted payload, the transport, or the URN construction is wrong.
+The server behaved correctly.
+
+Fix it as a bug. **Normalization is not touched, `NORMALIZATION_VERSION` does not
+move, and no ignore-list entry is added.** If an offline test passed while the
+bug was live, that test is also defective and is fixed in the same change — as
+happened in run 1, where the fake GMS accepted any request envelope and now
+validates it.
+
+### B — Genuine server-derived or server-owned metadata
+
+**Marker:** the server produced something DataSwamp never sent, and it can be
+*derived from what DataSwamp did send*.
+
+This is the only branch that may widen normalization, and it requires **all six**:
+
+1. **Evidence from a real compatibility run.** A green-except-this-difference
+   run against a pinned release, with the report artifact retained. A difference
+   observed only against the fake GMS is not evidence of server behaviour.
+2. **A justification of derivability or server ownership.** Name the fields the
+   server computed it from, or why it is server-owned provenance. "The server
+   happened to add it" is *not* sufficient — that is indistinguishable from a
+   third party writing to our URNs, which is what containment exists to detect.
+3. **A focused forgiveness test** proving the difference is normalized away.
+4. **A paired test** proving an adjacent, non-declared change is *still* caught —
+   and for a `SERVER_ADDED_FIELD`, specifically that a mutation to a value
+   DataSwamp *did* send remains visible.
+5. **A `NORMALIZATION_VERSION` bump.** Every rule change moves it, so a stored
+   report stays interpretable.
+6. **A documentation and `CHANGELOG.md` entry**, with the rule table updated.
+
+The bar is deliberately higher than the fix. See
+[what normalization forgives](#what-normalization-forgives-and-why).
+
+### C — Upstream DataHub API or aspect-model change
+
+**Marker:** DataHub changed an endpoint, an aspect's shape, or a field's
+semantics. Our payload and transport were correct against the previous release.
+
+| What changed | What moves |
+| --- | --- |
+| An endpoint path, verb or envelope | `client.py` only — the isolation rule exists for exactly this, so a moved endpoint changes one file |
+| An aspect's *emitted* shape | `mapping.py`, then regenerate fixtures deliberately with `scripts/update_datahub_fixtures.py --confirm --reason ...` |
+| The aspect model such that the old shape is no longer accepted | `DATAHUB_MODEL_VERSION`, but only per the rules below |
+
+**Committed fixtures move only when the emitted payload must change** — never to
+make a live run green. A fixture regeneration is a reviewable diff of the
+project's own output; if that diff is not explainable by the upstream change, the
+verdict was wrong.
+
+#### `DATAHUB_MODEL_VERSION` policy
+
+The range (currently `>=0.13,<2`) is a **declared target for the emitted payload
+shape**. It is not a tested range, and it says nothing whatever about the live
+REST endpoints.
+
+- It may be **narrowed** on evidence that a release inside it rejects the payload.
+- Its **upper bound may be raised only when a tested compatibility point exists
+  above the current bound** — a green live run against that named release. A
+  changelog, a schema reading, or "the shape has been stable" is not sufficient.
+- **Never claim a version range on assumption.** If compatibility with a release
+  is believed but untested, say so in those words, or run the canary against it.
+- A `DATAHUB_MODEL_VERSION` move changes what every export manifest asserts, so
+  it needs a `CHANGELOG.md` entry naming the evidence.
+
+A test asserts `VERIFIED_DATAHUB_VERSION` lies *inside* the declared range, so
+the declared target and the tested point can never become incoherent.
+
+### D — Infrastructure or transient canary failure
+
+**Marker:** image pull failure, registry outage, a container that never became
+healthy, the 25-minute timeout, or runner exhaustion. No `roundtrip-report.json`
+was produced, or it was produced but the run never reached `verify-ingestion`.
+
+- **This never justifies a normalization change.** Not one entry, not "while
+  we're here".
+- **Retain the diagnostic artifacts.** The run uploads `compose ps`, container
+  logs and the resolved image pins on failure precisely so a transient failure
+  can be told apart from a real one after the fact.
+- **Re-run before changing any product semantics.** `workflow_dispatch` on the
+  same pin is the cheapest disambiguation available; two independent failures on
+  the same pin are evidence, one is noise.
+- If a specific flake recurs, harden the *job* — a bound, a retry, a health
+  check — not the contract it is testing.
+
+### Recording a red weekly run
+
+1. **Open an issue** titled with the pinned version and the date, e.g.
+   `live-datahub red: v1.7.0, 2026-08-08`.
+2. **Attach the run artifact.** `roundtrip-report.json` and
+   `discrepancies.jsonl` are the evidence; the report embeds the normalization
+   rules in force, so it stays interpretable later.
+3. **State the verdict (A/B/C/D) and the evidence for it** before proposing a
+   fix. A triage comment that begins with the fix has skipped the step this
+   policy exists to enforce.
+4. **Do not disable, skip or unpin the job to go green.** A canary that is
+   silenced has been converted into no canary at all. If the pin must move, that
+   is a C-branch decision with its own evidence.
+5. **Track an accepted upstream difference as a declared rule**, never as a
+   suppression: it becomes a `SERVER_DERIVED_ASPECT` or `SERVER_ADDED_FIELD` with
+   a justification and paired tests, and it appears in the rule tables here. An
+   accepted difference that is not written down is indistinguishable from a
+   defect nobody noticed.
+
+### The four compatibility claims, and which is which
+
+Conflating these is the failure this policy exists to prevent — see
+[ADR 0006](adr/0006-compatibility-points-not-ranges.md).
+
+| Claim | Means | Backed by | Does **not** mean |
+| --- | --- | --- | --- |
+| **Emitted-payload compatibility** | `mcps.jsonl` matches DataHub's aspect shapes | Offline validator + committed fixtures | that any server accepted it |
+| **`DATAHUB_MODEL_VERSION`** (`>=0.13,<2`) | the model the payload is *written for* — a declared target | fixtures pinning emitted bytes | that every release in the range was tested |
+| **Live REST compatibility** | the transport works against a running GMS | the live canary | anything about the emitted payload's portability |
+| **`VERIFIED_DATAHUB_VERSION`** (`v1.7.0`) | the one release the live path actually ran against | one green canary run | a range, or any adjacent release |
+
+A **pinned compatibility point** is a named release with a green run behind it. A
+**claimed version range** is a statement of intent. The project publishes both
+and never lets the second borrow credibility from the first.
 
 ## What normalization forgives, and why
 
@@ -711,12 +875,20 @@ answer key.
   endpoints have been exercised against DataHub `v1.7.0` and nothing else. That
   is a compatibility *point*, not a range: no claim is made about older or newer
   releases, and none should be inferred. See
-  [the live integration job](#the-live-integration-job) and
-  [ADR 0005](adr/0005-direct-rest-datahub-client.md).
+  [the live integration job](#the-live-integration-job),
+  [ADR 0005](adr/0005-direct-rest-datahub-client.md) and
+  [ADR 0006](adr/0006-compatibility-points-not-ranges.md).
+- **The declared model range is broader than the evidence.**
+  `DATAHUB_MODEL_VERSION` is `>=0.13,<2`; one release inside it has been tested.
+  The gap is deliberate and documented rather than closed — see the
+  [`DATAHUB_MODEL_VERSION` policy](#datahub_model_version-policy) — because
+  narrowing the declaration to a single version would misrepresent the payload's
+  portability in the other direction.
 - **No SDK model validation.** Payloads are validated against this adapter's own
   documented contract and committed fixtures, not against DataHub's PDL schemas.
   A DataHub release that changes an aspect's shape would be caught at ingestion,
-  not here.
+  not here — which is what the [canary triage
+  policy](#when-the-canary-goes-red) exists to handle.
 - **Timeseries aspects are compared on their latest value.** The adapter emits
   one run event per quality check, so there is no series to verify.
 - **Extra-entity enumeration is client-side.** GMS offers no server-side

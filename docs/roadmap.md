@@ -181,12 +181,19 @@ remain future work.
   [ADR 0005](adr/0005-direct-rest-datahub-client.md)) — and the whole contract is
   provable offline against a local fake GMS.
 
-  Live GMS support is **experimental, contract-level**: the REST endpoints have
-  not yet been exercised against a pinned real DataHub release, and every
-  round-trip report records that rather than overstating it. An optional live
-  Quickstart integration job ([#28]) will establish the first tested
-  compatibility point, and a drift-canary and model-version policy ([#29])
-  governs what a failure there means. See [datahub.md](datahub.md).
+  Live GMS support is **verified against exactly one release, DataHub `v1.7.0`**
+  ([#28]) — a compatibility *point*, not a range. An optional weekly Quickstart
+  canary establishes and re-checks it, and every round-trip report names that
+  release rather than claiming a range. The canary earned its keep immediately:
+  it caught a rest.li/OpenAPI dialect mismatch that the whole offline suite had
+  missed, because the fake GMS accepted any request envelope the client chose.
+
+  A drift-canary and model-version policy ([#29]) governs what a red run means —
+  a four-branch triage (DataSwamp bug, server-derived metadata, upstream DataHub
+  change, infrastructure flake), each with a different permitted response, and a
+  rule that normalization is never widened merely to turn the canary green. See
+  [datahub.md](datahub.md#when-the-canary-goes-red) and
+  [ADR 0006](adr/0006-compatibility-points-not-ranges.md).
 * OpenMetadata integration
 * OpenLineage event export
 * Neo4j graph export
