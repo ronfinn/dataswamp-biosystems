@@ -13,7 +13,11 @@ A **live path** sits strictly downstream of that emitted export::
 
     bundle -> export-datahub -> emitted export -> ingest-datahub -> verify-ingestion
 
-``ingest.py`` transmits an emitted export verbatim, ``readback.py`` reads the
+``ingest.py`` transmits an emitted export without remapping, synthesizing,
+enriching or reinterpreting it — entity identity, entity type, aspect identity
+and semantic aspect content are all preserved, and ``client.py`` alone encodes
+that content into the wire representation the DataHub API requires.
+``readback.py`` reads the
 catalogue's state back, and ``roundtrip.py`` compares the two as a pure function
 — reporting completeness, fidelity, containment and observed-mode non-leakage
 separately. Every socket and every endpoint path is confined to ``client.py``,
@@ -35,6 +39,7 @@ from dataswamp_biosystems.adapters.datahub.client import (
     GMS_TOKEN_ENV,
     GMS_URL_ENV,
     LIVE_SUPPORT,
+    VERIFIED_DATAHUB_VERSION,
     DataHubClient,
     build_batches,
     redact_url,
@@ -126,6 +131,7 @@ __all__ = [
     "GMS_URL_ENV",
     "GMS_TOKEN_ENV",
     "LIVE_SUPPORT",
+    "VERIFIED_DATAHUB_VERSION",
     "DEFAULT_BATCH_SIZE",
     "DataHubClient",
     "build_batches",

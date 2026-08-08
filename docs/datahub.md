@@ -294,6 +294,41 @@ dataswamp ingest-datahub --export-dir export/datahub --dry-run
 dataswamp ingest-datahub --export-dir export/datahub --yes
 ```
 
+### What "does not reinterpret" means, precisely
+
+> Live ingestion does not remap, synthesize, enrich or reinterpret emitted
+> metadata. Entity identity, entity type, aspect identity and semantic aspect
+> content are preserved. `client.py` alone encodes the emitted content into the
+> wire representation required by the DataHub API.
+
+This replaces an earlier, stronger claim that ingestion transmitted the export
+*verbatim*. That claim was wrong, and the live canary is how we found out: the
+DataHub write API does not accept the emitted interchange shape as-is, so a
+transport that changed nothing at all could not have worked against a real
+server. See [the dialect mismatch](#the-restli-openapi-dialect-mismatch).
+
+The distinction is between the interchange artefact and the wire format.
+`mcps.jsonl` and `mcps.json` remain the deterministic emitted artefacts and are
+never rewritten — the export on disk is byte-identical to what it always was,
+and its fixtures and digests are unchanged. `encode_batch()` in `client.py`
+translates the envelope at the moment of transmission and nothing else:
+
+```text
+{"entityType": "dataset", "entityUrn": U, "aspectName": A, "aspect": {"json": P}}
+  →  {"dataset": [{"urn": U, "A": {"value": P}}]}
+```
+
+`P` is the same object, not a normalized or re-keyed copy. Proposals for one URN
+merge into one entity object because the request body is keyed by entity;
+merging is safe because the export guarantees `(entityUrn, aspectName)` is
+unique, and the encoder re-checks that rather than trusting it. `changeType` is
+the only emitted key with no wire representation — the endpoint *is* the change
+type — so a non-`UPSERT` proposal is refused rather than posted as an upsert.
+
+Semantic preservation is tested rather than asserted: the fake GMS reconstructs
+each proposal from the bytes it actually received, and the reconstruction must
+match the emitted record field for field.
+
 Four things are checked before a byte leaves the process: the payload passes the
 offline validator, every digest in `export-manifest.json` recomputes, no
 `(URN, aspect)` pair appears twice, and the manifest's privilege flag agrees with
@@ -377,10 +412,161 @@ non-empty output directory was given.
 
 The `datahub_model_version` range describes the emitted **payload** shape, which
 committed fixtures pin. It says nothing about the REST endpoints the live path
-uses, and must not be read as though it did. Those endpoints have not yet been
-exercised against a real DataHub release in this repository, so every round-trip
-report records `live_support` as *experimental, contract-level*. The first tested
-compatibility point comes from a separate, optional live integration job.
+uses, and must not be read as though it did. Every round-trip report therefore
+records `live_support` separately, and it names the one release the endpoints
+have actually been exercised against rather than a supported range.
+
+## The live integration job
+
+`.github/workflows/live-datahub.yml` stands up a real DataHub Quickstart, runs
+the whole live path against it, and asserts zero discrepancies and zero leak
+findings. It is what turns "the contract is right" into "the contract is right
+*against DataHub `v1.7.0`*".
+
+### The pin
+
+| | |
+| --- | --- |
+| DataHub release | **`v1.7.0`** (published 2026-08-04) |
+| Compose file | `docker/quickstart/docker-compose.quickstart-profile.yml`, fetched at that tag |
+| Profile | `quickstart-backend` — GMS, MySQL, Kafka, OpenSearch. No frontend; this path speaks REST. |
+| Everything else | Pinned inside that generated compose file (`mysql:8.2`, `confluentinc/cp-kafka:8.2.2`, `opensearchproject/opensearch:2.19.3`) |
+
+Fetching the compose file *at the release tag* is what makes the pin total: the
+non-DataHub images carry their own fixed tags inside it, so one version string
+pins the entire stack. The resolved image list is written into the job's uploaded
+artifact, so a past run's exact stack is recoverable from the run itself.
+
+A named release is the entire point. "Whatever is latest" would make a green run
+unfalsifiable — it could not distinguish a contract that still holds from one
+that was quietly rewritten to match. Bumping the pin is a deliberate commit with
+a diff, and [#29](https://github.com/ronfinn/dataswamp-biosystems/issues/29)
+owns the policy for when and how.
+
+### Why it is not a required check
+
+Quickstart is fourteen images and several minutes of startup. As a merge gate it
+would be red often enough — upstream image pushes, registry hiccups, runner
+memory — to train reviewers to click past it, and a check everyone ignores
+detects nothing. As a scheduled canary a red run is informative: DataHub drifted.
+
+It runs weekly, on `workflow_dispatch`, and on a pull request **labelled**
+`live-datahub` for when an adapter change deserves a real server before it
+merges. It never runs on an unlabelled PR and never runs in a fork.
+
+### What it actually does
+
+```
+dataswamp demo                          # bundle + observed export, offline
+dataswamp ingest-datahub --dry-run      # verify the export; opens no socket
+docker compose up -d --wait             # bounded: --wait-timeout 780
+curl $DATAHUB_GMS_URL/health            # bounded: 60 × 5s on the *mapped* port
+dataswamp ingest-datahub --yes
+dataswamp verify-ingestion              # exits 1 on any discrepancy or leak
+pytest -m live                          # the same claims, plus a negative control
+docker compose down -v                  # if: always()
+```
+
+Both waits are bounded and they check different things. `--wait` asks the
+containers whether they consider themselves healthy on the compose network, and
+fails immediately if a dependency exits non-zero, so a broken upstream image
+costs seconds instead of the full timeout. The `curl` loop then proves GMS
+answers on the *mapped* port from the runner, which is what the adapter actually
+talks to. The job's own timeout is 25 minutes.
+
+"Zero discrepancies and zero leak findings" is `verify-ingestion`'s exit status,
+not a grep over its output. The report directory uploads on success **and** on
+failure — a red canary is worth much more with its evidence attached — alongside
+`docker compose ps`, container logs and the resolved image pins. Teardown is
+`if: always()` and takes the volumes with it, so one run's state can never reach
+the next.
+
+### Credentials
+
+None, and this is structural rather than a promise. The pinned compose sets
+`METADATA_SERVICE_AUTH_ENABLED: 'false'` on GMS, so `DATAHUB_GMS_TOKEN` is never
+set. The instance is throwaway and local to the runner. No repository secret and
+no third-party catalogue is involved.
+
+Two values *are* generated. The published compose file cannot be run bare: it
+interpolates `DATAHUB_TOKEN_SERVICE_SIGNING_KEY` and `DATAHUB_TOKEN_SERVICE_SALT`
+into both GMS and `system-update` with no defaults, and `system-update` exits 1
+with `authentication.tokenService.signingKey must be set and not be empty` when
+they are missing. The `datahub` CLI normally supplies them from a local secrets
+file it generates on first run. The job generates random per-run values, masks
+them, and destroys the instance holding them — so no value in this repository is
+ever a live signing key.
+
+### The live test suite
+
+`tests/adapters/test_live_datahub.py`, marked `live` and deselected by default
+(`addopts = ["-m", "not live"]`); it also skips outright when `DATAHUB_GMS_URL`
+is unset, so an explicit `-m live` with no server says why rather than erroring.
+Point `DATAHUB_GMS_URL` at your own throwaway instance to run it locally.
+
+It re-asserts only the claims whose truth depends on the *server*:
+retrievability of every emitted aspect including the timeseries one — which the
+fake GMS cannot really test, since it serves both storage paths from one store —
+fidelity under normalization, idempotent upsert, extra-entity scanning and
+observed non-leakage. Perturbation coverage stays offline, where faults can be
+planted precisely.
+
+One test is live-specific and load-bearing. A comparison of nothing against
+nothing is also "clean", so a suite of green assertions against an empty
+catalogue would look exactly like success. `test_a_withheld_proposal_is_reported
+_as_an_extra_aspect` withholds one proposal from the *sent* side of an otherwise
+identical comparison and requires the real readback to report that exact aspect
+as extra — which it can only do if the server genuinely returned it.
+
+### The rest.li / OpenAPI dialect mismatch
+
+The first live run against a pinned release failed, and it is worth recording
+what it caught, because no offline test could have.
+
+Ingestion posted to the rest.li endpoint `/aspects?action=ingestProposalBatch`,
+which deserializes an aspect as
+[`GenericAspect`](https://github.com/datahub-project/datahub/blob/v1.7.0/metadata-models/src/main/pegasus/com/linkedin/mxe/GenericAspect.pdl)
+— `value` as serialized bytes plus `contentType`. The emitted payload writes
+aspects in the OpenAPI/JSON dialect, `{"aspect": {"json": {...}}}`. DataHub
+v1.7.0 answered:
+
+```
+HTTP 500  RequiredFieldNotPresentException: Field "value" is required but it is not present
+```
+
+Two DataHub API families, mispaired. The reads beside it were already OpenAPI
+v3 and were fine, so the *write* was the odd one out — and the timeseries read
+was quietly a third case, still on rest.li `getTimeseriesAspectValues`.
+
+**111 offline tests passed throughout.** They passed because the fake GMS read
+`proposal["aspect"]["json"]` out of whatever body arrived, so any envelope the
+client chose was self-consistently correct. A fake that cannot disagree with the
+client cannot catch the client being wrong. Two things changed as a result:
+
+- **One API family, end to end.** Write, entity read, timeseries read and
+  namespace enumeration are all OpenAPI v3. Mixing families is what made the
+  mismatch possible, so the fix is not merely a new path.
+- **The fake validates the envelope.** It enforces the cross-entity request
+  shape and rejects a rest.li `GenericAspect` body the way a real server does.
+  `test_client.py` carries that as an explicit regression test.
+
+Every emitted aspect was checked against the v1.7.0 OpenAPI schema before the
+change, `assertionRunEvent` included: all 24 emitted `(entityType, aspectName)`
+pairs are representable, so no hybrid transport was needed and none exists.
+
+One detail is load-bearing rather than incidental: the write endpoint defaults
+to **asynchronous** ingestion, and the adapter pins `async=false`. Reading back
+an asynchronously-accepted write is a race, and a round-trip built on one would
+report completeness failures that come and go.
+
+### If the live job goes red
+
+Diagnose before touching anything. A live failure is evidence, and the cheapest
+response to it — adding the offending field to the normalization ignore list —
+is the one that destroys the check's value. See
+[what normalization forgives](#what-normalization-forgives-and-why); the ignore
+list has an evidentiary bar and a paired-test requirement precisely so that a
+red canary cannot be silenced by editing it.
 
 ## What normalization forgives, and why
 
@@ -400,16 +586,53 @@ that an adjacent field which is not on the list still surfaces as a difference.
 `normalization_version` is recorded in every report, so a stored report stays
 interpretable — and the report embeds the rules themselves, not merely a number.
 
-At version 1 the list holds exactly one entry:
+The list holds exactly one entry:
 
 | Field | Justification |
 | --- | --- |
 | `systemMetadata` | Server-owned ingestion provenance (run id, observation time, registry name and version). DataSwamp never sends it — the export fixtures pin that — so its presence in a readback is definitionally the server's own annotation. It also changes on every ingestion by design, so comparing it would make the idempotence claim untestable. |
 
-The list is deliberately close to empty. That is not an oversight: this ships
-with no evidence from a real DataHub server, and inventing forgiveness rules for
-behaviour nobody has observed is exactly the erosion described above. Additions
-are earned by evidence from the live integration job.
+Version 1 shipped with that entry alone, and deliberately so: it had no evidence
+from a real DataHub server, and inventing forgiveness rules for behaviour nobody
+has observed is exactly the erosion described above.
+
+### Version 2: what the live canary earned
+
+The first live round-trip against DataHub `v1.7.0` produced 4,398 discrepancies.
+Every single one was **the server adding something, not changing something** —
+zero of the 861 field-level differences altered a value DataSwamp sent. Version 2
+encodes that distinction rather than merely trusting it.
+
+**Server-derived aspects** are exempt from *containment* only. They are never
+exempt from fidelity: none is on the sent key set, so none is ever compared as a
+value.
+
+| Aspect | Justification |
+| --- | --- |
+| `<entityType>Key` | The entity's key aspect, a parse of the URN DataSwamp sent. Handled as a **rule**, not a suffix match: `datasetKey` is derived on a dataset, but the same aspect on a tag was not derived from that tag's URN and stays a containment finding. |
+| `browsePathsV2` | Navigation path computed from the container and platform we sent; regenerated by the server on ingestion. |
+| `aliases` | Alternate identifiers the server maintains, derived from the URN. |
+| `dataPlatformInstance` | The platform association extracted from a dataset URN whose platform segment we sent. |
+
+The bar is **derivability**: the server must be able to compute the aspect from
+what DataSwamp already sent. "The server happened to add it" is not sufficient,
+because that is indistinguishable from a third party writing to our URNs — the
+very thing containment exists to detect. The exemption also reaches aspects
+only: a derived aspect on an entity we never sent is still an extra *entity*.
+
+**Server-added fields** are forgiven **only where DataSwamp sent no value**:
+
+| Aspect | Field | Justification |
+| --- | --- | --- |
+| `assertionInfo` | `entityUrn` | A denormalised copy of the asserted entity, already sent inside `datasetAssertion.dataset`. Same URN, second location. |
+| `domains` | `domainAssociations` | A richer rendering of the same membership sent in `domains` — one association object per domain URN, same order. |
+| `ownership` | `ownerTypes` | An index of the owners we sent, grouped by ownership-type URN. Derived wholly from `owners`, which remains present and is still compared. |
+
+That condition is what separates these from the `systemMetadata` rule. Stripping
+a field from both sides would hide a genuine change to a field we *do* send;
+conditional forgiveness cannot. If one of these paths ever appears in an emitted
+payload and the server returns something different, it is a mutation and is
+reported as one — and there is a paired test for each proving exactly that.
 
 **Unknown additions are differences.** A field the server adds that is not on the
 list is reported as a mutation, not silently dropped. The default is suspicion;
@@ -484,9 +707,11 @@ answer key.
 
 ## Limitations
 
-- **Live GMS support is experimental.** The REST endpoints have not been
-  exercised against a pinned real DataHub release in this repository. See
-  [live compatibility is experimental](#live-compatibility-is-experimental) and
+- **Live GMS support is verified against exactly one release.** The REST
+  endpoints have been exercised against DataHub `v1.7.0` and nothing else. That
+  is a compatibility *point*, not a range: no claim is made about older or newer
+  releases, and none should be inferred. See
+  [the live integration job](#the-live-integration-job) and
   [ADR 0005](adr/0005-direct-rest-datahub-client.md).
 - **No SDK model validation.** Payloads are validated against this adapter's own
   documented contract and committed fixtures, not against DataHub's PDL schemas.

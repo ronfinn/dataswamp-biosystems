@@ -19,13 +19,14 @@ constructor argument the CLI can pass from ``argv``, never rendered by
 written to any file. A token in ``argv`` leaks into shell history and process
 listings; a token in an exception leaks into CI logs and issue reports.
 
-**Compatibility is experimental at this version.** The offline
+**Compatibility is a point, not a range.** The offline
 ``DATAHUB_MODEL_VERSION`` range describes the emitted *payload* shape, which is
 pinned by committed fixtures. It says nothing about these REST endpoints, which
-have not yet been exercised against a real server in this repository. The first
-tested compatibility point is established by the live integration job; until
-then :data:`LIVE_SUPPORT` records the honest status, and it is written into
-every round-trip report.
+are exercised against exactly one real release —
+:data:`VERIFIED_DATAHUB_VERSION` — by the ``live-datahub`` workflow. Nothing is
+claimed about any other release. :data:`LIVE_SUPPORT` records that status and is
+written into every round-trip report, so a stored report never overstates its
+evidence.
 """
 
 from __future__ import annotations
@@ -49,16 +50,43 @@ from dataswamp_biosystems.adapters.datahub.errors import (
 GMS_URL_ENV = "DATAHUB_GMS_URL"
 GMS_TOKEN_ENV = "DATAHUB_GMS_TOKEN"
 
+# The one DataHub release these REST endpoints have actually been exercised
+# against, by the `live-datahub` workflow. A *point*, not a range: nothing is
+# claimed about any other release, and `tests/adapters/test_live_pin.py` fails if
+# this and the workflow's pin ever disagree, so the claim cannot outlive the
+# evidence for it.
+VERIFIED_DATAHUB_VERSION = "v1.7.0"
+
 # How much of DataHub's live API this adapter claims to have verified. Written
 # into every round-trip report so a stored report never overstates its evidence.
-LIVE_SUPPORT = "experimental: contract-level, not yet verified against a pinned DataHub release"
+LIVE_SUPPORT = (
+    f"experimental: contract-level, verified against DataHub {VERIFIED_DATAHUB_VERSION} only"
+)
 
 # --------------------------------------------------------------------------
 # Endpoints. Nothing outside this module may name one.
 # --------------------------------------------------------------------------
-# Batched proposal ingestion. Every proposal is an UPSERT, so this call is
-# idempotent by construction and re-running it converges rather than duplicating.
-INGEST_PATH = "/aspects?action=ingestProposalBatch"
+# **One API family, end to end.** Reads and writes both go through OpenAPI v3.
+#
+# The first live run against a pinned release found this the hard way. Ingestion
+# used to post to the rest.li ``/aspects?action=ingestProposalBatch``, which
+# deserializes an aspect as ``GenericAspect`` — ``value`` as serialized bytes
+# plus ``contentType``. The emitted payload writes aspects in the OpenAPI/JSON
+# dialect (``{"aspect": {"json": ...}}``), so a real GMS answered HTTP 500 with
+# ``RequiredFieldNotPresentException: Field "value" is required``, while the
+# reads beside it — already OpenAPI v3 — were fine. Two dialects, mispaired.
+#
+# Mixing families is what made that possible, so the fix is not just a new path:
+# every call below is OpenAPI v3, and none may be quietly swapped back.
+
+# Cross-entity batched create/upsert. Chosen over the per-entity-type route
+# because one batch can carry every entity type, which preserves the emitted
+# order rather than forcing proposals to be regrouped by type before sending.
+#
+# ``async=false`` is not optional and not a tuning knob: the endpoint defaults to
+# asynchronous ingestion, and reading back an asynchronously-accepted write is a
+# race that would make the round-trip's completeness claim meaningless.
+INGEST_PATH = "/openapi/v3/entity/generic?async=false"
 
 # Versioned-aspect read. Returns the entity with each requested aspect wrapped in
 # a ``{"value": ..., "systemMetadata": ...}`` envelope; the envelope is unwrapped
@@ -68,9 +96,16 @@ ENTITY_PATH = "/openapi/v3/entity/{entity_type}/{urn}"
 # Namespace enumeration, for extra-entity detection. Paged with a scroll token.
 SCROLL_PATH = "/openapi/v3/entity/{entity_type}"
 
-# Timeseries aspects are stored and read through a different path than versioned
-# ones, so they are fetched explicitly rather than assumed to appear alongside.
-TIMESERIES_PATH = "/aspects?action=getTimeseriesAspectValues"
+# Timeseries aspects have their own route, so they are fetched explicitly rather
+# than assumed to appear alongside the versioned ones. The aspect segment is
+# lower-cased, unlike the camel-case aspect name used everywhere else.
+TIMESERIES_PATH = "/openapi/v3/entity/{entity_type}/{urn}/{aspect}"
+
+# The change type this transport knows how to express. The emitted export is
+# UPSERT throughout; anything else would need a different endpoint or verb, and
+# silently posting it as an upsert would be exactly the reinterpretation this
+# module promises not to perform.
+SUPPORTED_CHANGE_TYPE = "UPSERT"
 
 # Aspects this adapter emits that DataHub stores as timeseries rather than
 # versioned. Handled explicitly so the round-trip covers every emitted aspect
@@ -137,6 +172,65 @@ def build_batches(
         IngestBatch(index=number, proposals=tuple(proposals[start : start + batch_size]))
         for number, start in enumerate(range(0, len(proposals), batch_size))
     )
+
+
+def encode_batch(proposals: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Encode emitted proposals into the OpenAPI v3 cross-entity request body.
+
+    **This is the one place emitted content changes shape, and it changes only
+    its shape.** The emitted export is the interchange artefact and is never
+    rewritten; what happens here is the envelope translation the wire protocol
+    requires, and nothing else. Entity identity, entity type, aspect identity
+    and aspect content all survive unchanged:
+
+    ``{"entityType": "dataset", "entityUrn": U, "aspectName": A, "aspect": {"json": P}}``
+
+    becomes ``{"dataset": [{"urn": U, "A": {"value": P}}]}``, where ``P`` is the
+    same object, not a copy that has been normalized, reordered or re-keyed.
+
+    Proposals for one URN are merged into a single entity object because the
+    request body is keyed by entity rather than by aspect. Merging is safe
+    precisely because the export guarantees ``(entityUrn, aspectName)`` is
+    unique, so no aspect can overwrite another; the guarantee is re-checked here
+    rather than assumed, since a silent overwrite would be an invisible data
+    loss. Emitted order is preserved by first appearance, within each entity
+    type and within each entity.
+
+    Anything this envelope cannot express is refused rather than approximated —
+    a non-UPSERT change type, or an aspect that is not in the ``json`` dialect.
+    Sending an approximation would be the reinterpretation this module exists
+    not to perform.
+    """
+    by_type: dict[str, dict[str, dict[str, Any]]] = {}
+    for proposal in proposals:
+        change_type = proposal.get("changeType")
+        if change_type != SUPPORTED_CHANGE_TYPE:
+            raise DataHubConfigError(
+                f"cannot transmit changeType {change_type!r} for "
+                f"{proposal.get('entityUrn')!r}: this transport expresses "
+                f"{SUPPORTED_CHANGE_TYPE} only"
+            )
+        aspect = proposal.get("aspect")
+        if not isinstance(aspect, dict) or "json" not in aspect:
+            raise DataHubConfigError(
+                f"proposal for {proposal.get('entityUrn')!r} carries no 'aspect.json' payload; "
+                "the OpenAPI transport cannot encode it without reinterpreting it"
+            )
+
+        entity_type = str(proposal["entityType"])
+        urn = str(proposal["entityUrn"])
+        aspect_name = str(proposal["aspectName"])
+
+        entities = by_type.setdefault(entity_type, {})
+        entity = entities.setdefault(urn, {"urn": urn})
+        if aspect_name in entity:
+            raise DataHubConfigError(
+                f"duplicate aspect {aspect_name!r} for {urn!r} in one batch; "
+                "encoding it would silently discard one of the two"
+            )
+        entity[aspect_name] = {"value": aspect["json"]}
+
+    return {entity_type: list(entities.values()) for entity_type, entities in by_type.items()}
 
 
 class DataHubClient:
@@ -234,14 +328,14 @@ class DataHubClient:
     # -------------------------------------------------------------- Ingest
 
     def ingest_batch(self, batch: IngestBatch) -> None:
-        """Transmit one batch verbatim.
+        """Transmit one batch, encoded for the OpenAPI v3 write API.
 
-        Pure transport: the proposals are sent exactly as the export contains
-        them. Nothing here synthesizes, enriches, rewrites or remaps a proposal,
-        which is what lets the round-trip treat the emitted file as an
-        authoritative statement of what the catalogue should hold.
+        The encoding is a change of envelope and nothing else — see
+        :func:`encode_batch`. Nothing here synthesizes, enriches, rewrites or
+        remaps a proposal, which is what lets the round-trip treat the emitted
+        file as an authoritative statement of what the catalogue should hold.
         """
-        self._request(INGEST_PATH, {"proposals": [dict(item) for item in batch.proposals]})
+        self._request(INGEST_PATH, encode_batch(batch.proposals))
 
     # ------------------------------------------------------------- Readback
 
@@ -267,33 +361,32 @@ class DataHubClient:
     def fetch_timeseries_aspect(self, entity_type: str, urn: str, aspect_name: str) -> Any | None:
         """Return the latest value of one timeseries aspect, or ``None``.
 
-        Timeseries aspects are read through a different endpoint than versioned
-        ones, and only the most recent value is compared: the adapter emits
-        exactly one run event per quality check, so a series is not something it
-        can produce. That limitation is documented rather than papered over.
+        Timeseries aspects are read through their own route rather than assumed
+        to appear beside the versioned ones, and only the most recent value is
+        compared: the adapter emits exactly one run event per quality check, so a
+        series is not something it can produce. That limitation is documented
+        rather than papered over.
+
+        This route is OpenAPI v3, like every other call in this module. It used
+        to be the rest.li ``getTimeseriesAspectValues``, which made reads a
+        two-dialect mixture even before the write path was corrected.
         """
-        body = self._request(
-            TIMESERIES_PATH,
-            {
-                "urn": urn,
-                "entity": entity_type,
-                "aspect": aspect_name,
-                "limit": 1,
-            },
+        path = TIMESERIES_PATH.format(
+            entity_type=urllib.parse.quote(entity_type, safe=""),
+            urn=urllib.parse.quote(urn, safe=""),
+            # The aspect segment is lower-cased in the route, unlike the
+            # camel-case aspect name used in every payload.
+            aspect=urllib.parse.quote(aspect_name.lower(), safe=""),
         )
-        values = body.get("value", {}).get("values", []) if isinstance(body, dict) else []
-        if not values:
+        try:
+            body = self._request(path)
+        except DataHubTransportError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        if not isinstance(body, dict) or "value" not in body:
             return None
-        first = values[0]
-        raw = first.get("aspect", {}).get("value") if isinstance(first, dict) else None
-        if isinstance(raw, str):
-            try:
-                return json.loads(raw)
-            except json.JSONDecodeError as exc:  # pragma: no cover - defensive
-                raise DataHubTransportError(
-                    f"timeseries aspect {aspect_name} for {urn} is not JSON"
-                ) from exc
-        return raw
+        return body["value"]
 
     def scroll_urns(self, entity_type: str) -> Iterator[str]:
         """Yield every URN the catalogue holds for one entity type.
@@ -353,6 +446,9 @@ __all__ = [
     "GMS_URL_ENV",
     "GMS_TOKEN_ENV",
     "LIVE_SUPPORT",
+    "VERIFIED_DATAHUB_VERSION",
+    "SUPPORTED_CHANGE_TYPE",
+    "encode_batch",
     "INGEST_PATH",
     "ENTITY_PATH",
     "SCROLL_PATH",

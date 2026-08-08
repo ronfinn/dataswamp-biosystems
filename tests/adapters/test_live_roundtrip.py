@@ -30,6 +30,7 @@ from dataswamp_biosystems.adapters.datahub.mapping import (
     TRUTH_ONLY_PROPERTY_PREFIX,
     ExportMode,
 )
+from dataswamp_biosystems.adapters.datahub.normalize import NORMALIZATION_VERSION
 from dataswamp_biosystems.adapters.datahub.readback import read_back
 from dataswamp_biosystems.adapters.datahub.report import (
     DISCREPANCIES_NAME,
@@ -230,7 +231,7 @@ def test_the_report_states_the_four_claims_separately(
     }
     assert all(claim["status"] == "pass" for claim in report["claims"].values())
     assert report["roundtrip_schema_version"] == ROUNDTRIP_SCHEMA_VERSION
-    assert report["normalization_version"] == 1
+    assert report["normalization_version"] == NORMALIZATION_VERSION
 
 
 def test_the_report_names_the_families_it_could_not_scan(

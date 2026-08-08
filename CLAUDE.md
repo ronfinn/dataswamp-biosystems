@@ -64,9 +64,11 @@ directory packaged from emitted layer output by
 and the **DataHub adapter** (a deterministic Metadata Change Proposal emitter in
 `src/dataswamp_biosystems/adapters/datahub/` via `dataswamp export-datahub`, plus
 a **live path** strictly downstream of that emitted export — `dataswamp
-ingest-datahub` transmits it verbatim to a running catalogue and `dataswamp
-verify-ingestion` reads it back and reports completeness, fidelity, containment
-and observed-mode non-leakage as four separate claims), and
+ingest-datahub` transmits it to a running catalogue without remapping or
+reinterpreting it, and `dataswamp verify-ingestion` reads it back and reports
+completeness, fidelity, containment and observed-mode non-leakage as four
+separate claims, verified against a pinned real DataHub Quickstart by the
+optional, non-blocking `live-datahub` workflow), and
 the **release surface** (a `dataswamp demo` command running the whole workflow
 into one directory, committed example submissions under `examples/predictions/`,
 and the canonical `config/` tree plus those examples shipped *inside* the
@@ -359,6 +361,35 @@ referential integrity, not just happy-path execution.
   forgiven, and a paired test proving an adjacent non-ignored mutation is still
   caught; bump `NORMALIZATION_VERSION` when the rules change. An ignore list that
   grows on failure turns fidelity validation into a function that always passes.
+  This applies with full force when the *live* job goes red: diagnose first, and
+  triage a genuine normalization or model-version question under its own issue.
+- **Never mix DataHub API families in the live client.** Write, entity read,
+  timeseries read and namespace enumeration are all OpenAPI v3. Pairing an
+  OpenAPI-dialect payload with a rest.li endpoint is what produced the
+  `GenericAspect` HTTP 500 the first live run found, and 111 offline tests
+  missed it because the fake GMS accepted any envelope. The fake now validates
+  the request envelope — never weaken it back into accepting whatever arrives,
+  and never pin `async=true` on the write endpoint, which would make readback a
+  race.
+- **Never claim ingestion is "verbatim".** It does not remap, synthesize, enrich
+  or reinterpret; entity identity, entity type, aspect identity and semantic
+  aspect content are preserved, and `client.py` alone encodes that content into
+  the wire representation the API requires. The emitted `mcps.jsonl`/`mcps.json`
+  are never rewritten to suit a transport.
+- **Never forgive a server addition unconditionally.** A `SERVER_ADDED_FIELD` is
+  ignored only where the emitted payload carries no value at that path; a
+  differing value DataSwamp did send is still a mutation. A
+  `SERVER_DERIVED_ASPECT` is exempt from containment only, never from fidelity,
+  and never for an entity the export did not contain. Both need a justification
+  and a paired test, and both move `NORMALIZATION_VERSION`.
+- **Never claim a DataHub compatibility point that was not run.**
+  `VERIFIED_DATAHUB_VERSION`, the `live-datahub` workflow's pin and the pin in
+  `docs/datahub.md` move together or not at all
+  (`tests/adapters/test_live_pin.py`). It is a point, never a range. Never make
+  the live job a required check, never let it run on `push` or on an unlabelled
+  pull request, and never give it a repository secret or point it at a
+  third-party catalogue — it stands up its own throwaway instance with
+  metadata-service auth disabled.
 - **Never report an unrelated catalogue entity as a DataSwamp extra**, and never
   claim live DataHub compatibility the endpoints have not been tested against.
   Where a family's URNs cannot settle ownership, report coverage as unavailable.

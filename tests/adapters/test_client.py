@@ -17,6 +17,7 @@ from dataswamp_biosystems.adapters.datahub.client import (
     GMS_URL_ENV,
     DataHubClient,
     build_batches,
+    encode_batch,
     redact_url,
 )
 from dataswamp_biosystems.adapters.datahub.errors import (
@@ -24,7 +25,7 @@ from dataswamp_biosystems.adapters.datahub.errors import (
     DataHubTransportError,
 )
 
-from .fake_gms import FakeGMSServer
+from .fake_gms import EnvelopeError, FakeGMS, FakeGMSServer
 
 TOKEN = "super-secret-token-value"
 
@@ -216,15 +217,95 @@ def test_a_non_json_body_is_a_transport_error(monkeypatch: pytest.MonkeyPatch) -
         client.fetch_aspects("dataset", "urn:li:dataset:(a,b,PROD)")
 
 
-def test_the_transmitted_body_is_the_proposal_set_verbatim() -> None:
-    """Pure transport: nothing is synthesized, enriched, rewritten or remapped."""
+def test_the_transmitted_content_survives_the_wire_encoding() -> None:
+    """Semantic preservation across the OpenAPI envelope.
+
+    The wire shape is not the emitted shape — ``client.py`` encodes proposals
+    into the cross-entity request body the API requires. What must survive that
+    encoding is everything that carries meaning: entity identity, entity type,
+    aspect identity and aspect content. This reconstructs each proposal from what
+    the server actually received and requires it to match, field for field.
+
+    ``changeType`` is the one emitted key with no wire representation, because
+    the endpoint *is* the change type — see the ``SUPPORTED_CHANGE_TYPE`` guard,
+    which refuses anything the endpoint cannot express rather than silently
+    posting it as an upsert.
+    """
     proposals = [_proposal(index) for index in range(3)]
-    captured: list[dict[str, object]] = []
 
     with FakeGMSServer() as server:
-        client = server.client()
-        client.ingest_batch(build_batches(proposals)[0])
-        captured = server.state.received
+        server.client().ingest_batch(build_batches(proposals)[0])
+        received = server.state.received
 
-    assert captured == proposals
-    assert json.dumps(captured, sort_keys=True) == json.dumps(proposals, sort_keys=True)
+    expected = [{k: v for k, v in item.items() if k != "changeType"} for item in proposals]
+    assert received == expected
+    assert json.dumps(received, sort_keys=True) == json.dumps(expected, sort_keys=True)
+
+
+def test_the_wire_body_is_the_openapi_cross_entity_envelope() -> None:
+    """The encoding itself, asserted against the shape the real API documents."""
+    proposals = [_proposal(0), _proposal(1)]
+    body = encode_batch(proposals)
+
+    assert body == {
+        "tag": [
+            {"urn": "urn:li:tag:t0", "tagProperties": {"value": {"name": "t0"}}},
+            {"urn": "urn:li:tag:t1", "tagProperties": {"value": {"name": "t1"}}},
+        ]
+    }
+    # The aspect payload is the emitted object itself, not a copy of it.
+    assert body["tag"][0]["tagProperties"]["value"] is proposals[0]["aspect"]["json"]
+
+
+def test_the_restli_generic_aspect_envelope_is_never_produced() -> None:
+    """A regression test for the failure the first live run found.
+
+    Ingestion used to post ``{"proposals": [...]}`` to the rest.li endpoint,
+    which deserializes an aspect as ``GenericAspect`` — ``value`` as serialized
+    bytes plus ``contentType``. A real GMS answered HTTP 500. Nothing in the
+    encoded body may carry that dialect's shape.
+    """
+    body = encode_batch([_proposal(0)])
+
+    assert "proposals" not in body
+    wrapper = body["tag"][0]["tagProperties"]
+    assert set(wrapper) == {"value"}
+    assert "contentType" not in wrapper
+    # The decisive difference: `value` is the aspect object, never a JSON string.
+    assert isinstance(wrapper["value"], dict)
+
+
+def test_a_generic_aspect_body_is_rejected_by_the_server_the_way_a_real_gms_rejects_it() -> None:
+    """And the fake must be able to say no, or it proves nothing.
+
+    The original mismatch survived 111 offline tests because the fake read the
+    aspect out of whatever body arrived. It now validates the envelope, so the
+    rest.li dialect fails here exactly as it failed against DataHub v1.7.0.
+    """
+    state = FakeGMS()
+    restli_body = {
+        "tag": [
+            {
+                "urn": "urn:li:tag:t0",
+                "tagProperties": {
+                    "value": json.dumps({"name": "t0"}),
+                    "contentType": "application/json",
+                },
+            }
+        ]
+    }
+    with pytest.raises(EnvelopeError):
+        state.ingest_v3(restli_body)
+
+
+def test_a_non_upsert_change_type_is_refused_rather_than_approximated() -> None:
+    """No silent reinterpretation: an unexpressible change type stops the send."""
+    proposal = _proposal(0) | {"changeType": "PATCH"}
+    with pytest.raises(DataHubConfigError, match="UPSERT"):
+        encode_batch([proposal])
+
+
+def test_a_duplicate_aspect_in_one_batch_is_refused_rather_than_overwritten() -> None:
+    """Merging by URN must not be able to lose an aspect silently."""
+    with pytest.raises(DataHubConfigError, match="duplicate"):
+        encode_batch([_proposal(0), _proposal(0)])
