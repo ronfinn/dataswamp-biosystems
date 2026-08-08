@@ -158,7 +158,15 @@ def test_the_transmitted_set_equals_the_emitted_set(observed_export_dir: Path) -
         execute_ingestion(plan_ingestion(export, batch_size=25), server.client())
         received = list(server.state.received)
 
-    assert received == _emitted_proposals(observed_export_dir)
+    # Reconstructed from the wire, so this is a statement about what the server
+    # was actually told — identity, type, aspect name and aspect content — not
+    # about what the client intended to say. `changeType` has no wire
+    # representation: the endpoint is the change type.
+    emitted = [
+        {key: value for key, value in proposal.items() if key != "changeType"}
+        for proposal in _emitted_proposals(observed_export_dir)
+    ]
+    assert received == emitted
 
 
 def test_a_second_ingestion_is_idempotent(observed_export_dir: Path) -> None:

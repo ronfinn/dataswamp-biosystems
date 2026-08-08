@@ -13,7 +13,11 @@ A **live path** sits strictly downstream of that emitted export::
 
     bundle -> export-datahub -> emitted export -> ingest-datahub -> verify-ingestion
 
-``ingest.py`` transmits an emitted export verbatim, ``readback.py`` reads the
+``ingest.py`` transmits an emitted export without remapping, synthesizing,
+enriching or reinterpreting it — entity identity, entity type, aspect identity
+and semantic aspect content are all preserved, and ``client.py`` alone encodes
+that content into the wire representation the DataHub API requires.
+``readback.py`` reads the
 catalogue's state back, and ``roundtrip.py`` compares the two as a pure function
 — reporting completeness, fidelity, containment and observed-mode non-leakage
 separately. Every socket and every endpoint path is confined to ``client.py``,

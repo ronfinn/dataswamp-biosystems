@@ -1374,9 +1374,14 @@ def ingest_datahub_command(
     """Transmit an emitted DataHub export to a live catalogue.
 
     The export is verified first — digests, payload validity, proposal
-    uniqueness and privilege mode — and then transmitted verbatim. Nothing is
-    regenerated, no bundle is opened and no benchmark ground truth is consulted:
-    the emitted export is the whole input.
+    uniqueness and privilege mode — and then transmitted. Nothing is regenerated,
+    no bundle is opened and no benchmark ground truth is consulted: the emitted
+    export is the whole input.
+
+    Ingestion does not remap, synthesize, enrich or reinterpret emitted metadata.
+    Entity identity, entity type, aspect identity and semantic aspect content are
+    preserved; the transport alone encodes that content into the wire
+    representation the DataHub API requires.
 
     ``--dry-run`` performs **no network activity at all**. It reads and verifies
     the export, builds the transmission batches and reports them; it opens no

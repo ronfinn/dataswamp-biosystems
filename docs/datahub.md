@@ -294,6 +294,41 @@ dataswamp ingest-datahub --export-dir export/datahub --dry-run
 dataswamp ingest-datahub --export-dir export/datahub --yes
 ```
 
+### What "does not reinterpret" means, precisely
+
+> Live ingestion does not remap, synthesize, enrich or reinterpret emitted
+> metadata. Entity identity, entity type, aspect identity and semantic aspect
+> content are preserved. `client.py` alone encodes the emitted content into the
+> wire representation required by the DataHub API.
+
+This replaces an earlier, stronger claim that ingestion transmitted the export
+*verbatim*. That claim was wrong, and the live canary is how we found out: the
+DataHub write API does not accept the emitted interchange shape as-is, so a
+transport that changed nothing at all could not have worked against a real
+server. See [the dialect mismatch](#the-restli-openapi-dialect-mismatch).
+
+The distinction is between the interchange artefact and the wire format.
+`mcps.jsonl` and `mcps.json` remain the deterministic emitted artefacts and are
+never rewritten — the export on disk is byte-identical to what it always was,
+and its fixtures and digests are unchanged. `encode_batch()` in `client.py`
+translates the envelope at the moment of transmission and nothing else:
+
+```text
+{"entityType": "dataset", "entityUrn": U, "aspectName": A, "aspect": {"json": P}}
+  →  {"dataset": [{"urn": U, "A": {"value": P}}]}
+```
+
+`P` is the same object, not a normalized or re-keyed copy. Proposals for one URN
+merge into one entity object because the request body is keyed by entity;
+merging is safe because the export guarantees `(entityUrn, aspectName)` is
+unique, and the encoder re-checks that rather than trusting it. `changeType` is
+the only emitted key with no wire representation — the endpoint *is* the change
+type — so a non-`UPSERT` proposal is refused rather than posted as an upsert.
+
+Semantic preservation is tested rather than asserted: the fake GMS reconstructs
+each proposal from the bytes it actually received, and the reconstruction must
+match the emitted record field for field.
+
 Four things are checked before a byte leaves the process: the payload passes the
 offline validator, every digest in `export-manifest.json` recomputes, no
 `(URN, aspect)` pair appears twice, and the manifest's privilege flag agrees with
@@ -483,6 +518,47 @@ _as_an_extra_aspect` withholds one proposal from the *sent* side of an otherwise
 identical comparison and requires the real readback to report that exact aspect
 as extra — which it can only do if the server genuinely returned it.
 
+### The rest.li / OpenAPI dialect mismatch
+
+The first live run against a pinned release failed, and it is worth recording
+what it caught, because no offline test could have.
+
+Ingestion posted to the rest.li endpoint `/aspects?action=ingestProposalBatch`,
+which deserializes an aspect as
+[`GenericAspect`](https://github.com/datahub-project/datahub/blob/v1.7.0/metadata-models/src/main/pegasus/com/linkedin/mxe/GenericAspect.pdl)
+— `value` as serialized bytes plus `contentType`. The emitted payload writes
+aspects in the OpenAPI/JSON dialect, `{"aspect": {"json": {...}}}`. DataHub
+v1.7.0 answered:
+
+```
+HTTP 500  RequiredFieldNotPresentException: Field "value" is required but it is not present
+```
+
+Two DataHub API families, mispaired. The reads beside it were already OpenAPI
+v3 and were fine, so the *write* was the odd one out — and the timeseries read
+was quietly a third case, still on rest.li `getTimeseriesAspectValues`.
+
+**111 offline tests passed throughout.** They passed because the fake GMS read
+`proposal["aspect"]["json"]` out of whatever body arrived, so any envelope the
+client chose was self-consistently correct. A fake that cannot disagree with the
+client cannot catch the client being wrong. Two things changed as a result:
+
+- **One API family, end to end.** Write, entity read, timeseries read and
+  namespace enumeration are all OpenAPI v3. Mixing families is what made the
+  mismatch possible, so the fix is not merely a new path.
+- **The fake validates the envelope.** It enforces the cross-entity request
+  shape and rejects a rest.li `GenericAspect` body the way a real server does.
+  `test_client.py` carries that as an explicit regression test.
+
+Every emitted aspect was checked against the v1.7.0 OpenAPI schema before the
+change, `assertionRunEvent` included: all 24 emitted `(entityType, aspectName)`
+pairs are representable, so no hybrid transport was needed and none exists.
+
+One detail is load-bearing rather than incidental: the write endpoint defaults
+to **asynchronous** ingestion, and the adapter pins `async=false`. Reading back
+an asynchronously-accepted write is a race, and a round-trip built on one would
+report completeness failures that come and go.
+
 ### If the live job goes red
 
 Diagnose before touching anything. A live failure is evidence, and the cheapest
@@ -510,16 +586,53 @@ that an adjacent field which is not on the list still surfaces as a difference.
 `normalization_version` is recorded in every report, so a stored report stays
 interpretable — and the report embeds the rules themselves, not merely a number.
 
-At version 1 the list holds exactly one entry:
+The list holds exactly one entry:
 
 | Field | Justification |
 | --- | --- |
 | `systemMetadata` | Server-owned ingestion provenance (run id, observation time, registry name and version). DataSwamp never sends it — the export fixtures pin that — so its presence in a readback is definitionally the server's own annotation. It also changes on every ingestion by design, so comparing it would make the idempotence claim untestable. |
 
-The list is deliberately close to empty. That is not an oversight: this ships
-with no evidence from a real DataHub server, and inventing forgiveness rules for
-behaviour nobody has observed is exactly the erosion described above. Additions
-are earned by evidence from the live integration job.
+Version 1 shipped with that entry alone, and deliberately so: it had no evidence
+from a real DataHub server, and inventing forgiveness rules for behaviour nobody
+has observed is exactly the erosion described above.
+
+### Version 2: what the live canary earned
+
+The first live round-trip against DataHub `v1.7.0` produced 4,398 discrepancies.
+Every single one was **the server adding something, not changing something** —
+zero of the 861 field-level differences altered a value DataSwamp sent. Version 2
+encodes that distinction rather than merely trusting it.
+
+**Server-derived aspects** are exempt from *containment* only. They are never
+exempt from fidelity: none is on the sent key set, so none is ever compared as a
+value.
+
+| Aspect | Justification |
+| --- | --- |
+| `<entityType>Key` | The entity's key aspect, a parse of the URN DataSwamp sent. Handled as a **rule**, not a suffix match: `datasetKey` is derived on a dataset, but the same aspect on a tag was not derived from that tag's URN and stays a containment finding. |
+| `browsePathsV2` | Navigation path computed from the container and platform we sent; regenerated by the server on ingestion. |
+| `aliases` | Alternate identifiers the server maintains, derived from the URN. |
+| `dataPlatformInstance` | The platform association extracted from a dataset URN whose platform segment we sent. |
+
+The bar is **derivability**: the server must be able to compute the aspect from
+what DataSwamp already sent. "The server happened to add it" is not sufficient,
+because that is indistinguishable from a third party writing to our URNs — the
+very thing containment exists to detect. The exemption also reaches aspects
+only: a derived aspect on an entity we never sent is still an extra *entity*.
+
+**Server-added fields** are forgiven **only where DataSwamp sent no value**:
+
+| Aspect | Field | Justification |
+| --- | --- | --- |
+| `assertionInfo` | `entityUrn` | A denormalised copy of the asserted entity, already sent inside `datasetAssertion.dataset`. Same URN, second location. |
+| `domains` | `domainAssociations` | A richer rendering of the same membership sent in `domains` — one association object per domain URN, same order. |
+| `ownership` | `ownerTypes` | An index of the owners we sent, grouped by ownership-type URN. Derived wholly from `owners`, which remains present and is still compared. |
+
+That condition is what separates these from the `systemMetadata` rule. Stripping
+a field from both sides would hide a genuine change to a field we *do* send;
+conditional forgiveness cannot. If one of these paths ever appears in an emitted
+payload and the server returns something different, it is a mutation and is
+reported as one — and there is a paired test for each proving exactly that.
 
 **Unknown additions are differences.** A field the server adds that is not on the
 list is reported as a mutation, not silently dropped. The default is suspicion;

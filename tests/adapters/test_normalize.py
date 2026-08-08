@@ -9,15 +9,53 @@ deleted the entire payload.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from dataswamp_biosystems.adapters.datahub import urns
+from dataswamp_biosystems.adapters.datahub.ingest import (
+    execute_ingestion,
+    load_export,
+    plan_ingestion,
+)
 from dataswamp_biosystems.adapters.datahub.normalize import (
+    KEY_ASPECT_JUSTIFICATION,
     NORMALIZATION_VERSION,
+    SERVER_ADDED_FIELDS,
+    SERVER_DERIVED_ASPECTS,
     SERVER_OWNED_FIELDS,
     UNORDERED_FIELDS,
+    is_server_derived_aspect,
     is_unordered,
     normalization_contract,
     normalize_aspect,
 )
-from dataswamp_biosystems.adapters.datahub.roundtrip import _diff
+from dataswamp_biosystems.adapters.datahub.readback import read_back
+from dataswamp_biosystems.adapters.datahub.roundtrip import (
+    DiscrepancyKind,
+    RoundTripResult,
+    _diff,
+    compare,
+    forgive_server_additions,
+)
+
+from .fake_gms import FakeGMS, FakeGMSServer
+
+
+def _filtered(sent: object, retrieved: object, aspect_name: str) -> list:
+    """Diff two payloads exactly as `compare` does, forgiveness included."""
+    return forgive_server_additions(_diff(sent, retrieved, "", aspect_name), aspect_name)
+
+
+def _roundtrip_with(export_dir: Path, state: object) -> RoundTripResult:
+    """Ingest an export into a perturbed fake catalogue and compare it back."""
+    export = load_export(export_dir)
+    with FakeGMSServer(state) as server:  # type: ignore[arg-type]
+        execute_ingestion(plan_ingestion(export), server.client())
+        populated = server.state
+    with FakeGMSServer(populated) as server:
+        readback = read_back(export, server.client())
+    return compare(list(export.proposals), readback, export.mode)
+
 
 # ---------------------------------------------------------------- the list
 
@@ -165,3 +203,127 @@ def test_unordered_comparison_applies_only_to_the_named_aspect() -> None:
     retrieved = {"owners": ["b", "a"]}
     assert _diff(sent, retrieved, "", "ownership") == []
     assert _diff(sent, retrieved, "", "datasetProperties") != []
+
+
+# ------------------------------------------------ version 2: server derivation
+#
+# Every rule below is paired. The forgiveness test proves the rule works; the
+# test beside it proves the rule cannot be stretched to cover a real change.
+# A rule with only the first half of that pair is how an ignore list becomes a
+# function that always returns "identical".
+
+
+def test_a_key_aspect_is_recognised_as_server_derived() -> None:
+    """DataHub materialises ``<entityType>Key`` from the URN we sent."""
+    assert is_server_derived_aspect("dataset", "datasetKey")
+    assert is_server_derived_aspect("assertion", "assertionKey")
+    assert is_server_derived_aspect("glossaryNode", "glossaryNodeKey")
+
+
+def test_a_key_aspect_of_the_wrong_entity_type_is_not_derived() -> None:
+    """The paired test: it is a rule about *that* entity's key, not a suffix.
+
+    A ``datasetKey`` sitting on a tag was not derived from the tag's URN, so
+    somebody put it there and containment must say so.
+    """
+    assert not is_server_derived_aspect("tag", "datasetKey")
+    assert not is_server_derived_aspect("dataset", "assertionKey")
+
+
+def test_only_the_named_aspects_are_treated_as_derived() -> None:
+    """The paired test for the enumerated entries: the list is exhaustive."""
+    for aspect in ("browsePathsV2", "aliases", "dataPlatformInstance"):
+        assert is_server_derived_aspect("dataset", aspect), aspect
+    for aspect in ("datasetProperties", "ownership", "globalTags", "institutionalMemory"):
+        assert not is_server_derived_aspect("dataset", aspect), aspect
+
+
+def test_a_derived_aspect_does_not_fail_containment(mini_export_dir: Path) -> None:
+    export = load_export(mini_export_dir)
+    urn = str(next(p for p in export.proposals if p["entityType"] == "dataset")["entityUrn"])
+    state = FakeGMS(inject={(urn, "datasetKey"): {"name": "x"}})
+    result = _roundtrip_with(mini_export_dir, state)
+    assert not result.of_kind(DiscrepancyKind.EXTRA_ASPECT)
+    assert result.clean
+
+
+def test_an_undeclared_extra_aspect_still_fails_containment(mini_export_dir: Path) -> None:
+    """The paired test: derivation is not a blanket amnesty for extra aspects."""
+    export = load_export(mini_export_dir)
+    urn = str(export.proposals[0]["entityUrn"])
+    state = FakeGMS(inject={(urn, "institutionalMemory"): {"elements": []}})
+    result = _roundtrip_with(mini_export_dir, state)
+    assert [
+        (i.entity_urn, i.aspect_name) for i in result.of_kind(DiscrepancyKind.EXTRA_ASPECT)
+    ] == [(urn, "institutionalMemory")]
+
+
+def test_a_derived_aspect_on_an_entity_nobody_sent_is_still_an_extra_entity(
+    mini_export_dir: Path,
+) -> None:
+    """The exemption reaches aspects, never entities.
+
+    A key aspect proves an entity exists; it does not make an entity we never
+    sent acceptable.
+    """
+
+    intruder = urns.dataset_urn("ds-nobody-sent-this")
+    state = FakeGMS(inject_entities={intruder: {"datasetKey": {"name": "x"}}})
+    result = _roundtrip_with(mini_export_dir, state)
+    assert [i.entity_urn for i in result.of_kind(DiscrepancyKind.EXTRA_ENTITY)] == [intruder]
+
+
+def test_a_declared_server_added_field_is_forgiven_when_we_sent_nothing() -> None:
+    sent = {"owners": [{"owner": "urn:li:corpGroup:a"}]}
+    retrieved = sent | {"ownerTypes": {"urn:li:ownershipType:__system__dataowner": ["a"]}}
+    assert _filtered(sent, retrieved, "ownership") == []
+
+
+def test_a_declared_server_added_field_we_did_send_is_still_compared() -> None:
+    """The paired test, and the reason this is not a strip rule.
+
+    Forgiveness is conditional on the field being *added*. If the emitted
+    payload carries the path and the server returns something else, that is a
+    mutation — the list cannot hide it.
+    """
+    sent = {"owners": [], "ownerTypes": {"a": ["x"]}}
+    retrieved = {"owners": [], "ownerTypes": {"a": ["CHANGED"]}}
+    differences = _filtered(sent, retrieved, "ownership")
+    assert [d.path for d in differences] == ["ownerTypes.a[0]"]
+
+
+def test_server_added_forgiveness_is_scoped_to_its_aspect() -> None:
+    """``ownerTypes`` is forgiven in ``ownership``, not everywhere."""
+    sent: dict[str, object] = {}
+    retrieved = {"ownerTypes": {"a": ["x"]}}
+    assert _filtered(sent, retrieved, "ownership") == []
+    assert [d.path for d in _filtered(sent, retrieved, "datasetProperties")] == ["ownerTypes"]
+
+
+def test_an_undeclared_added_field_is_still_a_mutation() -> None:
+    """The default stays suspicion: only the three declared paths are forgiven."""
+    sent: dict[str, object] = {"name": "x"}
+    retrieved = {"name": "x", "somethingNew": 1}
+    assert [d.path for d in _filtered(sent, retrieved, "datasetProperties")] == ["somethingNew"]
+
+
+def test_every_declared_rule_carries_a_justification() -> None:
+    """A rule without a stated reason cannot be reviewed, so it cannot be added."""
+    for item in SERVER_ADDED_FIELDS:
+        assert len(item.justification) > 80, item.path
+    for item in SERVER_DERIVED_ASPECTS:
+        assert len(item.justification) > 80, item.aspect
+    assert len(KEY_ASPECT_JUSTIFICATION) > 80
+
+
+def test_the_contract_is_reported_with_its_scope() -> None:
+    """A stored report must be interpretable without this source tree."""
+    contract = normalization_contract()
+    assert contract["normalization_version"] == NORMALIZATION_VERSION == 2
+    assert "containment only" in contract["server_derived_aspects"]["scope"]
+    assert "still a mutation" in contract["server_added_fields_scope"]
+    assert {item["path"] for item in contract["server_added_fields"]} == {
+        "entityUrn",
+        "domainAssociations",
+        "ownerTypes",
+    }

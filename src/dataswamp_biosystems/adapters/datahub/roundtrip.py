@@ -50,7 +50,12 @@ from dataswamp_biosystems.adapters.datahub.mapping import (
     TRUTH_ONLY_PROPERTY_PREFIX,
     ExportMode,
 )
-from dataswamp_biosystems.adapters.datahub.normalize import is_unordered, normalize_aspect
+from dataswamp_biosystems.adapters.datahub.normalize import (
+    is_server_added_field,
+    is_server_derived_aspect,
+    is_unordered,
+    normalize_aspect,
+)
 from dataswamp_biosystems.truth import serialize
 
 # Bumped when the emitted round-trip report's shape changes. Owned by this
@@ -301,6 +306,27 @@ def _render(value: Any) -> str:
     return serialize.canonical_json(value)
 
 
+def forgive_server_additions(
+    differences: list[FieldDifference], aspect_name: str
+) -> list[FieldDifference]:
+    """Drop differences that are a declared server *addition*, and only those.
+
+    A declared server-added field is forgiven exclusively where DataSwamp sent
+    nothing at that path. If the emitted payload carried a value and the server
+    returned another, ``sent`` is not :data:`ABSENT` and the difference survives.
+
+    That condition is what separates this from stripping the field off both
+    sides: a strip rule would hide a genuine change to a field we *do* send,
+    whereas this one cannot. Exposed rather than inlined so the tests exercise
+    the same code the comparison runs, instead of a copy that can drift from it.
+    """
+    return [
+        difference
+        for difference in differences
+        if not (difference.sent == ABSENT and is_server_added_field(aspect_name, difference.path))
+    ]
+
+
 def _key(value: Any) -> str:
     """Return a stable comparison key for an unordered list member."""
     return serialize.canonical_json(value)
@@ -437,7 +463,9 @@ def compare(
             continue
         expected = normalize_aspect(aspect_name, sent_by_key[key]["aspect"]["json"])
         actual = normalize_aspect(aspect_name, found.payload)
-        differences = _diff(expected, actual, "", aspect_name)
+        differences = forgive_server_additions(
+            _diff(expected, actual, "", aspect_name), aspect_name
+        )
         if differences:
             discrepancies.append(
                 Discrepancy(
@@ -459,6 +487,13 @@ def compare(
         urn, aspect_name = key
         if urn not in entity_types:
             continue  # An entity we never sent; handled as an extra entity below.
+        if is_server_derived_aspect(entity_types[urn], aspect_name):
+            # The server computed this from what we sent it — a key aspect parsed
+            # from the URN, or a declared materialisation. Not somebody else's
+            # metadata, so not a containment breach. Note this exemption reaches
+            # only aspects on URNs the export *did* contain: a derived aspect on
+            # an entity we never sent is still caught as an extra entity below.
+            continue
         discrepancies.append(
             Discrepancy(
                 DiscrepancyKind.EXTRA_ASPECT,
@@ -531,5 +566,6 @@ __all__ = [
     "RetrievedAspect",
     "Readback",
     "RoundTripResult",
+    "forgive_server_additions",
     "compare",
 ]
