@@ -14,6 +14,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+import typer.main
 from typer.testing import CliRunner
 
 from dataswamp_biosystems.adapters.openmetadata import (
@@ -126,7 +127,12 @@ def test_the_token_is_not_a_command_line_option(om_observed_export_dir: Path) ->
         ],
     )
     assert result.exit_code != 0
-    assert "--token" not in runner.invoke(app, ["ingest-openmetadata", "--help"]).output
+    # Introspected, not read out of rendered help: Typer wraps and colours help
+    # text by terminal width, which makes a substring check a test of the
+    # terminal rather than of the interface.
+    command = typer.main.get_command(app).commands["ingest-openmetadata"]  # type: ignore[attr-defined]
+    options = {opt for param in command.params for opt in param.opts}
+    assert not any("token" in opt.lower() for opt in options)
 
 
 def test_a_full_ingestion_reports_what_it_replayed(

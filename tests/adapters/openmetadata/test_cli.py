@@ -14,6 +14,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+import typer.main
 from typer.testing import CliRunner
 
 from dataswamp_biosystems.adapters.openmetadata import (
@@ -228,10 +229,16 @@ def test_the_live_commands_are_present_and_strictly_downstream() -> None:
     assert "ingest-openmetadata" in result.output
     assert "verify-om-ingestion" in result.output
 
-    for command in ("ingest-openmetadata", "verify-om-ingestion"):
-        help_text = runner.invoke(app, [command, "--help"]).output
-        assert "--export-dir" in help_text
-        assert "--bundle" not in help_text
+    # Introspected rather than read out of rendered help. Typer wraps and colours
+    # help text according to terminal width, so a substring check against it
+    # passes locally and fails in CI for reasons that have nothing to do with the
+    # command's actual interface.
+    group = typer.main.get_command(app)
+    for name in ("ingest-openmetadata", "verify-om-ingestion"):
+        command = group.commands[name]  # type: ignore[attr-defined]
+        options = {opt for param in command.params for opt in param.opts}
+        assert "--export-dir" in options
+        assert "--bundle" not in options
 
 
 def test_the_live_commands_still_claim_no_compatibility_point() -> None:
