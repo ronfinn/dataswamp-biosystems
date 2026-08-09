@@ -27,6 +27,8 @@ proves the adapter behaves on the actual benchmark.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -34,10 +36,21 @@ import pytest
 from dataswamp_biosystems.adapters.openmetadata import (
     ExportMode,
     ExportPlan,
+    LoadedExport,
+    OpenMetadataClient,
+    Readback,
+    RoundTripResult,
     SourceGraph,
     build_plan,
+    compare,
+    execute_ingestion,
     export_openmetadata,
+    load_export,
+    plan_ingestion,
+    read_back,
 )
+
+from .fake_om import FakeOpenMetadata, FakeOpenMetadataServer
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 
@@ -194,3 +207,59 @@ def copied_om_export(om_observed_export_dir: Path, tmp_path: Path) -> Path:
     target = tmp_path / "export"
     shutil.copytree(om_observed_export_dir, target)
     return target
+
+
+# ---------------------------------------------------------------------------
+# The live path, against the strict offline fake.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class LiveFixture:
+    """One emitted export, replayed into one fake catalogue, ready to compare."""
+
+    export: LoadedExport
+    state: FakeOpenMetadata
+    server: FakeOpenMetadataServer
+
+    def client(self, token: str | None = None) -> OpenMetadataClient:
+        # Retries are pointless against an in-process fake and only slow a
+        # failing test down.
+        return OpenMetadataClient(self.server.host_port, token, retries=0, timeout=10)
+
+    def read(self) -> Readback:
+        return read_back(self.export, self.client())
+
+    def compare(self) -> RoundTripResult:
+        return compare(self.export.records, self.read(), self.export.mode)
+
+
+@pytest.fixture
+def om_live(om_observed_export_dir: Path) -> Iterator[LiveFixture]:
+    """A clean observed export, fully replayed into a fresh fake catalogue.
+
+    Every round-trip test starts from a *successful* ingestion and then perturbs
+    one thing, so a failure names exactly one cause.
+    """
+    export = load_export(om_observed_export_dir)
+    with FakeOpenMetadataServer() as server:
+        fixture = LiveFixture(export=export, state=server.state, server=server)
+        execute_ingestion(plan_ingestion(export), fixture.client())
+        server.state.reset_traffic()
+        yield fixture
+
+
+@pytest.fixture
+def om_live_truth(om_truth_export_dir: Path) -> Iterator[LiveFixture]:
+    """The privileged truth export, replayed — the leak probes' negative control.
+
+    Ingested in ``truth`` mode but compared as ``observed`` by the leak tests, to
+    prove the probes actually fire on real truth markers rather than merely never
+    having seen one.
+    """
+    export = load_export(om_truth_export_dir)
+    with FakeOpenMetadataServer() as server:
+        fixture = LiveFixture(export=export, state=server.state, server=server)
+        execute_ingestion(plan_ingestion(export), fixture.client())
+        server.state.reset_traffic()
+        yield fixture

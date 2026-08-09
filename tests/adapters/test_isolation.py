@@ -98,7 +98,11 @@ def test_no_openmetadata_client_is_a_dependency() -> None:
 # rules diverge, and ``adapters/common/`` is deliberately not created until it is
 # clear what is genuinely common rather than merely similar.
 
-OPENMETADATA_MODULES = ("__init__", "coverage", "errors", "export", "fqn", "mapping", "validate")
+# The *offline* modules. ``__init__`` is deliberately absent: it is the package
+# façade and now re-exports the live path's names (``JWT_TOKEN_ENV`` among them),
+# so holding it to the offline rules would assert that the live path does not
+# exist rather than that it is contained.
+OPENMETADATA_MODULES = ("coverage", "errors", "export", "fqn", "mapping", "validate")
 
 
 def _openmetadata_module_paths() -> list[Path]:
@@ -119,20 +123,144 @@ def test_no_adapters_common_package_exists_yet() -> None:
     assert not (SRC / "adapters" / "common").exists()
 
 
-def test_the_openmetadata_adapter_opens_no_socket() -> None:
-    """Issue A is offline: no server, no network, no credentials."""
+def test_the_offline_openmetadata_modules_open_no_socket() -> None:
+    """The mapping and export path stay offline even though a live path now exists."""
     network = {"urllib", "http", "socket", "ssl", "asyncio", "requests", "httpx"}
     for path in _openmetadata_module_paths():
         for name in _imported_names(path):
             assert name.split(".")[0] not in network, f"{path.name} imports {name}"
 
 
-def test_no_openmetadata_module_names_a_live_endpoint_host() -> None:
-    """Endpoint *paths* are recorded for a future live path; hosts and schemes are not."""
+def test_no_offline_openmetadata_module_names_a_live_endpoint_host() -> None:
+    """Endpoint *paths* are recorded in the plan; hosts, schemes and credentials are not."""
     for path in _openmetadata_module_paths():
         text = path.read_text(encoding="utf-8")
         for fragment in ("http://", "https://localhost", "getpass", "TOKEN", "Authorization"):
             assert fragment not in text, f"{path.name} names {fragment!r}"
+
+
+# ---------------------------------------------------------------------------
+# The OpenMetadata live path's boundaries.
+# ---------------------------------------------------------------------------
+# The same three claims the DataHub live path is held to, enforced separately
+# rather than by sharing a helper: the two adapters must be free to diverge.
+
+OPENMETADATA_LIVE_MODULES = ("client", "ingest", "readback", "roundtrip", "normalize", "report")
+
+
+def _openmetadata_live_paths() -> list[Path]:
+    return [SRC / "adapters" / "openmetadata" / f"{name}.py" for name in OPENMETADATA_LIVE_MODULES]
+
+
+def test_the_openmetadata_live_path_never_reaches_for_a_privileged_artefact() -> None:
+    """``ingest-openmetadata`` and ``verify-om-ingestion`` consume an emitted export.
+
+    Verifying an observed export must need no privilege — that is the whole point
+    of having an observed export — so the live modules may not so much as *name* a
+    bundle reader, a defect ledger, a rule scope, a control partition, a scenario
+    or an expected finding, even to strengthen a leak probe.
+    """
+    for path in _openmetadata_live_paths():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Name | ast.Attribute):
+                continue
+            rendered = ast.unparse(node)
+            for surface in PRIVILEGED_SURFACES:
+                assert surface not in rendered, f"{path.name} reaches for {surface}: {rendered}"
+
+
+def test_the_openmetadata_live_path_imports_no_bundle_or_observed_module() -> None:
+    """A bundle is the *offline* exporter's input, not the live path's."""
+    for path in _openmetadata_live_paths():
+        for name in _imported_names(path):
+            assert ".bundle" not in name, f"{path.name} imports {name}"
+            assert ".observed" not in name, f"{path.name} imports {name}"
+            assert ".evaluation" not in name, f"{path.name} imports {name}"
+            assert ".comparison" not in name, f"{path.name} imports {name}"
+
+
+def test_only_the_openmetadata_client_opens_a_socket() -> None:
+    network = {"urllib", "http", "socket", "ssl", "asyncio", "requests", "httpx"}
+    for path in _openmetadata_live_paths():
+        if path.name == "client.py":
+            continue
+        for name in _imported_names(path):
+            assert name.split(".")[0] not in network, f"{path.name} imports {name}"
+
+
+def test_no_openmetadata_endpoint_path_appears_outside_the_client() -> None:
+    """Endpoint strings and authorization logic are the other half of the boundary.
+
+    ``mapping.py`` is exempt and stays exempt: the emitted plan carries an
+    ``endpoint`` annotation as *data*, which is part of the frozen Issue A export
+    contract. ``client.py`` deliberately does not read it — it owns the live paths
+    itself — so a stale annotation cannot mis-address a request.
+    """
+    for path in _openmetadata_live_paths():
+        if path.name == "client.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        for fragment in ("/api/v1/", "http://", "https://", "Authorization", "Bearer "):
+            assert fragment not in text, f"{path.name} names {fragment!r}"
+
+
+def test_the_two_live_paths_do_not_import_each_other() -> None:
+    for path in _openmetadata_live_paths():
+        for name in _imported_names(path):
+            assert "datahub" not in name.lower(), f"{path.name} imports {name}"
+
+
+def test_the_openmetadata_live_path_adds_no_dependency() -> None:
+    pyproject = (SRC.parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    runtime = pyproject.split("[dependency-groups]")[0].lower()
+    for package in ("openmetadata-ingestion", "requests", "httpx", "aiohttp", "urllib3"):
+        assert package not in runtime, f"{package} became a runtime dependency"
+
+
+def test_the_live_path_fabricates_no_table_column_or_test_entity() -> None:
+    """The Issue A decision stands: quality checks have no honest OpenMetadata target.
+
+    ``TestDefinition.entityType`` admits only ``TABLE`` and ``COLUMN`` while
+    DataSwamp datasets are Containers, so unlocking native quality tests would
+    mean inventing a Table. The live path must not do one level down what the
+    mapping refused to do.
+
+    Prose may discuss these — explaining *why* a thing is refused is the point of
+    the refusal. Executable code and short string literals may not name one, which
+    is what would be needed to build such a request.
+
+    ``report.py`` is out of scope and deliberately so: it can send nothing, and it
+    names these entities precisely to *declare them unsupported* in every emitted
+    report. A test that forbade that would be forbidding the disclosure.
+    """
+    forbidden = (
+        "createtable",
+        "createdatabase",
+        "createdatabaseschema",
+        "testdefinition",
+        "testsuite",
+        "testcase",
+        "createpipeline",
+        "datacontract",
+    )
+    for path in _openmetadata_live_paths():
+        if path.name == "report.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name | ast.Attribute):
+                rendered = ast.unparse(node).lower()
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                # A docstring is prose; every other string literal is a value
+                # that could reach a request body or a path.
+                if len(node.value) > 200:
+                    continue
+                rendered = node.value.lower()
+            else:
+                continue
+            for fragment in forbidden:
+                assert fragment not in rendered, f"{path.name} names {fragment!r}: {rendered}"
 
 
 def test_the_openmetadata_adapter_claims_no_verified_live_version() -> None:

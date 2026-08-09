@@ -45,7 +45,8 @@ and cannot be inflated by counting entities a rule never applied to.
 | Portable, checksummed bundles | `build-bundle` / `verify-bundle` | [bundles.md](docs/bundles.md) |
 | DataHub metadata export (offline) | `export-datahub` | [datahub.md](docs/datahub.md) |
 | DataHub live ingestion + round-trip | `ingest-datahub` / `verify-ingestion` | [datahub.md](docs/datahub.md) |
-| OpenMetadata export (offline only) | `export-openmetadata` | [openmetadata.md](docs/openmetadata.md) |
+| OpenMetadata export (offline) | `export-openmetadata` | [openmetadata.md](docs/openmetadata.md) |
+| OpenMetadata ingestion + round-trip | `ingest-openmetadata` / `verify-om-ingestion` | [openmetadata.md](docs/openmetadata.md) |
 | Reference baseline agents | `run-baseline` / `list-baselines` | [baselines.md](docs/baselines.md) |
 | The whole workflow, end to end | `demo` | below |
 
@@ -140,8 +141,24 @@ dataswamp export-openmetadata --bundle dist/benchmark --mode observed \
                               --output-dir export/openmetadata
 ```
 
-That command writes files and nothing else: there is no OpenMetadata ingestion
-command yet, and no plan has ever been loaded into a running instance. See
+That export can then be replayed into a running OpenMetadata and checked back,
+exactly as the DataHub one can. Credentials come from the environment only, and
+`--dry-run` performs no network activity at all:
+
+```bash
+export OPENMETADATA_HOST_PORT=http://localhost:8585/api
+dataswamp ingest-openmetadata --export-dir export/openmetadata --dry-run
+dataswamp ingest-openmetadata --export-dir export/openmetadata --yes
+dataswamp verify-om-ingestion --export-dir export/openmetadata \
+                              --output-dir generated/om-roundtrip
+```
+
+The verification reports four claims separately — completeness, fidelity,
+containment and, for an observed export, non-leakage of benchmark ground truth —
+and states its containment coverage per entity family rather than claiming it
+uniformly. **No plan has ever been loaded into a real OpenMetadata instance**:
+the whole live path is proved against a strict offline fake, and
+`VERIFIED_OPENMETADATA_VERSION` is `None`. See
 [docs/openmetadata.md](docs/openmetadata.md).
 
 Push that export into a running DataHub and prove the catalogue holds exactly
@@ -297,12 +314,12 @@ out-of-scope false positive rather than folded into the matrix.
 * DataHub live ingestion and round-trip validation ship, but the REST endpoints
   they use have not been verified against a pinned real DataHub release; live
   support is experimental and every round-trip report records that.
-* OpenMetadata support is **offline only**. The mapping and export are
-  deterministic and their payloads are validated against a vendored subset of
-  OpenMetadata's own JSON schemas, but nothing has ever been loaded into a
-  running OpenMetadata instance: there is no ingestion command, no client and no
-  canary, and `VERIFIED_OPENMETADATA_VERSION` is `None`. Schema validity is not
-  load success.
+* OpenMetadata ingestion and round-trip validation ship, but **no real
+  OpenMetadata release has ever accepted this export**. The request shapes were
+  read from OpenMetadata's own resource classes and the live path is proved end to
+  end against a strict offline fake — a contract simulator, not a server. There is
+  no canary, and `VERIFIED_OPENMETADATA_VERSION` is `None`. Schema validity is not
+  load success, and a green fake is not a green server.
 * Run comparison reports what changed between two scored runs; it applies no
   threshold and does not gate CI.
 

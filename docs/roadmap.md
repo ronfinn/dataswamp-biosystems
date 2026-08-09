@@ -170,6 +170,7 @@ remain future work.
 [#28]: https://github.com/ronfinn/dataswamp-biosystems/issues/28
 [#29]: https://github.com/ronfinn/dataswamp-biosystems/issues/29
 [#33]: https://github.com/ronfinn/dataswamp-biosystems/issues/33
+[#35]: https://github.com/ronfinn/dataswamp-biosystems/issues/35
 
 ### v0.2 — Metadata and Lineage Integrations
 
@@ -217,15 +218,23 @@ remain future work.
   OpenMetadata's `TestDefinition.entityType` admits only `TABLE` and `COLUMN` and
   emitting one for a Container would fabricate applicability.
 
-  **There is no live path and no compatibility claim.** Nothing has been loaded
-  into a running OpenMetadata; `VERIFIED_OPENMETADATA_VERSION` is `None` and stays
-  `None` until a real-server canary earns a point, per
-  [ADR 0006](adr/0006-compatibility-points-not-ranges.md). The whole adapter is
-  offline — no server, no network, no credentials and no catalogue-client
-  dependency ([ADR 0007](adr/0007-no-catalogue-client-dependency.md)) — with
-  emitted payloads validated against a vendored subset of OpenMetadata's own JSON
-  schemas. Live ingestion, round-trip validation and a real-server canary remain
-  future work. See [openmetadata.md](openmetadata.md).
+  **Live ingestion and round-trip validation have now landed too** ([#35]):
+  `dataswamp ingest-openmetadata` replays the emitted export in its emitted order
+  without remapping it, and `dataswamp verify-om-ingestion` reads the catalogue
+  back by fully-qualified name and reports completeness, fidelity, containment and
+  observed-mode non-leakage as four separate claims. Credentials are
+  environment-only, `--dry-run` opens no socket, and the whole path is testable
+  offline against a strict fake that validates requests against OpenMetadata's own
+  vendored schemas rather than against the client. Still no catalogue-client
+  dependency ([ADR 0007](adr/0007-no-catalogue-client-dependency.md)).
+
+  **There is still no compatibility claim.** Nothing has been loaded into a
+  running OpenMetadata; `VERIFIED_OPENMETADATA_VERSION` is `None` and stays `None`
+  until a real-server canary earns a point, per
+  [ADR 0006](adr/0006-compatibility-points-not-ranges.md). A green offline fake is
+  not evidence about a server — that is what the fake being a *contract simulator*
+  means. A pinned real-server canary, and the compatibility point it would earn,
+  remain future work. See [openmetadata.md](openmetadata.md).
 * OpenLineage event export
 * Neo4j graph export
 * Integration examples

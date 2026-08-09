@@ -29,6 +29,7 @@ from dataswamp_biosystems.adapters.datahub import (
 )
 from dataswamp_biosystems.adapters.openmetadata import (
     VERIFIED_OPENMETADATA_VERSION,
+    OpenMetadataClient,
     build_plan,
 )
 from dataswamp_biosystems.adapters.openmetadata import (
@@ -38,10 +39,35 @@ from dataswamp_biosystems.adapters.openmetadata import (
     build_source as build_openmetadata_source,
 )
 from dataswamp_biosystems.adapters.openmetadata import (
+    compare as compare_openmetadata,
+)
+from dataswamp_biosystems.adapters.openmetadata import (
+    execute_ingestion as execute_openmetadata_ingestion,
+)
+from dataswamp_biosystems.adapters.openmetadata import (
     export_openmetadata as run_openmetadata_export,
 )
 from dataswamp_biosystems.adapters.openmetadata import (
+    load_export as load_openmetadata_export,
+)
+from dataswamp_biosystems.adapters.openmetadata import (
+    plan_ingestion as plan_openmetadata_ingestion,
+)
+from dataswamp_biosystems.adapters.openmetadata import (
+    read_back as read_back_openmetadata,
+)
+from dataswamp_biosystems.adapters.openmetadata import (
     validate_plan as validate_openmetadata_plan,
+)
+from dataswamp_biosystems.adapters.openmetadata import (
+    write_roundtrip as write_openmetadata_roundtrip,
+)
+from dataswamp_biosystems.adapters.openmetadata.errors import (
+    OpenMetadataConfigError,
+    OpenMetadataTransportError,
+)
+from dataswamp_biosystems.adapters.openmetadata.ingest import (
+    LoadedExport as LoadedOpenMetadataExport,
 )
 from dataswamp_biosystems.baselines import (
     BASELINE_NAMES,
@@ -173,6 +199,7 @@ DEFAULT_BUNDLE_DIR = Path("dist") / "dataswamp-benchmark"
 DEFAULT_DATAHUB_EXPORT_DIR = Path("export") / "datahub"
 DEFAULT_OPENMETADATA_EXPORT_DIR = Path("export") / "openmetadata"
 DEFAULT_ROUNDTRIP_DIR = Path("generated") / "roundtrip"
+DEFAULT_OM_ROUNDTRIP_DIR = Path("generated") / "om-roundtrip"
 
 # The demo writes every layer, the bundle and the export beneath one directory,
 # so a new user has a single thing to look at — and a single thing to delete.
@@ -185,6 +212,7 @@ ESTATE_INPUT_LABEL = "estate input directory"
 EVALUATION_INPUT_LABEL = "evaluation input directory"
 BUNDLE_INPUT_LABEL = "benchmark bundle directory"
 DATAHUB_EXPORT_INPUT_LABEL = "DataHub export directory"
+OPENMETADATA_EXPORT_INPUT_LABEL = "OpenMetadata export directory"
 
 _LAYER_INPUT_LABELS: dict[Layer, str] = {
     Layer.TRUTH: TRUTH_INPUT_LABEL,
@@ -1621,6 +1649,205 @@ def verify_ingestion_command(
     if unavailable:
         typer.echo(
             "  extra-entity coverage unavailable for: " + ", ".join(unavailable),
+        )
+    if total or leaks:
+        raise typer.Exit(code=1)
+
+
+def _load_om_export_or_exit(export_dir: Path) -> LoadedOpenMetadataExport:
+    """Read and fully verify an emitted OpenMetadata export, or exit with code 2."""
+    try:
+        return load_openmetadata_export(export_dir)
+    except OpenMetadataConfigError as exc:
+        typer.echo(f"Could not read the OpenMetadata export: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+
+@app.command(name="ingest-openmetadata")
+def ingest_openmetadata_command(
+    export_dir: Annotated[
+        Path,
+        typer.Option("--export-dir", help="Directory containing an emitted OpenMetadata export."),
+    ] = DEFAULT_OPENMETADATA_EXPORT_DIR,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Report what would be sent. Performs no network activity."),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Confirm transmission to the configured catalogue."),
+    ] = False,
+    privileged_ack: Annotated[
+        bool,
+        typer.Option(
+            "--i-understand-this-is-ground-truth",
+            help="Required to transmit a privileged truth-mode export.",
+        ),
+    ] = False,
+) -> None:
+    """Replay an emitted OpenMetadata export into a live catalogue.
+
+    The export is verified first — every manifest digest, the declared mode and
+    its privilege flag, and the offline plan validator's full set of checks
+    including FQN uniqueness, reference closure and load ordering — and only then
+    replayed. Nothing is regenerated, no bundle is opened and no benchmark ground
+    truth is consulted: the emitted export is the whole input.
+
+    Replay preserves the emitted order exactly. OpenMetadata's model is
+    order-dependent — a container needs its parent, an extension key needs its
+    custom property, a lineage edge needs both endpoints — so the plan is never
+    sorted, grouped or batched for convenience. The transport resolves the
+    references the export declares as unresolvable offline, and changes nothing
+    else.
+
+    ``--dry-run`` performs **no network activity at all**. It reads and verifies
+    the export, builds the replay plan and reports it; it opens no socket and
+    makes no health or connectivity check.
+
+    Credentials are read from the environment only, never from the command line:
+    ``OPENMETADATA_HOST_PORT`` and, if your instance needs one,
+    ``OPENMETADATA_JWT_TOKEN``.
+
+    No OpenMetadata release has ever accepted this export: the request shapes were
+    read from upstream's resource classes and proved against an offline fake, and
+    no compatibility point is claimed.
+
+    Exit codes: 0 = replayed (or planned, for a dry run), 1 = the export is valid
+    but transmission was refused for want of confirmation, 2 = the export could
+    not be read or the catalogue could not be reached.
+    """
+    export = _load_om_export_or_exit(export_dir)
+    try:
+        plan = plan_openmetadata_ingestion(export)
+    except OpenMetadataConfigError as exc:
+        typer.echo(f"Cannot plan ingestion: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(f"OpenMetadata export {export_dir} (mode {export.mode.value}) verified.")
+    typer.echo(f"  operations: {len(plan.operations)}")
+    typer.echo(f"  to transmit: {plan.transmitted_count}")
+    typer.echo(f"  blocked (no honest OpenMetadata target): {plan.blocked_count}")
+    for kind, count in plan.counts_by_kind().items():
+        typer.echo(f"    {kind}: {count}")
+
+    if dry_run:
+        typer.echo("Dry run: nothing was transmitted and no connection was opened.")
+        return
+
+    if export.privileged:
+        typer.echo("", err=True)
+        typer.echo(
+            "PRIVILEGED EXPORT: this plan carries benchmark ground truth. Loading it into "
+            "a shared catalogue publishes the answer key.",
+            err=True,
+        )
+        if not privileged_ack:
+            typer.echo(
+                "Refusing to transmit a truth-mode export without "
+                "--i-understand-this-is-ground-truth.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+    if not yes:
+        typer.echo(
+            "Refusing to transmit without --yes: ingestion writes to a system outside this "
+            "repository.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        client = OpenMetadataClient.from_environment()
+        sent = execute_openmetadata_ingestion(plan, client)
+    except OpenMetadataConfigError as exc:
+        typer.echo(f"Cannot reach a catalogue: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except OpenMetadataTransportError as exc:
+        typer.echo(f"Ingestion failed: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(f"Replayed {sent} operation(s) to {client.endpoint}.")
+    typer.echo("Every write is a create-or-update, so re-running this command converges.")
+
+
+@app.command(name="verify-om-ingestion")
+def verify_om_ingestion_command(
+    export_dir: Annotated[
+        Path,
+        typer.Option("--export-dir", help="Directory containing the emitted OpenMetadata export."),
+    ] = DEFAULT_OPENMETADATA_EXPORT_DIR,
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Directory to write the round-trip report into."),
+    ] = DEFAULT_OM_ROUNDTRIP_DIR,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite a non-empty output directory."),
+    ] = False,
+) -> None:
+    """Read an OpenMetadata catalogue back and compare it against an emitted export.
+
+    Four claims are judged and reported separately: completeness (every emitted
+    operation that should materialise did), fidelity (every value the export sent
+    survives a normalization-equivalent readback), containment (no unexpected
+    DataSwamp-owned state within scopes where ownership can be proved) and — for
+    an observed export — non-leakage of benchmark ground truth.
+
+    Containment coverage is declared per entity family rather than claimed
+    uniformly, and reported as unavailable where DataSwamp ownership cannot be
+    established. An entity outside every ownership rule is somebody else's and is
+    never reported as a DataSwamp extra.
+
+    The export is the only statement of what should be there. No bundle, defect
+    ledger, rule scope, scenario, expected finding or control partition is opened,
+    so this command is unprivileged by construction.
+
+    Exit codes: 0 = all four claims pass, 1 = discrepancies or leak findings were
+    reported, 2 = the export could not be read, the catalogue could not be
+    reached, or an unsafe/non-empty output directory was given.
+    """
+    _prepare_output_dir_or_exit(
+        output_dir,
+        {
+            CONFIG_INPUT_LABEL: DEFAULT_CONFIG_DIR,
+            OPENMETADATA_EXPORT_INPUT_LABEL: export_dir,
+        },
+        force=force,
+    )
+    export = _load_om_export_or_exit(export_dir)
+
+    try:
+        client = OpenMetadataClient.from_environment()
+        readback = read_back_openmetadata(export, client)
+    except OpenMetadataConfigError as exc:
+        typer.echo(f"Cannot reach a catalogue: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except OpenMetadataTransportError as exc:
+        typer.echo(f"Readback failed: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    result = compare_openmetadata(export.records, readback, export.mode)
+    report = write_openmetadata_roundtrip(output_dir, result, export)
+
+    typer.echo(f"OpenMetadata round-trip report written to {output_dir}.")
+    for name, claim in report["claims"].items():
+        typer.echo(f"  {name}: {claim['status']}")
+    total = report["discrepancies"]["total"]
+    leaks = report["claims"]["non-leakage"]["findings"]
+    typer.echo(f"  discrepancies: {total}")
+    typer.echo(f"  leak findings: {leaks}")
+    unavailable = sorted(
+        family
+        for family, coverage in report["claims"]["containment"]["entity_family_coverage"].items()
+        if coverage == "unavailable"
+    )
+    if unavailable:
+        typer.echo("  extra-entity coverage unavailable for: " + ", ".join(unavailable))
+    if VERIFIED_OPENMETADATA_VERSION is None:
+        typer.echo(
+            "  No live OpenMetadata compatibility point is claimed: no pinned real-server "
+            "canary has run against this adapter."
         )
     if total or leaks:
         raise typer.Exit(code=1)
