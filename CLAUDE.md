@@ -68,7 +68,13 @@ ingest-datahub` transmits it to a running catalogue without remapping or
 reinterpreting it, and `dataswamp verify-ingestion` reads it back and reports
 completeness, fidelity, containment and observed-mode non-leakage as four
 separate claims, verified against a pinned real DataHub Quickstart by the
-optional, non-blocking `live-datahub` workflow), and
+optional, non-blocking `live-datahub` workflow), the **OpenMetadata adapter**
+(a deterministic, *offline-only* load-plan emitter in
+`src/dataswamp_biosystems/adapters/openmetadata/` via `dataswamp
+export-openmetadata`, built on OpenMetadata's own native model — whole-entity
+`Create<Entity>` requests, hierarchical FQN identity, load-order-aware reference
+closure — with a first-class `mapping-coverage.json`; there is **no** live path,
+no client and no verified compatibility point), and
 the **release surface** (a `dataswamp demo` command running the whole workflow
 into one directory, committed example submissions under `examples/predictions/`,
 and the canonical `config/` tree plus those examples shipped *inside* the
@@ -76,16 +82,19 @@ distribution so an installed package needs no checkout). See
 `docs/domain-model.md`, `docs/truth-graph-schema.md`, `docs/file-generation.md`,
 `docs/observed-state.md`, `docs/difficulty-tiers.md`,
 `docs/adversarial-scenarios.md`, `docs/evaluation.md`, `docs/bundles.md`,
-`docs/datahub.md`, `docs/run-comparison.md`, and `docs/public-api.md`.
+`docs/datahub.md`, `docs/openmetadata.md`, `docs/run-comparison.md`, and
+`docs/public-api.md`.
 
 All five generation layers, the comparison layer and the bundle packager are
 deliberately catalogue-independent. The observed layer never mutates the truth
 graph, the evaluation layer mutates nothing at all, the comparison layer writes
 nothing into either run it reads, and the bundle layer copies emitted bytes
-without reinterpreting them. The DataHub adapter is the *only* place a
-catalogue is named, it consumes bundles rather than generators, and no DataHub
-package is a dependency. There is no scenario-pack layer and no assessment
-agents yet.
+without reinterpreting them. The two adapters are the *only* place a
+catalogue is named, they consume bundles rather than generators, and no catalogue
+package is a dependency. The adapters are independent of each other and there is
+deliberately **no** `adapters/common/` — that judgement waits until it is clear
+what is genuinely common rather than merely similar. There is no scenario-pack
+layer and no assessment agents yet.
 
 Do not implement future-milestone capabilities (below) speculatively. Add
 them only when a task explicitly scopes them, and do not create placeholder
@@ -113,6 +122,7 @@ uv run dataswamp verify-bundle dist/benchmark      # verify a bundle end to end
 uv run dataswamp export-datahub --bundle dist/benchmark --mode observed --output-dir export/datahub
 uv run dataswamp ingest-datahub --export-dir export/datahub --dry-run   # plan only; opens no socket
 uv run dataswamp verify-ingestion --export-dir export/datahub --output-dir generated/roundtrip
+uv run dataswamp export-openmetadata --bundle dist/benchmark --mode observed --output-dir export/openmetadata
 uv run dataswamp demo --output-dir ./dataswamp-demo  # the whole workflow, end to end
 uv run pytest                  # run tests
 uv run ruff check .            # lint
@@ -218,6 +228,23 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     marked as such in tags, custom properties and the export manifest. Emits
     schemas directly rather than depending on `acryl-datahub`. See
     `docs/datahub.md`.
+  - `adapters/openmetadata/` — the deterministic, **offline-only** OpenMetadata
+    adapter: hierarchical FQN identity (`fqn.py`), the native-model mapping and
+    ordered load plan (`mapping.py`), the mapping-coverage contract
+    (`coverage.py`), the file emitter (`export.py`) and the offline plan
+    validator (`validate.py`). It consumes a verified bundle through
+    `BundleReader` and nothing else, and `observed` mode reads
+    `observed-graph.json` *alone*, exactly as the DataHub adapter does; `truth`
+    mode is privileged and marked three independent ways (tag, reserved
+    `dataswampTruth*` properties, manifest flag). It is **not** a copy of the
+    entity/aspect architecture: OpenMetadata models whole entities with
+    hierarchical FQNs, so the plan is one `Create<Entity>` per entity in a
+    contractually-fixed load order, with server-assigned-UUID references emitted
+    as a declared reference block rather than fabricated. Emitted payloads are
+    validated offline against a vendored subset of OpenMetadata's own JSON
+    schemas under `tests/adapters/openmetadata/schemas/`; `jsonschema` is a dev
+    dependency only. See `docs/openmetadata.md` and
+    `docs/adr/0007-no-catalogue-client-dependency.md`.
   - `examples.py` — resolves the committed example submissions, preferring a
     checkout's `examples/predictions/`, then the copy force-included into the
     distribution, then the source tree (for an editable install run from
@@ -238,7 +265,19 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
   contents, and scoring semantics; `tests/bundle/` and `tests/adapters/` cover
   packaging, verification and tamper detection, the reader API, URN determinism,
   the DataHub mapping (pinned by committed fixtures under
-  `tests/adapters/fixtures/`), the privilege boundary, and CLI commands. Shared
+  `tests/adapters/fixtures/`), the privilege boundary, and CLI commands.
+  `tests/adapters/openmetadata/` covers the OpenMetadata adapter: FQN injectivity
+  and escaping, the mapping and what it refuses to invent, the offline plan
+  validator, the export's determinism and manifest, the CLI, and the privilege
+  boundary — including a test that makes every privileged bundle artefact
+  unreadable and asserts an observed export still succeeds. Its payloads are
+  validated against the vendored upstream schemas in
+  `tests/adapters/openmetadata/schemas/` (provenance in `PROVENANCE.md`), and its
+  plan fixtures live in `tests/adapters/openmetadata/fixtures/`. Neither the
+  schemas nor the fixtures are ever rewritten by `pytest` — regenerate them
+  deliberately with `uv run --frozen python
+  scripts/update_openmetadata_fixtures.py --schemas|--fixtures --confirm
+  --reason ...`. Shared
   benchmark fixtures live in `tests/conftest.py` (including `real_observed_dir`,
 the canonical observed state, generated once per session).
 `tests/test_release_surface.py`, `tests/test_examples.py` and
@@ -342,15 +381,77 @@ referential integrity, not just happy-path execution.
   registry, the observed state or the answer key.
 - **Never difference two runs from different universes.** Compatibility is a
   refusal, not a warning, and the error must name every differing field.
-- **Never let a core layer import or name DataHub.** `company/`, `truth/`,
+- **Never let a core layer import or name a catalogue.** `company/`, `truth/`,
   `estate/`, `observed/`, `evaluation/`, `comparison/` and `bundle/` must stay
-  catalogue-independent; the adapter depends on them, never the reverse.
-  `tests/adapters/test_isolation.py` enforces this.
-- **Never add `acryl-datahub` (or another catalogue client) as a dependency.**
-  The adapter emits documented payload shapes and is testable with no server, no
-  network and no credentials; keep it that way.
-- **Never leak ground truth into an observed DataHub export.** The observed
-  source graph reads the observed graph alone; do not widen it.
+  catalogue-independent — neither DataHub nor OpenMetadata; the adapters depend
+  on them, never the reverse. `tests/adapters/test_isolation.py` enforces this.
+- **Never claim a live OpenMetadata compatibility point.**
+  `VERIFIED_OPENMETADATA_VERSION` is `None` and stays `None` until a real-server
+  canary has actually run. Reading, vendoring or refreshing OpenMetadata's JSON
+  schemas establishes nothing about a running server, and neither does schema
+  validity: a payload can satisfy every schema and still be refused. The declared
+  `OPENMETADATA_MODEL_TARGET_RANGE` is a *target* for the payload shape, never
+  evidence — the same rule ADR 0006 imposes on DataHub, applied before there is
+  anything to be tempted by. `OPENMETADATA_SCHEMA_TARGET` and
+  `OPENMETADATA_SCHEMA_COMMIT` must match `PROVENANCE.md` and move with the
+  vendored files.
+- **Never invent a Table, column, database, Pipeline, PipelineService or
+  DataContract in the OpenMetadata adapter.** DataSwamp holds no honest
+  relational column metadata, no orchestrated pipeline and nothing that
+  constitutes a governed contract, so each of those would be a fabricated fact in
+  a catalogue. Datasets are Containers; contract and quality facts are custom
+  properties; scientific provenance is `unsupported` with a documented upgrade
+  path. Do not emit a `TestDefinition` either — its `entityType` enum admits only
+  `TABLE` and `COLUMN`, and asserting table scope for a Container is the same
+  fabrication one level removed.
+- **Never let an OpenMetadata identity depend on mutable metadata or a
+  server-assigned UUID.** An FQN is a pure function of stable DataSwamp ids; a
+  title, description, owner, checksum, version or quality status must never feed
+  one, or a defect would fork the estate on reload. Root-level identities stay
+  namespaced, because OpenMetadata's Domain/DataProduct/Team/Glossary/
+  Classification namespaces are global.
+- **Never widen the OpenMetadata reference allow-list.** Exactly three references
+  may resolve outside an export — the built-in `string` property type and the
+  `container` and `dataProduct` entity types. Add no general "external reference"
+  flag; reference closure must stay a closed property, and a target must appear
+  *earlier* in the plan, not merely somewhere in it.
+- **Never let a coverage row lose its reason, or a concept go unclassified.**
+  `mapping-coverage.json` is a contract, not documentation: `build_coverage`
+  refuses a report that misses a declared concept or counts an undeclared one,
+  and the semantic classification must never be replaced by the operational
+  state — they answer different questions. Never soften `lossy` to `reasonable`
+  to make a table look better; the stewardship loss in particular is the thing
+  the report exists to make visible.
+- **Never relax OpenMetadata schema validation to make a payload pass.**
+  `additionalProperties: false` stands, enums stand, and an unresolvable `$ref`
+  means a newly emitted field needs reviewing and its schema vendoring — never
+  that validation should be skipped. Vendor the minimum reachable subset, never
+  the tree, and never let `pytest` rewrite the schemas or the fixtures:
+  regenerate deliberately with `uv run --frozen python
+  scripts/update_openmetadata_fixtures.py --schemas|--fixtures --confirm
+  --reason ...`.
+- **Never create `adapters/common/` yet.** The two adapters duplicate an
+  id-escaping codec and an atomic writer on purpose; with two examples it is not
+  yet clear which similarities are structural. They must not import each other,
+  and `tests/adapters/test_isolation.py` enforces both.
+- **Never give the OpenMetadata adapter a socket, a client or a live command.**
+  Issue A is offline: no network, no credentials, no `ingest-openmetadata`, no
+  `verify-om-ingestion`. Adding one is a new milestone with its own evidence
+  requirements, not a convenience.
+- **Never add `acryl-datahub`, `openmetadata-ingestion` (or another catalogue
+  client) as a dependency.**
+  Both adapters emit documented payload shapes and are testable with no server,
+  no network and no credentials; keep it that way. `jsonschema` validates
+  OpenMetadata payloads against vendored upstream schemas and is a **dev**
+  dependency — it must never become a runtime one. See
+  `docs/adr/0007-no-catalogue-client-dependency.md`, which is worded as the
+  current policy rather than an irreversible law: a future catalogue that can
+  only be integrated responsibly through an official SDK should supersede that
+  ADR, not be worked around.
+- **Never leak ground truth into an observed catalogue export.** In both
+  adapters the observed source graph reads `observed-graph.json` alone; do not
+  widen it. An observed OpenMetadata plan must carry no `dataswampTruth*`
+  property and no privileged tag, and a truth plan must carry all three markers.
 - **Never let the live DataHub path open a privileged artefact.** `ingest-datahub`
   and `verify-ingestion` consume an emitted export; they must never read the
   bundle, defect ledgers, rule scope, scenarios, expected findings or

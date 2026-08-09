@@ -27,7 +27,7 @@ generate-files      validate-files
 inject-defects      validate-observed
 evaluate            compare-runs
 build-bundle        verify-bundle
-export-datahub
+export-datahub      export-openmetadata
 ingest-datahub      verify-ingestion
 demo
 ```
@@ -57,6 +57,8 @@ not import Python.
 | Bundle manifest + checksums | `bundle_schema_version` |
 | DataHub Metadata Change Proposals | `DATAHUB_MODEL_VERSION` |
 | DataHub round-trip reports | `roundtrip_schema_version` (currently `1`) |
+| OpenMetadata load plan | `OPENMETADATA_SCHEMA_TARGET` (payload) + `OM_ADAPTER_VERSION` (plan) |
+| OpenMetadata mapping coverage | `coverage_schema_version` (currently `1`) |
 
 Each declares its own version, and a reader that meets an unsupported version is
 told so rather than best-effort parsing it.
@@ -106,6 +108,10 @@ from dataswamp_biosystems.adapters.datahub import (
     compare, write_roundtrip, ROUNDTRIP_SCHEMA_VERSION, NORMALIZATION_VERSION,
 )
 
+# Emitting an OpenMetadata load plan from a verified bundle.
+# (Experimental and offline-only — see the OpenMetadata entry below.)
+from dataswamp_biosystems.adapters.openmetadata import ExportMode, export_openmetadata
+
 # The package version.
 from dataswamp_biosystems import __version__
 ```
@@ -154,6 +160,16 @@ Usable and documented, but the shapes are still settling:
   pinned real DataHub release, and every emitted report says so in its
   `live_support` field. See [docs/datahub.md](datahub.md) and
   [ADR 0005](adr/0005-direct-rest-datahub-client.md).
+* **The OpenMetadata adapter** — `export_openmetadata`, `build_plan`,
+  `build_source`, `validate_plan`, `SourceGraph`, `ExportPlan`, `PlanRecord`,
+  `Reference`, and the coverage model (`Fidelity`, `State`, `Concept`,
+  `ConceptCounts`, `CONCEPTS`, `build_coverage`). The emitted plan's shape is
+  versioned by `OM_ADAPTER_VERSION` and the payload shapes by
+  `OPENMETADATA_SCHEMA_TARGET`; the coverage report by
+  `coverage_schema_version`. **Offline only**: there is no ingestion command, no
+  client and no network. `VERIFIED_OPENMETADATA_VERSION` is `None` and every
+  emitted manifest says so. See [docs/openmetadata.md](openmetadata.md) and
+  [ADR 0007](adr/0007-no-catalogue-client-dependency.md).
 * **`company.load_config` and the config models** — the YAML schema is versioned
   and stable; the Python model classes are not yet frozen.
 * **`paths.ensure_safe_output_dir`** — the containment policy is deliberately
@@ -164,7 +180,8 @@ Usable and documented, but the shapes are still settling:
 Not public, whatever their import path suggests: everything under
 `truth.serialize`, `truth.writer`, `estate.formats`, `observed.engine` internals,
 `observed.index`, `evaluation.engine` internals, `bundle.builder`,
-`adapters.datahub.mapping` internals, and any module or name prefixed with `_`.
+`adapters.datahub.mapping` internals, `adapters.openmetadata.mapping` internals,
+and any module or name prefixed with `_`.
 
 Depending on these is not a bug report we can act on.
 
@@ -188,6 +205,12 @@ Stated plainly, so nobody builds on a promise that was never made:
   field named. Scores are only comparable within one
   generator version, config fingerprint, profile and seed. The provenance and
   bundle manifest record all four so a comparison can be checked.
+* **A verified live OpenMetadata compatibility point.** Stronger than the DataHub
+  caveat below: there is no live OpenMetadata path *at all*. `export-openmetadata`
+  writes files and nothing else, no plan has ever been loaded into a running
+  OpenMetadata instance, and `VERIFIED_OPENMETADATA_VERSION` is `None`. The
+  declared `>=1.9,<2` model range is a target for the emitted payload shape, not
+  tested evidence. Schema validity is not load success.
 * **A verified live DataHub compatibility point.** `ingest-datahub` and
   `verify-ingestion` do talk to a server, and round-trip validation is
   implemented and offline-testable — but the REST endpoints they use have not

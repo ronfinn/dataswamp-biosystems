@@ -1,0 +1,272 @@
+{
+  "classifications": {
+    "exact": "OpenMetadata holds the same concept with the same meaning.",
+    "lossy": "A distinction DataSwamp draws does not survive into native OpenMetadata fields.",
+    "reasonable": "No identical concept exists; a defensible one is used and the source concept stays recoverable.",
+    "unsupported": "Deliberately not mapped."
+  },
+  "concepts": [
+    {
+      "classification": "reasonable",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 1,
+      "openmetadata_target": "storageService",
+      "operational_state": "materialized_in_entity_export",
+      "reason": "OpenMetadata has no 'organisation' entity that owns a container tree, so the fictional company becomes the StorageService rooting the hierarchy. serviceType is CustomStorage and no storage connection is fabricated, because the estate is not actually in S3, ADLS or GCS.",
+      "source_concept": "company",
+      "source_record_count": 1
+    },
+    {
+      "classification": "reasonable",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 1,
+      "openmetadata_target": "domain",
+      "operational_state": "materialized_in_entity_export",
+      "reason": "A research programme is a governance grouping, which is what a Domain is. OpenMetadata requires a domainType from a fixed taxonomy; Source-aligned is the closest honest member and the source concept is preserved in dataswampEntityType.",
+      "source_concept": "programme",
+      "source_record_count": 1
+    },
+    {
+      "classification": "reasonable",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 1,
+      "openmetadata_target": "container",
+      "operational_state": "materialized_in_entity_export",
+      "reason": "A study is a scientific grouping OpenMetadata has no entity for. It becomes an intermediate Container so the dataset hierarchy stays navigable; that it was a study, not a folder, is preserved in dataswampEntityType.",
+      "source_concept": "study",
+      "source_record_count": 1
+    },
+    {
+      "classification": "reasonable",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 2,
+      "openmetadata_target": "container",
+      "operational_state": "materialized_in_entity_export",
+      "reason": "Container rather than Table: DataSwamp holds no honest relational column metadata, so no Table, column, database or schema is invented to hold one.",
+      "source_concept": "dataset",
+      "source_record_count": 2
+    },
+    {
+      "classification": "reasonable",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 2,
+      "openmetadata_target": "container",
+      "operational_state": "materialized_in_entity_export",
+      "reason": "A leaf Container beneath its dataset. OpenMetadata's native size is in KB, so it is derived conservatively by flooring the byte count; the exact byte count is preserved in dataswampPhysicalBytes. A file_format outside OpenMetadata's fileFormat enum is left unset rather than coerced into a wrong member.",
+      "source_concept": "physical_file",
+      "source_record_count": 2
+    },
+    {
+      "classification": "reasonable",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 1,
+      "openmetadata_target": "dataProduct",
+      "operational_state": "materialized_in_entity_export",
+      "reason": "OpenMetadata's DataProduct is the same idea, but its name is globally unique rather than scoped by domain, so the programme is folded into the identity.",
+      "source_concept": "data_product",
+      "source_record_count": 1
+    },
+    {
+      "classification": "reasonable",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 1,
+      "openmetadata_target": "dataProduct.assets",
+      "operational_state": "deferred_live_write",
+      "reason": "Asset attachment is a bulk-assets call against an already-created data product and its already-created components, so it is emitted as an ordered plan record rather than folded into the create payload.",
+      "source_concept": "data_product_components",
+      "source_record_count": 2
+    },
+    {
+      "classification": "reasonable",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 3,
+      "openmetadata_target": "team",
+      "operational_state": "materialized_in_entity_export",
+      "reason": "teamType Group is the only member that carries no organisational-hierarchy claim; DataSwamp teams have no parent/child structure to assert.",
+      "source_concept": "team",
+      "source_record_count": 3
+    },
+    {
+      "classification": "reasonable",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 3,
+      "openmetadata_target": "owners",
+      "operational_state": "materialized_in_entity_export",
+      "reason": "A DataSwamp owner is a team, and OpenMetadata owners accept a team reference. The reference needs a server-assigned UUID, so it is emitted as a declared reference resolved at load time rather than fabricated inline.",
+      "source_concept": "ownership",
+      "source_record_count": 3
+    },
+    {
+      "classification": "lossy",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 6,
+      "openmetadata_target": "custom property dataswampStewardRefs",
+      "operational_state": "materialized_in_entity_export",
+      "reason": "OpenMetadata draws no owner/steward role distinction. Flattening stewards into owners would destroy exactly the distinction this benchmark tests for, so they are kept separate — but only as a custom property. The native experts field is not a home for them: it takes user login names, and DataSwamp stewards are teams. A consumer reading only native OpenMetadata fields will not see stewardship at all.",
+      "source_concept": "stewardship",
+      "source_record_count": 6
+    },
+    {
+      "classification": "reasonable",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 7,
+      "openmetadata_target": "glossary",
+      "operational_state": "materialized_in_entity_export",
+      "reason": "A controlled vocabulary is a flat term list; a Glossary is the same shape but carries review workflow this project does not model.",
+      "source_concept": "controlled_vocabulary",
+      "source_record_count": 7
+    },
+    {
+      "classification": "reasonable",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 9,
+      "openmetadata_target": "glossaryTerm",
+      "operational_state": "materialized_in_entity_export",
+      "reason": "Term identity and membership survive exactly; the definition text is generated rather than authored, because the source vocabulary carries none.",
+      "source_concept": "vocabulary_term",
+      "source_record_count": 9
+    },
+    {
+      "classification": "reasonable",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 4,
+      "openmetadata_target": "tag",
+      "operational_state": "materialized_in_entity_export",
+      "reason": "Coarse browse facets become Tags under a single dataswamp Classification. The precise controlled-vocabulary values remain glossary terms, so the two do not duplicate each other.",
+      "source_concept": "facet_tag",
+      "source_record_count": 4
+    },
+    {
+      "classification": "lossy",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 1,
+      "openmetadata_target": "custom properties dataswampContract*",
+      "operational_state": "materialized_in_entity_export",
+      "reason": "OpenMetadata has a DataContract entity, but populating it honestly needs schema and test-suite semantics DataSwamp does not contain. Contract id, version, schema reference and SLA are preserved as custom properties instead; the contract's status as a governed agreement is not represented.",
+      "source_concept": "data_contract",
+      "source_record_count": 1
+    },
+    {
+      "classification": "reasonable",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 1,
+      "openmetadata_target": "lineage edge",
+      "operational_state": "deferred_live_write",
+      "reason": "Dataset-to-dataset edges map to OpenMetadata lineage. The edge endpoints are EntityReferences needing server-assigned UUIDs, so edges are emitted as a plan. OpenMetadata's edge model has no typed-relationship field to hold DataSwamp's edge_type, so the type is carried in the edge description rather than asserted as a native relationship kind.",
+      "source_concept": "dataset_lineage",
+      "source_record_count": 1
+    },
+    {
+      "classification": "exact",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 2,
+      "openmetadata_target": "container.parent",
+      "operational_state": "materialized_in_entity_export",
+      "source_concept": "file_containment",
+      "source_record_count": 2
+    },
+    {
+      "classification": "unsupported",
+      "deliberately_dropped_count": 1,
+      "emitted_record_count": 0,
+      "openmetadata_target": null,
+      "operational_state": "deliberately_not_mapped",
+      "reason": "OpenMetadata's TestDefinition.entityType is an enum of exactly TABLE and COLUMN, so every TestDefinition would have to assert table scope for an entity that is a Container. Since no Table is invented, emitting TestDefinition/TestSuite/TestCase would mean fabricating applicability. The check facts are preserved verbatim in the dataswampQualityChecks custom property. Upgrade path: if a future domain pack gives datasets honest column-level schema, they can become Tables and the data- quality mapping becomes available without changing identity.",
+      "source_concept": "quality_check",
+      "source_record_count": 1
+    },
+    {
+      "classification": "unsupported",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 1,
+      "openmetadata_target": null,
+      "operational_state": "deferred_live_write",
+      "reason": "A TestCaseResult must name a TestCase, and no TestCase is created for the reason above. Results are emitted into test-results.jsonl as an explicitly blocked plan so the facts and the blocker travel together rather than disappearing.",
+      "source_concept": "quality_check_result",
+      "source_record_count": 1
+    },
+    {
+      "classification": "unsupported",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 0,
+      "openmetadata_target": null,
+      "operational_state": "deliberately_not_mapped",
+      "reason": "A study subject is scientific provenance, not catalogue metadata. OpenMetadata has no entity for it and synthesizing one would put fictional participants into a data catalogue. Upgrade path: a future OpenLineage or graph export.",
+      "source_concept": "subject",
+      "source_record_count": 0
+    },
+    {
+      "classification": "unsupported",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 0,
+      "openmetadata_target": null,
+      "operational_state": "deliberately_not_mapped",
+      "reason": "Scientific provenance with no catalogue analogue; see subject.",
+      "source_concept": "biospecimen",
+      "source_record_count": 0
+    },
+    {
+      "classification": "unsupported",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 0,
+      "openmetadata_target": null,
+      "operational_state": "deliberately_not_mapped",
+      "reason": "Scientific provenance with no catalogue analogue; see subject.",
+      "source_concept": "assay",
+      "source_record_count": 0
+    },
+    {
+      "classification": "unsupported",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 0,
+      "openmetadata_target": null,
+      "operational_state": "deliberately_not_mapped",
+      "reason": "OpenMetadata's Pipeline entity models an orchestrated data pipeline under a PipelineService. An instrument acquisition is neither, and inventing a PipelineService for it would put a fictional platform connection into the catalogue. The producing run id is preserved on each file container. Upgrade path: an OpenLineage run-event export, where a run is a first-class concept.",
+      "source_concept": "instrument_run",
+      "source_record_count": 0
+    },
+    {
+      "classification": "unsupported",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 0,
+      "openmetadata_target": null,
+      "operational_state": "deliberately_not_mapped",
+      "reason": "Closer to OpenMetadata's Pipeline than an instrument run is, but still needs a fabricated PipelineService with a connection that does not exist. Deferred to the same OpenLineage upgrade path rather than approximated.",
+      "source_concept": "pipeline_run",
+      "source_record_count": 0
+    },
+    {
+      "classification": "unsupported",
+      "deliberately_dropped_count": 0,
+      "emitted_record_count": 0,
+      "openmetadata_target": null,
+      "operational_state": "deliberately_not_mapped",
+      "reason": "Lineage edges whose endpoints are subjects, biospecimens, assays or runs cannot be emitted, because neither endpoint exists in the export. Counted here so the gap between DataSwamp's lineage graph and the catalogue's is visible.",
+      "source_concept": "non_dataset_lineage",
+      "source_record_count": 0
+    }
+  ],
+  "coverage_schema_version": 1,
+  "operational_states": {
+    "deferred_live_write": "Emitted as a plan for a later live write, not as an entity.",
+    "deliberately_not_mapped": "Emitted nowhere; recorded so the omission is counted.",
+    "materialized_in_entity_export": "Emitted as entity payloads in this export."
+  },
+  "totals": {
+    "by_classification": {
+      "exact": 1,
+      "lossy": 2,
+      "reasonable": 13,
+      "unsupported": 8
+    },
+    "by_operational_state": {
+      "deferred_live_write": 3,
+      "deliberately_not_mapped": 7,
+      "materialized_in_entity_export": 14
+    },
+    "concepts": 24,
+    "deliberately_dropped_records": 1,
+    "emitted_records": 46,
+    "source_records": 48
+  }
+}

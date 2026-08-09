@@ -36,6 +36,11 @@ dataswamp = "dataswamp_biosystems.cli:main"
 [dependency-groups]
 dev = [
     "pytest>=8",
+    # Test-only: validates the OpenMetadata adapter's emitted payloads against the
+    # vendored upstream JSON schemas. Deliberately NOT a runtime dependency — the
+    # adapter emits documented shapes and the package installs no catalogue
+    # client. See docs/adr/0007-no-catalogue-client-dependency.md.
+    "jsonschema>=4.23",
     "ruff>=0.8",
     "mypy>=1.13",
     "pre-commit>=4",

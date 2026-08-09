@@ -27,6 +27,22 @@ from dataswamp_biosystems.adapters.datahub import (
     validate_export,
     write_roundtrip,
 )
+from dataswamp_biosystems.adapters.openmetadata import (
+    VERIFIED_OPENMETADATA_VERSION,
+    build_plan,
+)
+from dataswamp_biosystems.adapters.openmetadata import (
+    ExportMode as OpenMetadataExportMode,
+)
+from dataswamp_biosystems.adapters.openmetadata import (
+    build_source as build_openmetadata_source,
+)
+from dataswamp_biosystems.adapters.openmetadata import (
+    export_openmetadata as run_openmetadata_export,
+)
+from dataswamp_biosystems.adapters.openmetadata import (
+    validate_plan as validate_openmetadata_plan,
+)
 from dataswamp_biosystems.baselines import (
     BASELINE_NAMES,
     BaselineError,
@@ -155,6 +171,7 @@ BASELINE_OUTPUT_LABEL = "baseline submission file"
 
 DEFAULT_BUNDLE_DIR = Path("dist") / "dataswamp-benchmark"
 DEFAULT_DATAHUB_EXPORT_DIR = Path("export") / "datahub"
+DEFAULT_OPENMETADATA_EXPORT_DIR = Path("export") / "openmetadata"
 DEFAULT_ROUNDTRIP_DIR = Path("generated") / "roundtrip"
 
 # The demo writes every layer, the bundle and the export beneath one directory,
@@ -1334,6 +1351,93 @@ def export_datahub_command(
     typer.echo(f"  aspects: {counts['aspects']}")
     for entity_type, count in counts["by_entity_type"].items():
         typer.echo(f"    {entity_type}: {count}")
+
+
+@app.command(name="export-openmetadata")
+def export_openmetadata_command(
+    bundle_dir: Annotated[
+        Path,
+        typer.Option("--bundle", help="Directory containing a benchmark bundle."),
+    ] = DEFAULT_BUNDLE_DIR,
+    mode: Annotated[
+        OpenMetadataExportMode,
+        typer.Option(
+            "--mode",
+            help="observed = what an agent under test may see; truth = privileged ground truth.",
+        ),
+    ] = OpenMetadataExportMode.OBSERVED,
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Directory to write the OpenMetadata export into."),
+    ] = DEFAULT_OPENMETADATA_EXPORT_DIR,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite a non-empty output directory."),
+    ] = False,
+) -> None:
+    """Emit a deterministic OpenMetadata load plan from a verified benchmark bundle.
+
+    No OpenMetadata server, token or network access is involved: the command
+    writes the ordered ``Create<Entity>`` plan, the lineage and deferred-result
+    plans, and the mapping-coverage report. The emitted JSONL is the interchange
+    contract — there is no ingestion command yet, and this project has never
+    loaded the plan into a running OpenMetadata instance, so no live
+    compatibility is claimed.
+
+    ``--mode observed`` (the default) is built from the observed catalogue graph
+    alone and contains no ground truth. ``--mode truth`` is a privileged export
+    for benchmark administration: it is tagged, propertied and manifested as such.
+
+    ``output_dir`` is replaced wholesale, so it may not be, contain, or sit
+    inside the bundle it reads.
+
+    Exit codes: 0 = written, 1 = the emitted plan failed validation,
+    2 = the bundle could not be read or an unsafe/non-empty output directory was
+    given.
+    """
+    _prepare_output_dir_or_exit(
+        output_dir,
+        {CONFIG_INPUT_LABEL: DEFAULT_CONFIG_DIR, BUNDLE_INPUT_LABEL: bundle_dir},
+        force=force,
+    )
+
+    # Validate the plan before anything is written, so a mapping fault never
+    # replaces a previous, sound export.
+    try:
+        with BundleReader.open(bundle_dir) as reader:
+            problems = validate_openmetadata_plan(
+                build_plan(build_openmetadata_source(reader, mode))
+            )
+    except BundleConfigError as exc:
+        typer.echo(f"Could not read the bundle: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except BundleValidationError as exc:
+        typer.echo(f"Bundle is invalid — {len(exc.issues)} issue(s):", err=True)
+        for issue in exc.issues:
+            typer.echo(f"  - {issue.render()}", err=True)
+        raise typer.Exit(code=2) from exc
+    if problems:
+        typer.echo(f"OpenMetadata export is invalid — {len(problems)} problem(s):", err=True)
+        for problem in problems:
+            typer.echo(f"  - {problem}", err=True)
+        raise typer.Exit(code=1)
+
+    manifest = run_openmetadata_export(bundle_dir, output_dir, mode=mode)
+    counts = manifest["counts"]
+    typer.echo(f"OpenMetadata export written to {output_dir} (mode {manifest['mode']}).")
+    if manifest["privileged"]:
+        typer.echo("  PRIVILEGED: this export carries benchmark ground truth.")
+    typer.echo(f"  plan records: {counts['records']}")
+    typer.echo(f"  custom properties: {counts['custom_properties']}")
+    typer.echo(f"  entities: {counts['entities']}")
+    typer.echo(f"  lineage edges: {counts['lineage_edges']}")
+    typer.echo(f"  deferred test results: {counts['deferred_test_results']}")
+    if VERIFIED_OPENMETADATA_VERSION is None:
+        typer.echo(
+            "  No live OpenMetadata compatibility point is claimed: this plan has never "
+            "been loaded into a running instance by this project."
+        )
+    typer.echo(f"  mapping coverage: {output_dir / 'mapping-coverage.json'}")
 
 
 def _load_export_or_exit(export_dir: Path) -> LoadedExport:
