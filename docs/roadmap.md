@@ -169,6 +169,7 @@ remain future work.
 [#27]: https://github.com/ronfinn/dataswamp-biosystems/issues/27
 [#28]: https://github.com/ronfinn/dataswamp-biosystems/issues/28
 [#29]: https://github.com/ronfinn/dataswamp-biosystems/issues/29
+[#33]: https://github.com/ronfinn/dataswamp-biosystems/issues/33
 
 ### v0.2 — Metadata and Lineage Integrations
 
@@ -194,7 +195,37 @@ remain future work.
   rule that normalization is never widened merely to turn the canary green. See
   [datahub.md](datahub.md#when-the-canary-goes-red) and
   [ADR 0006](adr/0006-compatibility-points-not-ranges.md).
-* OpenMetadata integration
+* OpenMetadata integration — **in progress, not shipped.** The deterministic
+  offline mapping and export have landed ([#33]): `dataswamp export-openmetadata`
+  emits an ordered, load-order-aware plan of whole-entity `Create<Entity>`
+  requests against OpenMetadata's **native** model — a `CustomStorage`
+  StorageService over a study → dataset → file Container hierarchy, plus Domains,
+  Data Products, Teams, Glossaries and a Classification — together with a
+  first-class `mapping-coverage.json` recording, per DataSwamp concept, how
+  faithfully it maps and what was deliberately dropped.
+
+  It is deliberately **not** a copy of the DataHub adapter's entity/aspect
+  architecture, and no `adapters/common/` exists yet: with two adapters it is now
+  possible to see what is genuinely common rather than merely similar, and that
+  judgement is better made once than guessed at twice.
+
+  Three decisions are worth knowing before reading the export. Datasets become
+  **Containers, not Tables**, because DataSwamp holds no honest relational column
+  metadata. Stewardship is preserved *separately* from ownership and the mapping
+  is classified **lossy**, because OpenMetadata draws no owner/steward
+  distinction. Quality checks are classified **unsupported**, because
+  OpenMetadata's `TestDefinition.entityType` admits only `TABLE` and `COLUMN` and
+  emitting one for a Container would fabricate applicability.
+
+  **There is no live path and no compatibility claim.** Nothing has been loaded
+  into a running OpenMetadata; `VERIFIED_OPENMETADATA_VERSION` is `None` and stays
+  `None` until a real-server canary earns a point, per
+  [ADR 0006](adr/0006-compatibility-points-not-ranges.md). The whole adapter is
+  offline — no server, no network, no credentials and no catalogue-client
+  dependency ([ADR 0007](adr/0007-no-catalogue-client-dependency.md)) — with
+  emitted payloads validated against a vendored subset of OpenMetadata's own JSON
+  schemas. Live ingestion, round-trip validation and a real-server canary remain
+  future work. See [openmetadata.md](openmetadata.md).
 * OpenLineage event export
 * Neo4j graph export
 * Integration examples

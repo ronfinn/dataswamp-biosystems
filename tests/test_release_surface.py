@@ -39,6 +39,7 @@ DOCUMENTED_COMMANDS = (
     "build-bundle",
     "verify-bundle",
     "export-datahub",
+    "export-openmetadata",
     "list-baselines",
     "run-baseline",
     "demo",
@@ -87,6 +88,9 @@ STABLE_IMPORTS: dict[str, tuple[str, ...]] = {
         "ObservedInputError",
     ),
     "dataswamp_biosystems.adapters.datahub": ("ExportMode", "export_datahub"),
+    # Experimental and offline-only, but the two names docs/public-api.md shows in
+    # a code block must at least keep importing.
+    "dataswamp_biosystems.adapters.openmetadata": ("ExportMode", "export_openmetadata"),
     "dataswamp_biosystems.examples": ("example_path", "examples_dir", "EXAMPLE_SUBMISSIONS"),
 }
 

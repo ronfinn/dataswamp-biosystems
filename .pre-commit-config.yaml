@@ -2,8 +2,15 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
+      # The vendored OpenMetadata JSON schemas are copied byte-for-byte from
+      # upstream and re-downloaded verbatim by
+      # scripts/update_openmetadata_fixtures.py --schemas. Whitespace fixups
+      # would make the committed copy differ from the source it claims to be,
+      # and would then fight the refresh script on every bump.
       - id: trailing-whitespace
+        exclude: ^tests/adapters/openmetadata/schemas/.*\.json$
       - id: end-of-file-fixer
+        exclude: ^tests/adapters/openmetadata/schemas/.*\.json$
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files

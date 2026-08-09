@@ -52,14 +52,22 @@ def test_no_core_layer_imports_the_adapter(package: str) -> None:
 
 
 @pytest.mark.parametrize("package", CORE_PACKAGES)
-def test_no_core_layer_mentions_datahub_in_code(package: str) -> None:
-    """Docstrings may discuss DataHub; executable code may not name it."""
+def test_no_core_layer_mentions_a_catalogue_in_code(package: str) -> None:
+    """Docstrings may discuss a catalogue; executable code may not name one."""
     for path in _module_paths(package):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Name | ast.Attribute):
                 rendered = ast.unparse(node).lower()
                 assert "datahub" not in rendered, f"{path}: {rendered}"
+                assert "openmetadata" not in rendered, f"{path}: {rendered}"
+
+
+@pytest.mark.parametrize("package", CORE_PACKAGES)
+def test_no_core_layer_imports_openmetadata(package: str) -> None:
+    for path in _module_paths(package):
+        for name in _imported_names(path):
+            assert "openmetadata" not in name.lower(), f"{path} imports {name}"
 
 
 def test_datahub_is_not_a_declared_dependency() -> None:
@@ -67,6 +75,80 @@ def test_datahub_is_not_a_declared_dependency() -> None:
     pyproject = (SRC.parents[1] / "pyproject.toml").read_text(encoding="utf-8")
     assert "acryl-datahub" not in pyproject
     assert "datahub" not in pyproject.lower().split("[tool.")[0]
+
+
+def test_no_openmetadata_client_is_a_dependency() -> None:
+    """The OpenMetadata adapter emits schemas rather than depending on a client.
+
+    ``jsonschema`` is a *dev* dependency — it validates emitted payloads against
+    the vendored upstream schemas in the test suite — and must never become a
+    runtime one. See ADR 0007.
+    """
+    pyproject = (SRC.parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    runtime = pyproject.split("[dependency-groups]")[0].lower()
+    for package in ("openmetadata-ingestion", "openmetadata", "requests", "httpx", "jsonschema"):
+        assert package not in runtime, f"{package} became a runtime dependency"
+
+
+# ---------------------------------------------------------------------------
+# The OpenMetadata adapter's boundaries.
+# ---------------------------------------------------------------------------
+# Two adapters now exist. They must stay independent of each other as well as of
+# the core: a shared helper today is a coupling to undo when their catalogues'
+# rules diverge, and ``adapters/common/`` is deliberately not created until it is
+# clear what is genuinely common rather than merely similar.
+
+OPENMETADATA_MODULES = ("__init__", "coverage", "errors", "export", "fqn", "mapping", "validate")
+
+
+def _openmetadata_module_paths() -> list[Path]:
+    return [SRC / "adapters" / "openmetadata" / f"{name}.py" for name in OPENMETADATA_MODULES]
+
+
+def test_the_two_adapters_do_not_import_each_other() -> None:
+    for path in _openmetadata_module_paths():
+        for name in _imported_names(path):
+            assert "datahub" not in name.lower(), f"{path.name} imports {name}"
+    for path in _module_paths("adapters/datahub"):
+        for name in _imported_names(path):
+            assert "openmetadata" not in name.lower(), f"{path.name} imports {name}"
+
+
+def test_no_adapters_common_package_exists_yet() -> None:
+    """Deferred on purpose until both adapters have settled. See issue #33."""
+    assert not (SRC / "adapters" / "common").exists()
+
+
+def test_the_openmetadata_adapter_opens_no_socket() -> None:
+    """Issue A is offline: no server, no network, no credentials."""
+    network = {"urllib", "http", "socket", "ssl", "asyncio", "requests", "httpx"}
+    for path in _openmetadata_module_paths():
+        for name in _imported_names(path):
+            assert name.split(".")[0] not in network, f"{path.name} imports {name}"
+
+
+def test_no_openmetadata_module_names_a_live_endpoint_host() -> None:
+    """Endpoint *paths* are recorded for a future live path; hosts and schemes are not."""
+    for path in _openmetadata_module_paths():
+        text = path.read_text(encoding="utf-8")
+        for fragment in ("http://", "https://localhost", "getpass", "TOKEN", "Authorization"):
+            assert fragment not in text, f"{path.name} names {fragment!r}"
+
+
+def test_the_openmetadata_adapter_claims_no_verified_live_version() -> None:
+    """No canary has run, so no compatibility point exists. See ADR 0006."""
+    from dataswamp_biosystems.adapters.openmetadata import VERIFIED_OPENMETADATA_VERSION
+
+    assert VERIFIED_OPENMETADATA_VERSION is None
+
+
+def test_the_openmetadata_adapter_only_reaches_the_project_through_the_bundle_reader() -> None:
+    forbidden = {"generator", "engine", "inject", "index", "scenarios", "registry"}
+    for path in _openmetadata_module_paths():
+        for name in _imported_names(path):
+            if not name.startswith("dataswamp_biosystems"):
+                continue
+            assert name.rsplit(".", 1)[-1] not in forbidden, f"{path.name} imports {name}"
 
 
 def test_the_adapter_only_reaches_the_project_through_the_bundle_reader() -> None:
