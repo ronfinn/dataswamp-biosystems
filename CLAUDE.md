@@ -69,12 +69,17 @@ reinterpreting it, and `dataswamp verify-ingestion` reads it back and reports
 completeness, fidelity, containment and observed-mode non-leakage as four
 separate claims, verified against a pinned real DataHub Quickstart by the
 optional, non-blocking `live-datahub` workflow), the **OpenMetadata adapter**
-(a deterministic, *offline-only* load-plan emitter in
+(a deterministic load-plan emitter in
 `src/dataswamp_biosystems/adapters/openmetadata/` via `dataswamp
 export-openmetadata`, built on OpenMetadata's own native model — whole-entity
 `Create<Entity>` requests, hierarchical FQN identity, load-order-aware reference
-closure — with a first-class `mapping-coverage.json`; there is **no** live path,
-no client and no verified compatibility point), and
+closure — with a first-class `mapping-coverage.json`, plus a **live path**
+strictly downstream of that emitted export: `dataswamp ingest-openmetadata`
+replays it in its emitted order without remapping it and `dataswamp
+verify-om-ingestion` reads it back by FQN and reports completeness, fidelity,
+containment and observed-mode non-leakage as four separate claims, all provable
+offline against a strict fake; there is still **no** verified compatibility
+point and no real-server canary), and
 the **release surface** (a `dataswamp demo` command running the whole workflow
 into one directory, committed example submissions under `examples/predictions/`,
 and the canonical `config/` tree plus those examples shipped *inside* the
@@ -123,6 +128,8 @@ uv run dataswamp export-datahub --bundle dist/benchmark --mode observed --output
 uv run dataswamp ingest-datahub --export-dir export/datahub --dry-run   # plan only; opens no socket
 uv run dataswamp verify-ingestion --export-dir export/datahub --output-dir generated/roundtrip
 uv run dataswamp export-openmetadata --bundle dist/benchmark --mode observed --output-dir export/openmetadata
+uv run dataswamp ingest-openmetadata --export-dir export/openmetadata --dry-run  # plan only; opens no socket
+uv run dataswamp verify-om-ingestion --export-dir export/openmetadata --output-dir generated/om-roundtrip
 uv run dataswamp demo --output-dir ./dataswamp-demo  # the whole workflow, end to end
 uv run pytest                  # run tests
 uv run ruff check .            # lint
@@ -389,7 +396,9 @@ referential integrity, not just happy-path execution.
   `VERIFIED_OPENMETADATA_VERSION` is `None` and stays `None` until a real-server
   canary has actually run. Reading, vendoring or refreshing OpenMetadata's JSON
   schemas establishes nothing about a running server, and neither does schema
-  validity: a payload can satisfy every schema and still be refused. The declared
+  validity: a payload can satisfy every schema and still be refused. **A green
+  offline fake establishes nothing either** — the fake is a contract simulator,
+  and every live test in the suite passing is exactly what it is worth. The declared
   `OPENMETADATA_MODEL_TARGET_RANGE` is a *target* for the payload shape, never
   evidence — the same rule ADR 0006 imposes on DataHub, applied before there is
   anything to be tempted by. `OPENMETADATA_SCHEMA_TARGET` and
@@ -434,10 +443,59 @@ referential integrity, not just happy-path execution.
   id-escaping codec and an atomic writer on purpose; with two examples it is not
   yet clear which similarities are structural. They must not import each other,
   and `tests/adapters/test_isolation.py` enforces both.
-- **Never give the OpenMetadata adapter a socket, a client or a live command.**
-  Issue A is offline: no network, no credentials, no `ingest-openmetadata`, no
-  `verify-om-ingestion`. Adding one is a new milestone with its own evidence
-  requirements, not a convenience.
+- **Never let anything but `adapters/openmetadata/client.py` open a socket or
+  name an OpenMetadata endpoint.** Endpoint paths, HTTP verbs and authorization
+  headers live in that one file and nowhere else, and it does **not** read the
+  emitted plan's `endpoint` annotation — a transport path is a live fact, so
+  trusting a string carried in a data file would put the endpoint contract
+  outside the module that owns it. `mapping.py` keeps its `ENDPOINTS` table as
+  frozen Issue A export *data*; that exemption is deliberate and narrow.
+- **Never widen OpenMetadata normalization on the strength of the fake.**
+  `OM_NORMALIZATION_VERSION` is 1 and independent of DataHub's 2 — they share no
+  rules, no counter and no evidence. A field is forgiven only where OpenMetadata's
+  own `Create<Entity>` schema sets `additionalProperties: false` and omits it
+  while the entity schema declares it, which proves DataSwamp cannot have sent it.
+  "The fake returns it" is not evidence that a real server generates it, and
+  neither is "a real server might". Forgiveness is additive-only — a value
+  DataSwamp sent is always compared — and every rule needs a justification, a
+  focused forgiveness test and a paired test proving an adjacent field is still
+  caught. `retentionPeriod`, `sampleData`, `certification` and `entityStatus` stay
+  off the list on purpose: OpenMetadata does not generate them.
+- **Never let the OpenMetadata fake server model `client.py`.**
+  `tests/adapters/openmetadata/fake_om.py` must import nothing from the client and
+  must derive its routes and validation from upstream's resource classes and the
+  vendored schemas, so it can *disagree* with the client. A fake that models the
+  client cannot catch the client — that is exactly how the DataHub
+  rest.li/OpenAPI dialect mismatch survived 111 offline tests.
+- **Never let the OpenMetadata live path reorder, batch or parallelise the plan.**
+  Order is load-bearing: a container needs its parent, an `extension` key needs
+  its custom property registered, a lineage edge needs both endpoints. Replay the
+  emitted order exactly. Correctness beats throughput at this size, and a batch
+  crossing a dependency boundary is a correctness bug.
+- **Never let a resolved OpenMetadata UUID become DataSwamp identity.** Three
+  writes need one because OpenMetadata keys an `EntityReference` by `id`; the
+  client resolves them by FQN and keeps them to itself. Identity is the
+  fully-qualified name, everywhere, or the benchmark forks per server.
+- **Never let the OpenMetadata live path open a privileged artefact.**
+  `ingest-openmetadata` and `verify-om-ingestion` consume an emitted export and
+  nothing else — no bundle, defect ledger, rule scope, control partition,
+  expected finding, remediation, scenario or evaluation output, not even to
+  strengthen a leak probe. Leak probes use only markers the export contract itself
+  defines: the reserved `dataswampTruth*` namespace and the privileged tag.
+  `tests/adapters/test_isolation.py` enforces this.
+- **Never accept an OpenMetadata JWT as a CLI argument**, and never write one
+  into a log, report, exception, provenance record or recorded URL. Configuration
+  is `OPENMETADATA_HOST_PORT` and `OPENMETADATA_JWT_TOKEN`, from the environment
+  only. `--dry-run` must open zero sockets and perform no health check.
+- **Never write a hostname, path, username or wall clock into an OpenMetadata
+  round-trip report.** Unlike the DataHub report it records no server address at
+  all — deliberately, so two identical round-trips write identical bytes anywhere.
+  What identifies a run is the export it judged, by digest.
+- **Never report OpenMetadata containment coverage as uniform.** It is declared
+  per entity family: `provable` only where a server-side scope filter makes
+  ownership structural, `namespace-prefix` where it rests on the reserved FQN
+  prefix, `unavailable` where nothing was enumerated. An entity outside every
+  ownership rule is somebody else's and is never a DataSwamp extra.
 - **Never add `acryl-datahub`, `openmetadata-ingestion` (or another catalogue
   client) as a dependency.**
   Both adapters emit documented payload shapes and are testable with no server,

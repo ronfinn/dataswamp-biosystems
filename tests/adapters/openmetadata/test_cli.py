@@ -14,6 +14,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+import typer.main
 from typer.testing import CliRunner
 
 from dataswamp_biosystems.adapters.openmetadata import (
@@ -215,8 +216,32 @@ def test_the_command_appears_in_help() -> None:
     assert "export-openmetadata" in result.output
 
 
-def test_no_ingestion_command_exists_yet() -> None:
-    """Issue A is offline. A live command would be a claim this project cannot back."""
+def test_the_live_commands_are_present_and_strictly_downstream() -> None:
+    """The live path consumes an emitted export, never a bundle.
+
+    This replaces an earlier assertion that no live command existed at all. The
+    thing that actually needed protecting was never the *absence* of a command —
+    it was that a live command must not be able to reach back into the generator
+    or the bundle, and that it must claim no compatibility it has not earned.
+    Both are asserted here and enforced structurally in ``test_isolation.py``.
+    """
     result = runner.invoke(app, ["--help"])
-    assert "ingest-openmetadata" not in result.output
-    assert "verify-om-ingestion" not in result.output
+    assert "ingest-openmetadata" in result.output
+    assert "verify-om-ingestion" in result.output
+
+    # Introspected rather than read out of rendered help. Typer wraps and colours
+    # help text according to terminal width, so a substring check against it
+    # passes locally and fails in CI for reasons that have nothing to do with the
+    # command's actual interface.
+    group = typer.main.get_command(app)
+    for name in ("ingest-openmetadata", "verify-om-ingestion"):
+        command = group.commands[name]  # type: ignore[attr-defined]
+        options = {opt for param in command.params for opt in param.opts}
+        assert "--export-dir" in options
+        assert "--bundle" not in options
+
+
+def test_the_live_commands_still_claim_no_compatibility_point() -> None:
+    from dataswamp_biosystems.adapters.openmetadata import VERIFIED_OPENMETADATA_VERSION
+
+    assert VERIFIED_OPENMETADATA_VERSION is None

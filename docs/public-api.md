@@ -29,6 +29,7 @@ evaluate            compare-runs
 build-bundle        verify-bundle
 export-datahub      export-openmetadata
 ingest-datahub      verify-ingestion
+ingest-openmetadata verify-om-ingestion
 demo
 ```
 
@@ -108,9 +109,14 @@ from dataswamp_biosystems.adapters.datahub import (
     compare, write_roundtrip, ROUNDTRIP_SCHEMA_VERSION, NORMALIZATION_VERSION,
 )
 
-# Emitting an OpenMetadata load plan from a verified bundle.
-# (Experimental and offline-only — see the OpenMetadata entry below.)
+# Emitting an OpenMetadata load plan from a verified bundle, and replaying it.
+# (Experimental — no running OpenMetadata has ever accepted this export. See the
+# OpenMetadata entry below.)
 from dataswamp_biosystems.adapters.openmetadata import ExportMode, export_openmetadata
+from dataswamp_biosystems.adapters.openmetadata import (
+    OpenMetadataClient, load_export, plan_ingestion, execute_ingestion, read_back,
+    compare, write_roundtrip, OM_ROUNDTRIP_SCHEMA_VERSION, OM_NORMALIZATION_VERSION,
+)
 
 # The package version.
 from dataswamp_biosystems import __version__
@@ -166,9 +172,17 @@ Usable and documented, but the shapes are still settling:
   `ConceptCounts`, `CONCEPTS`, `build_coverage`). The emitted plan's shape is
   versioned by `OM_ADAPTER_VERSION` and the payload shapes by
   `OPENMETADATA_SCHEMA_TARGET`; the coverage report by
-  `coverage_schema_version`. **Offline only**: there is no ingestion command, no
-  client and no network. `VERIFIED_OPENMETADATA_VERSION` is `None` and every
-  emitted manifest says so. See [docs/openmetadata.md](openmetadata.md) and
+  `coverage_schema_version`.
+* **The OpenMetadata live path** — `OpenMetadataClient`, `load_export`,
+  `plan_ingestion`, `execute_ingestion`, `read_back`, `compare`,
+  `write_roundtrip`, and the claim/coverage model (`Claim`, `Coverage`,
+  `DiscrepancyKind`, `Readback`, `RoundTripResult`). Versioned by
+  `OM_ROUNDTRIP_SCHEMA_VERSION` and `OM_NORMALIZATION_VERSION`, both of which are
+  `1` and **entirely independent of DataHub's**. Credentials come from
+  `OPENMETADATA_HOST_PORT` / `OPENMETADATA_JWT_TOKEN` and nowhere else; a token is
+  never a CLI argument and never reaches a report. `VERIFIED_OPENMETADATA_VERSION`
+  is `None` and every emitted manifest and round-trip report says so. See
+  [docs/openmetadata.md](openmetadata.md) and
   [ADR 0007](adr/0007-no-catalogue-client-dependency.md).
 * **`company.load_config` and the config models** — the YAML schema is versioned
   and stable; the Python model classes are not yet frozen.
@@ -206,11 +220,14 @@ Stated plainly, so nobody builds on a promise that was never made:
   generator version, config fingerprint, profile and seed. The provenance and
   bundle manifest record all four so a comparison can be checked.
 * **A verified live OpenMetadata compatibility point.** Stronger than the DataHub
-  caveat below: there is no live OpenMetadata path *at all*. `export-openmetadata`
-  writes files and nothing else, no plan has ever been loaded into a running
-  OpenMetadata instance, and `VERIFIED_OPENMETADATA_VERSION` is `None`. The
+  caveat below. `ingest-openmetadata` and `verify-om-ingestion` exist and work,
+  but **no plan has ever been loaded into a running OpenMetadata instance**. The
+  endpoint paths and verbs were read from OpenMetadata's own resource classes and
+  the whole live path is proved against a strict *offline fake* — a contract
+  simulator, not a server — so `VERIFIED_OPENMETADATA_VERSION` is `None`. The
   declared `>=1.9,<2` model range is a target for the emitted payload shape, not
-  tested evidence. Schema validity is not load success.
+  tested evidence. Schema validity is not load success, and a green fake is not a
+  green server.
 * **A verified live DataHub compatibility point.** `ingest-datahub` and
   `verify-ingestion` do talk to a server, and round-trip validation is
   implemented and offline-testable — but the REST endpoints they use have not

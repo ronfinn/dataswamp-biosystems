@@ -508,11 +508,20 @@ precisely because these get conflated:
 | `VERIFIED_OPENMETADATA_VERSION` | The one release the live path was actually **run** against | A green canary run, and only that | **`None`** |
 
 `OM_ADAPTER_VERSION` is `1.0.0`, bumped when the emitted plan changes for
-unchanged input.
+unchanged input. It did **not** move for the live path: the emitted bytes are
+unchanged, and the Issue A fixtures are byte-identical.
 
-There is **no `OM_NORMALIZATION_VERSION`**. Normalization is a round-trip concern
-and belongs to the live milestone; adding one now would version a contract that
-does not exist.
+Two more versions belong to the live path, and to nothing else:
+
+| | What it is | Value |
+| --- | --- | --- |
+| `OM_NORMALIZATION_VERSION` | The forgiveness rules in force when a round-trip report was produced | `1` |
+| `OM_ROUNDTRIP_SCHEMA_VERSION` | The shape of `roundtrip-report.json` | `1` |
+
+Both are **entirely independent of DataHub's**. DataHub's `NORMALIZATION_VERSION`
+is `2` and reached that value through a real canary run against a pinned release;
+OpenMetadata's is `1` and has no such evidence behind it. They share no rules, no
+counter and no justification, and neither moves when the other does.
 
 ---
 
@@ -520,25 +529,278 @@ does not exist.
 
 Stated plainly, because a reader should not have to infer it:
 
-* **Nothing has been loaded into a running OpenMetadata.** Not once. There is no
-  ingestion command, no client, no canary, no credentials handling.
-* **No REST endpoint has been exercised.** The paths recorded in `ENDPOINTS` are
-  read from documentation, for a future live path to start from. They are
-  untested.
+* **Nothing has been loaded into a running OpenMetadata.** Not once. The live
+  path is proved end to end against a strict *offline fake* — see below — which
+  is a contract simulator and not a server.
+* **No REST endpoint has been exercised against a real instance.** The paths and
+  verbs in `client.py` were read from OpenMetadata's own JAX-RS resource classes
+  at the `1.13.3-release` tree. Reading a resource class establishes the shape of
+  a request and nothing whatever about a running server.
 * **The declared model range is not evidence.** `>=1.9,<2` is where the payload
   shape is *aimed*. Exactly one revision inside it has been read, and zero have
   been run against.
 * **Schema validity is not load success.** A payload can satisfy every JSON
   schema and still be rejected by server-side business rules, authorization, or
   reference resolution. Only a real run settles that.
-* **The declared references are unresolved by construction.** Whether the FQNs
-  this plan names actually resolve to the right entities on a server is exactly
-  the question a live path answers.
+* **A green fake is not a green server.** Every round-trip test in this
+  repository passes, and `VERIFIED_OPENMETADATA_VERSION` is still `None`. Those
+  two facts are not in tension; the second is what the first is worth.
 
 Treat OpenMetadata support as **offline-only and experimental**. When a
 compatibility point is earned it will be a named release in
 `VERIFIED_OPENMETADATA_VERSION`, moving together with a workflow pin and this
-document — never a range, and never on the strength of a schema having been read.
+document — never a range, and never on the strength of a schema having been read
+or a fake having agreed.
+
+---
+
+## The live path
+
+```text
+bundle → export-openmetadata → emitted export → ingest-openmetadata → verify-om-ingestion
+```
+
+The two live commands consume **the emitted export directory and nothing else**.
+They do not reopen the bundle, re-run the generator, read a truth shard, a defect
+ledger, a control partition, a rule scope, an expected finding, a remediation, a
+scenario or any evaluation output. That is enforced structurally by
+`tests/adapters/test_isolation.py`, not merely intended: verifying an *observed*
+export must need no privilege, because needing privilege to check it would defeat
+the point of having one.
+
+### Modules
+
+| Module | Responsibility |
+| --- | --- |
+| `client.py` | The **only** module that opens a socket, and the only one that names an endpoint path, an HTTP verb or an authorization header. Standard library only. |
+| `ingest.py` | Verifies an emitted export, then replays its ordered plan. No remapping, no enrichment, no reordering. |
+| `readback.py` | Read-only retrieval by fully-qualified name. No write function exists here. |
+| `normalize.py` | The versioned forgiveness contract. |
+| `roundtrip.py` | Pure comparison. No filesystem, no network, no clock. |
+| `report.py` | Deterministic, atomic report output. |
+
+### Commands
+
+```bash
+export OPENMETADATA_HOST_PORT=http://localhost:8585/api
+export OPENMETADATA_JWT_TOKEN=...          # only if your instance needs one
+
+dataswamp ingest-openmetadata --export-dir export/openmetadata --dry-run
+dataswamp ingest-openmetadata --export-dir export/openmetadata --yes
+dataswamp verify-om-ingestion --export-dir export/openmetadata --output-dir generated/om-roundtrip
+```
+
+**Credentials come from the environment only.** The JWT is never a command-line
+argument — a token in `argv` leaks into shell history and process listings — and
+never appears in a `repr`, an exception, a log, a report or a recorded URL. Any
+URL that reaches evidence passes through `redact_url` first, which strips
+userinfo and the query string.
+
+`--dry-run` performs **zero network activity**: no socket, no health check, no
+connectivity probe. It verifies the export, builds the replay plan and reports
+it. The tests prove this by poisoning `socket.socket`, `socket.create_connection`
+and `urllib.request.urlopen`, rather than by mocking the client — mocking the
+client would only prove that the code path nobody doubts was not taken.
+
+Exit codes:
+
+| | `ingest-openmetadata` | `verify-om-ingestion` |
+| --- | --- | --- |
+| `0` | dry-run planned, or replay completed | all four claims pass |
+| `1` | refused for want of `--yes` (or the privileged acknowledgement) | discrepancies or leak findings |
+| `2` | unreadable/tampered export, config error, unreachable catalogue | readback, config, I/O or unsafe-output failure |
+
+### What is verified before a socket opens
+
+Every manifest digest recomputes; the declared mode is known and agrees with its
+privilege flag; the plan re-parses into the record shape the exporter emitted;
+the *offline* validator runs again over what was read from disk — FQN shape and
+uniqueness, entity-type coherence, containment, reference closure, privilege
+markers; `order` increases strictly across the whole export; and every operation
+maps back to exactly one emitted record.
+
+### Order is load-bearing
+
+Unlike DataHub's aspect stream, OpenMetadata's plan has dependency order: a
+container needs its parent, an `extension` key needs its custom property
+registered, a lineage edge needs both endpoints. The plan is replayed **exactly
+as emitted** — never sorted, grouped, batched or parallelised. Batching is absent
+on purpose rather than merely unimplemented: a batch crossing a dependency
+boundary would be a correctness bug bought for throughput nothing at this size
+needs.
+
+### The three writes that need a UUID
+
+OpenMetadata keys an `EntityReference` by a server-assigned `id`, so three
+operations cannot be fully written offline:
+
+| Operation | Upstream contract |
+| --- | --- |
+| custom-property registration | `GET /api/v1/metadata/types/name/{entityType}` for the type's UUID, then `PUT /api/v1/metadata/types/{id}` with a `CustomProperty` body |
+| data-product asset attachment | `PUT /api/v1/dataProducts/name/{fqn}/assets/add` with a `BulkAssets` body |
+| lineage | `PUT /api/v1/lineage` with an `AddLineage` body whose endpoints are `EntityReference` values |
+
+The emitted plan already declares each of those targets as a `Reference` block
+*precisely because* an offline export cannot know a UUID. `client.py` resolves
+them by FQN at load time, which is the encoding that declaration asks for. A
+resolved UUID is never retained as DataSwamp identity — identity is the FQN,
+always, or the benchmark would fork per server.
+
+### Everything else is create-or-update
+
+`PUT /api/v1/<collection>` with the emitted `Create<Entity>` body, transmitted
+exactly as written. `PUT` rather than `POST` is what makes a second ingestion
+converge on one estate instead of conflicting. Readback is
+`GET /api/v1/<collection>/name/{fqn}`, always addressed by FQN.
+
+> **A note on the emitted `endpoint` annotation.** Plan records carry an
+> `endpoint` string from Issue A. `client.py` deliberately ignores it and owns the
+> paths itself, because a transport path is a live fact. One of those annotations
+> is in fact wrong — `data-product-assets` records name
+> `/api/v1/dataProducts/assets/add`, while the real endpoint is
+> `/api/v1/dataProducts/name/{fqn}/assets/add`. Because the annotation is inert
+> documentation rather than something the transport reads, the live path is
+> unaffected and the Issue A fixtures were left byte-identical. Correcting the
+> annotation would move those fixtures and is a separate, deliberate change.
+
+---
+
+## The four round-trip claims
+
+Reported separately, never collapsed into one verdict. A catalogue missing
+entities has a different problem from one that mutated them, and both differ from
+one holding entities nobody sent it.
+
+**completeness** — every emitted operation that should materialise did: each
+entity is retrievable by its FQN, each declared asset attachment and lineage edge
+is present, each registered custom property exists.
+
+**fidelity** — every value the export sent survives a normalization-equivalent
+readback. The *sent* side is built from the emitted plan, not from what the
+transport put on the wire, so a transport that quietly altered a payload fails
+this claim rather than hiding inside it.
+
+**containment** — no unexpected DataSwamp-owned state, within scopes where
+ownership can actually be proved.
+
+**observed-mode non-leakage** — no truth-only marker after ingesting an observed
+export. The probes use only markers the OpenMetadata *export contract* itself
+defines: the reserved `dataswampTruth*` custom-property namespace and the
+privileged truth-export tag. Nothing reaches back into a bundle or answer key to
+build a stronger probe.
+
+### Containment coverage is declared, not assumed
+
+| Coverage | Meaning | Families |
+| --- | --- | --- |
+| `provable` | A server-side scope filter makes ownership structural | `container` (via `?service=`), `tag` (via `?parent=`) |
+| `namespace-prefix` | Enumerated globally; ownership from DataSwamp's reserved FQN prefix, which a third party could in principle imitate | `domain`, `dataProduct`, `team`, `glossary`, `glossaryTerm`, `classification`, `storageService` |
+| `unavailable` | Not enumerated; no extra-entity claim is made | any family not scanned |
+
+An entity outside every ownership rule is **somebody else's** and is ignored
+entirely — never reported as a DataSwamp extra. "The scan did not run" and "the
+scan was clean" are different statements and the report distinguishes them.
+
+---
+
+## Normalization v1
+
+The highest-risk part of the live path, and the risk is not a bug — it is
+*erosion*. When a round-trip fails, the cheapest fix is to add the offending
+field to the ignore list and watch it go green; do that a few times and fidelity
+validation becomes a function that always returns "identical", which is worse
+than no check at all because it looks like evidence.
+
+**The evidence standard.** A field is forgiven only where OpenMetadata's own
+`Create<Entity>` schema sets `additionalProperties: false` and omits it while the
+entity schema declares it — proving DataSwamp *cannot* have sent it, so any value
+found there is the platform's. That test is mechanical and runs against the
+vendored schemas in `tests/adapters/openmetadata/test_normalize.py`. **A fake
+server returning a field is not evidence that a real OpenMetadata generates it.**
+
+Version 1 forgives:
+
+| Path | Why |
+| --- | --- |
+| `id`, `href`, `version`, `updatedAt`, `updatedBy`, `impersonatedBy` | Server-assigned identity, URI, version counter, clock and auth principal |
+| `changeDescription`, `incrementalChangeDescription` | Server-computed diffs against what it already stored |
+| `deleted` | The server's soft-delete lifecycle flag |
+| `children` (Container) | The server-materialised inverse of `parent`; the export declares containment one way only |
+| `serviceType` (Container) | Copied from the StorageService by the server; DataSwamp states it once, on the service, where it *is* compared |
+
+Deliberately **not** forgiven: `retentionPeriod`, `sampleData`, `certification`,
+`entityStatus`. They are also absent from the create schemas, but OpenMetadata
+does not *generate* them — a user or another tool sets them through PATCH. A
+value appearing there is somebody writing to DataSwamp's entities, which is
+exactly what containment exists to notice.
+
+Three further rules:
+
+* **Forgiveness is additive only.** A rule applies only where the emitted plan
+  carried no value at that path. A value DataSwamp sent is always compared.
+* **Reference projection changes representation, not value.** OpenMetadata
+  accepts a reference as an FQN or an `EntityReference` and always answers with
+  the expanded form, so both sides are projected to the target's
+  `fullyQualifiedName` — the value the plan declared. A reference pointing
+  somewhere else still fails fidelity.
+* **Unknown additions are discrepancies.** The default is suspicion; forgiveness
+  is opt-in, justified, and paired with a test proving an adjacent field is still
+  caught.
+
+The whole contract is embedded verbatim in every `roundtrip-report.json`, so a
+stored report is readable years later without this file.
+
+---
+
+## The strict fake OpenMetadata server
+
+`tests/adapters/openmetadata/fake_om.py`. The live path has to be provable
+without Docker, a network or credentials, and this is what makes that possible.
+
+**It is built to disagree with the client**, which is the entire design
+constraint. The DataHub fake once accepted the wrong wire dialect for months
+because it read request bodies the way the client wrote them; a real server
+answered HTTP 500 and 111 offline tests had missed it. A fake that models the
+client cannot catch the client.
+
+So it imports nothing from `client.py` — not the collection table, not a field
+name, not an envelope shape. Routes are written out again from upstream's
+resource classes, and **request bodies are validated against the vendored
+upstream JSON schemas**, `additionalProperties: false` included. It rejects the
+wrong method, an unknown path, a malformed envelope, a missing or unknown field,
+an unregistered `extension` key, a reference to something not yet created, and a
+bare property-type name where an `EntityReference` is required. It also withholds
+opt-in `fields` that were not requested, so a client that forgets to ask sees a
+lean entity and fails — the correct outcome, not something to paper over.
+
+It is a contract simulator. It is not evidence about a real OpenMetadata, and no
+amount of green from it moves `VERIFIED_OPENMETADATA_VERSION`.
+
+---
+
+## Output
+
+`verify-om-ingestion` writes four files, atomically:
+
+```text
+roundtrip-report.json   the four claims, their counts, and the contracts in force
+discrepancies.jsonl     one record per disagreement, canonically ordered
+leak-findings.jsonl     one record per ground-truth marker found (empty on success)
+provenance.json         the environment provenance every generated directory carries
+```
+
+`leak-findings.jsonl` is always written, even when empty: "the probes ran and
+found nothing" and "the probes never ran" are different statements, and a missing
+file cannot distinguish them.
+
+**No wall clock, no hostname, no username, no filesystem path** — not even a
+redacted server address. That is a deliberate difference from the DataHub report,
+which records its endpoint: a host name cannot be made deterministic, is the field
+most likely to carry a credential by accident, and tells a reader nothing they
+need. What identifies a run is the export it judged, recorded by digest. Two
+identical round-trips write identical bytes on any machine.
+
+---
 
 ---
 

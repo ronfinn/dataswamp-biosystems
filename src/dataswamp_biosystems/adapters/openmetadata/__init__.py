@@ -18,17 +18,35 @@ the test suite; emitted payloads are validated offline against a small vendored
 subset of OpenMetadata's own JSON schemas. See
 ``docs/adr/0007-no-catalogue-client-dependency.md``.
 
-**There is no live path and no verified compatibility point.**
+A **live path** exists and is strictly downstream of the emitted export::
+
+    bundle -> export-openmetadata -> emitted export -> ingest-openmetadata -> verify-om-ingestion
+
+:mod:`.client` is the only module that opens a socket and the only one that names
+an endpoint; :mod:`.ingest` replays the emitted plan in its emitted order without
+remapping it; :mod:`.readback` retrieves state by fully-qualified name;
+:mod:`.roundtrip` compares the two purely; :mod:`.report` writes the verdict.
+
+**There is still no verified compatibility point.**
 :data:`~dataswamp_biosystems.adapters.openmetadata.mapping.VERIFIED_OPENMETADATA_VERSION`
-is ``None`` and stays ``None`` until a real-server run earns one. The schemas
-were read, which is not the same as having been tested against — see
-``docs/adr/0006-compatibility-points-not-ranges.md``.
+is ``None`` and stays ``None`` until a real-server run earns one. The request
+shapes were read from OpenMetadata's own resource classes and the whole live path
+is proved against a strict offline fake, neither of which is the same as having
+run against a server — see ``docs/adr/0006-compatibility-points-not-ranges.md``.
 
 See ``docs/openmetadata.md``.
 """
 
 from __future__ import annotations
 
+from dataswamp_biosystems.adapters.openmetadata.client import (
+    COLLECTIONS,
+    HOST_PORT_ENV,
+    JWT_TOKEN_ENV,
+    LIVE_SUPPORT,
+    OpenMetadataClient,
+    redact_url,
+)
 from dataswamp_biosystems.adapters.openmetadata.coverage import (
     CONCEPT_NAMES,
     CONCEPTS,
@@ -42,6 +60,7 @@ from dataswamp_biosystems.adapters.openmetadata.coverage import (
 from dataswamp_biosystems.adapters.openmetadata.errors import (
     OpenMetadataAdapterError,
     OpenMetadataConfigError,
+    OpenMetadataTransportError,
 )
 from dataswamp_biosystems.adapters.openmetadata.export import (
     CUSTOM_PROPERTIES_NAME,
@@ -52,6 +71,14 @@ from dataswamp_biosystems.adapters.openmetadata.export import (
     TEST_RESULTS_NAME,
     build_source,
     export_openmetadata,
+)
+from dataswamp_biosystems.adapters.openmetadata.ingest import (
+    IngestPlan,
+    LoadedExport,
+    Operation,
+    execute_ingestion,
+    load_export,
+    plan_ingestion,
 )
 from dataswamp_biosystems.adapters.openmetadata.mapping import (
     BUILTIN_REFERENCES,
@@ -73,6 +100,32 @@ from dataswamp_biosystems.adapters.openmetadata.mapping import (
     SourceGraph,
     build_plan,
     property_specs,
+)
+from dataswamp_biosystems.adapters.openmetadata.normalize import (
+    OM_NORMALIZATION_VERSION,
+    normalization_contract,
+)
+from dataswamp_biosystems.adapters.openmetadata.readback import read_back
+from dataswamp_biosystems.adapters.openmetadata.report import (
+    DISCREPANCIES_NAME,
+    LEAK_FINDINGS_NAME,
+    ROUNDTRIP_REPORT_NAME,
+    build_report,
+    write_roundtrip,
+)
+from dataswamp_biosystems.adapters.openmetadata.roundtrip import (
+    CONTAINMENT_FAMILIES,
+    LEAK_PROBES,
+    OM_ROUNDTRIP_SCHEMA_VERSION,
+    Claim,
+    ContainmentFamily,
+    Coverage,
+    Discrepancy,
+    DiscrepancyKind,
+    LeakFinding,
+    Readback,
+    RoundTripResult,
+    compare,
 )
 from dataswamp_biosystems.adapters.openmetadata.validate import (
     CUSTOM_PROPERTY_NAME,
@@ -123,7 +176,43 @@ __all__ = [
     "CONCEPTS",
     "CONCEPT_NAMES",
     "build_coverage",
+    # The live path: transport.
+    "OpenMetadataClient",
+    "HOST_PORT_ENV",
+    "JWT_TOKEN_ENV",
+    "COLLECTIONS",
+    "LIVE_SUPPORT",
+    "redact_url",
+    # The live path: replay.
+    "LoadedExport",
+    "IngestPlan",
+    "Operation",
+    "load_export",
+    "plan_ingestion",
+    "execute_ingestion",
+    "read_back",
+    # The live path: comparison and reporting.
+    "OM_NORMALIZATION_VERSION",
+    "normalization_contract",
+    "OM_ROUNDTRIP_SCHEMA_VERSION",
+    "Claim",
+    "Coverage",
+    "ContainmentFamily",
+    "CONTAINMENT_FAMILIES",
+    "LEAK_PROBES",
+    "Discrepancy",
+    "DiscrepancyKind",
+    "LeakFinding",
+    "Readback",
+    "RoundTripResult",
+    "compare",
+    "build_report",
+    "write_roundtrip",
+    "ROUNDTRIP_REPORT_NAME",
+    "DISCREPANCIES_NAME",
+    "LEAK_FINDINGS_NAME",
     # Errors.
     "OpenMetadataAdapterError",
     "OpenMetadataConfigError",
+    "OpenMetadataTransportError",
 ]
