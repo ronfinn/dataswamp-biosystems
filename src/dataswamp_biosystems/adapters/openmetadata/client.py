@@ -57,8 +57,12 @@ register a custom property       ``GET /api/v1/metadata/types/name/{entityType}`
                                  lookup is mandatory, not an optimisation.
 read registered properties       ``GET /api/v1/metadata/types/name/{entityType}
                                  ?fields=customProperties``.
-attach data-product assets       ``PUT /api/v1/dataProducts/name/{fqn}/assets/add`` with a
+attach data-product assets       ``PUT /api/v1/dataProducts/{fqn}/assets/add`` with a
                                  ``BulkAssets`` body, answering ``BulkOperationResult``.
+                                 Upstream calls the path parameter ``name``, but the
+                                 repository resolves it through ``getByName``, so it is
+                                 an FQN. There is **no** ``/name/{fqn}`` form of this
+                                 write — only of the read below.
 read data-product assets         ``GET /api/v1/dataProducts/name/{fqn}/assets``.
 write lineage                    ``PUT /api/v1/lineage`` with an ``AddLineage`` body whose
                                  ``edge.fromEntity`` / ``edge.toEntity`` are
@@ -83,8 +87,10 @@ retained as DataSwamp identity.
 the table above. A path is a live-transport fact, so it belongs here and is
 verified here; trusting a string carried in a data file would put the endpoint
 contract outside the one module that owns it. (It also means a stale annotation
-in an emitted export cannot mis-address a request — see ``docs/openmetadata.md``,
-which records one such annotation.)
+in an emitted export cannot mis-address a request. That independence is not
+theoretical: the annotation and this table disagreed until #37, and because the
+transport never consulted the annotation, the disagreement was a documentation
+defect rather than a live one.)
 """
 
 from __future__ import annotations
@@ -461,11 +467,19 @@ class OpenMetadataClient:
     def add_data_product_assets(self, fqn: str, assets: list[dict[str, Any]]) -> dict[str, Any]:
         """Attach assets to a data product by FQN (``BulkAssets``).
 
-        The FQN-addressed form of the endpoint is used deliberately over the
-        ``/{name}`` form: it is the one that takes the full hierarchical name,
-        and it keeps this call keyed by the same identity everything else is.
+        ``PUT /v1/dataProducts/{fqn}/assets/add``. Upstream names the path
+        parameter ``name``, but ``DataProductResource.bulkAddAssets`` hands it to
+        ``DataProductRepository.bulkAddAssets``, which resolves it through
+        ``EntityRepository.getByName(uriInfo, fqn, fields)`` — so the segment is a
+        fully-qualified name, and upstream's own integration test calls this
+        endpoint with ``product.getFullyQualifiedName()``.
+
+        There is deliberately no ``/name/{fqn}`` here. That form exists for the
+        asset *read* below, and for ``inputPorts``/``outputPorts``, but
+        ``DataProductResource`` exposes no ``/name/{fqn}/assets/add`` at all: a
+        request there is a 404, not an alternative spelling.
         """
-        path = f"{COLLECTIONS['dataProduct']}/name/{_quote_fqn(fqn)}/assets/add"
+        path = f"{COLLECTIONS['dataProduct']}/{_quote_fqn(fqn)}/assets/add"
         body = self._request("PUT", path, {"assets": assets})
         return body if isinstance(body, dict) else {}
 

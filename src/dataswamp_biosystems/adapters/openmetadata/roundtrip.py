@@ -453,7 +453,40 @@ def build_sent_view(
         fields["fullyQualifiedName"] = record.fqn
         entities.append(SentEntity(record.entity_type, record.fqn, fields))
 
+    _expect_attachment_reverse_edges(entities, assets)
     return tuple(entities), properties, assets, lineage
+
+
+def _expect_attachment_reverse_edges(
+    entities: list[SentEntity], assets: dict[str, list[str]]
+) -> None:
+    """Record the ``dataProducts`` an attachment makes appear on its assets.
+
+    ``bulkAddAssets`` writes a single ``DATA_PRODUCT --HAS--> asset``
+    relationship, and OpenMetadata reads that same relationship back to populate
+    the *asset's* ``dataProducts`` field. So a container carrying the product it
+    was attached to is not the catalogue volunteering something — it is the
+    visible half of a write the export itself asked for.
+
+    That distinction decides how it is handled. Forgiving the field would mean
+    ignoring the only readable evidence that the attachment landed on the right
+    asset, and would hide a product attached to a container DataSwamp never
+    named. So the expectation is *derived from the plan's own attachments* and
+    compared like any other reference field: right products, no discrepancy;
+    wrong or extra ones, a difference at an exact path.
+
+    The plan's asset lists are keyed by product and this field is keyed by asset,
+    so the relation is simply inverted here rather than re-derived from anything.
+    """
+    products_by_asset: dict[str, list[str]] = {}
+    for product_fqn, asset_fqns in assets.items():
+        for asset_fqn in asset_fqns:
+            products_by_asset.setdefault(asset_fqn, []).append(product_fqn)
+
+    for entity in entities:
+        expected = products_by_asset.get(entity.fqn)
+        if expected is not None:
+            entity.fields["dataProducts"] = sorted(expected)
 
 
 # ---------------------------------------------------------------------------

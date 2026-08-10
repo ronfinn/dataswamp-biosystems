@@ -129,6 +129,7 @@ OPT_IN_FIELDS: frozenset[str] = frozenset(
 BUILTIN_TYPES: tuple[str, ...] = ("container", "dataProduct", "string")
 
 _NAME_ROUTE = re.compile(r"^(?P<collection>.+)/name/(?P<fqn>[^/]+)(?P<tail>/.*)?$")
+_ASSETS_ADD_ROUTE = re.compile(r"^(?P<collection>.+)/(?P<fqn>[^/]+)/assets/add$")
 _TYPES_BY_NAME = re.compile(r"^/api/v1/metadata/types/name/(?P<name>[^/]+)$")
 _TYPES_BY_ID = re.compile(r"^/api/v1/metadata/types/(?P<id>[0-9a-f-]{36})$")
 _LINEAGE_BY_NAME = re.compile(r"^/api/v1/lineage/(?P<kind>[^/]+)/name/(?P<fqn>[^/]+)$")
@@ -136,6 +137,21 @@ _LINEAGE_BY_NAME = re.compile(r"^/api/v1/lineage/(?P<kind>[^/]+)/name/(?P<fqn>[^
 
 def _load_schema(name: str) -> dict[str, Any]:
     return json.loads((SCHEMAS / name).read_text(encoding="utf-8"))
+
+
+def _quote_name(name: str) -> str:
+    """Encode one raw name as an FQN segment, as ``FullyQualifiedName`` does.
+
+    Transcribed from upstream's ``quoteName``/``needsQuoting`` at the pinned
+    ``1.13.3-release`` tree: a segment is wrapped in double quotes when it holds
+    the separator or a quote character, with embedded quotes doubled. DataSwamp's
+    own names never trigger it — which is the point. If an identity ever did
+    contain a ``.``, the server would hand back a quoted FQN rather than the bare
+    dotted string, and this fake has to be the thing that says so.
+    """
+    if "." in name or '"' in name:
+        return '"' + name.replace('"', '""') + '"'
+    return name
 
 
 @dataclass
@@ -232,7 +248,7 @@ class FakeOpenMetadata:
 
     def _fqn_for(self, entity_type: str, body: dict[str, Any]) -> str:
         """Compute the FQN the server would assign, the way OpenMetadata does."""
-        name = str(body["name"])
+        name = _quote_name(str(body["name"]))
         if entity_type == "tag":
             return f"{body.get('classification')}.{name}"
         if entity_type == "glossaryTerm":
@@ -247,10 +263,16 @@ class FakeOpenMetadata:
                 return f"{owner[1]}.{name}"
             return f"{body.get('service')}.{name}"
         if entity_type == "dataProduct":
-            domains = body.get("domains") or []
-            if not domains:
+            # Deliberately *not* domain-scoped. DataProductRepository does not
+            # override setFullyQualifiedName and leaves quoteFqn false, so the
+            # EntityRepository default applies and the FQN is quoteName(name)
+            # alone; the owning Domain is a field, not a path component. This
+            # branch used to return f"{domains[0]}.{name}", which fabricated a
+            # prefix upstream never adds and made a wrong DataSwamp identity look
+            # right for the whole of #33 and #35. See #37.
+            if not (body.get("domains") or []):
                 raise RequestError(400, "createDataProduct requires a domain")
-            return f"{domains[0]}.{name}"
+            return name
         return name
 
     def _check_references(self, entity_type: str, body: dict[str, Any]) -> None:
@@ -414,6 +436,18 @@ class FakeOpenMetadata:
             if identifier not in self.assets[fqn]:
                 self.assets[fqn].append(identifier)
                 added += 1
+            # The reverse edge. bulkAddAssets writes one DATA_PRODUCT --HAS-->
+            # asset relationship, and EntityRepository.batchFetchDataProducts
+            # reads that same relationship back to populate the *asset's*
+            # ``dataProducts`` field. So attaching an asset is what makes the
+            # product appear on the container, and a fake that stored only the
+            # forward direction would hide the consequence of our own write.
+            kind, asset_fqn = self.by_id[identifier]
+            document = self.entities.get((kind, asset_fqn))
+            if document is not None:
+                held = document.setdefault("dataProducts", [])
+                if all(ref.get("fullyQualifiedName") != fqn for ref in held):
+                    held.append(self._reference("dataProduct", fqn))
         return {"dryRun": False, "status": "success", "numberOfRowsPassed": added}
 
     def add_lineage(self, body: Any) -> None:
@@ -607,24 +641,40 @@ def _handler_for(state: FakeOpenMetadata) -> type[BaseHTTPRequestHandler]:
                 return
 
             # -- data-product assets --------------------------------------
+            # The two operations sit on *different* route families upstream, and
+            # the asymmetry is real rather than an oversight in this fake.
+            # DataProductResource declares the read as ``/name/{fqn}/assets`` and
+            # the write as ``/{name}/assets/add`` — there is no
+            # ``/name/{fqn}/assets/add``, so one must 404 while the other works.
             match = _NAME_ROUTE.match(path)
-            if match and match.group("tail") in {"/assets/add", "/assets"}:
+            if match and match.group("tail") == "/assets":
                 collection = COLLECTION_ROUTES.get(match.group("collection"))
                 if collection != "dataProduct":
-                    raise RequestError(404, "asset attachment exists on data products only")
-                fqn = match.group("fqn")
-                if match.group("tail") == "/assets/add":
-                    if method != "PUT":
-                        raise RequestError(405, "assets are attached with PUT, not " + method)
-                    self._respond(state.add_assets(fqn, body))
-                    return
+                    raise RequestError(404, "asset listing exists on data products only")
                 if method != "GET":
                     raise RequestError(405, f"{method} is not allowed here")
-                document = state.get_assets(fqn)
+                document = state.get_assets(match.group("fqn"))
                 if document is None:
                     raise RequestError(404, "no such data product")
                 self._respond(document)
                 return
+            if match and match.group("tail") == "/assets/add":
+                raise RequestError(
+                    404,
+                    "there is no /name/{fqn}/assets/add route; DataProductResource "
+                    "declares the asset write as /{fqn}/assets/add",
+                )
+
+            match = _ASSETS_ADD_ROUTE.match(path)
+            if match:
+                collection = COLLECTION_ROUTES.get(match.group("collection"))
+                if collection != "dataProduct":
+                    raise RequestError(404, "asset attachment exists on data products only")
+                if method != "PUT":
+                    raise RequestError(405, "assets are attached with PUT, not " + method)
+                self._respond(state.add_assets(match.group("fqn"), body))
+                return
+            match = _NAME_ROUTE.match(path)
 
             # -- entity by name --------------------------------------------
             if match and not match.group("tail"):
