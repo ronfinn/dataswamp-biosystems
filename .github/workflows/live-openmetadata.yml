@@ -94,8 +94,13 @@ jobs:
       # generated tree inside the repository is a trap waiting for the next
       # command that treats the checkout as a protected input. Set here rather
       # than in the job's `env:`, where the `runner` context does not exist.
+      # RUN_DIR is created here rather than where it is first written, because
+      # the diagnostics and teardown steps run under `if: always()` with it as
+      # their working directory. A job that fails before it exists would
+      # otherwise lose both — which is exactly when they are worth most.
       - name: Choose working directories
         run: |
+          mkdir -p "$RUNNER_TEMP/live-om-run"
           {
             echo "DEMO_DIR=$RUNNER_TEMP/live-om-demo"
             echo "RUN_DIR=$RUNNER_TEMP/live-om-run"
@@ -115,8 +120,22 @@ jobs:
       # Offline, and first: generating the export costs seconds, while standing
       # up OpenMetadata costs minutes. If the benchmark cannot emit a valid
       # export there is no reason to boot a catalogue to find that out.
-      - name: Generate a benchmark bundle and an observed OpenMetadata export
+      #
+      # `demo` produces the canonical scenario, the bundle and the *DataHub*
+      # export; the OpenMetadata export is a separate command against the same
+      # verified bundle. Exporting it here rather than teaching `demo` to do it
+      # keeps `demo`'s pinned output unchanged — it is a published surface with
+      # its own tests — and keeps the canary running the two commands a user
+      # would actually run.
+      - name: Generate a benchmark bundle
         run: uv run --frozen dataswamp demo --output-dir "$DEMO_DIR"
+
+      - name: Export observed OpenMetadata metadata from the verified bundle
+        run: |
+          uv run --frozen dataswamp export-openmetadata \
+            --bundle "$DEMO_DIR/bundle" \
+            --mode observed \
+            --output-dir "$DEMO_DIR/export/openmetadata"
 
       # Verifies digests, plan validity, reference closure and privilege mode,
       # and opens no socket. Proves the export is transmissible before any

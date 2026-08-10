@@ -219,11 +219,44 @@ def test_the_canary_runs_the_real_product_path(workflow_text: str) -> None:
     """Not a bespoke script: the same commands a user would run."""
     for command in (
         "dataswamp demo",
+        "dataswamp export-openmetadata",
         "dataswamp ingest-openmetadata",
         "dataswamp verify-om-ingestion",
         "pytest -q -m live_openmetadata",
     ):
         assert command in workflow_text, command
+
+
+def test_the_export_the_canary_ingests_is_one_it_actually_produced(
+    workflow_text: str,
+) -> None:
+    """`demo` emits the bundle and the *DataHub* export, not the OpenMetadata one.
+
+    The first live run failed here: the job ingested a directory nothing had
+    written. The export step and the paths that consume it have to agree, so
+    both halves are asserted rather than assumed.
+    """
+    assert '--output-dir "$DEMO_DIR/export/openmetadata"' in workflow_text
+    assert '--bundle "$DEMO_DIR/bundle"' in workflow_text
+    assert workflow_text.index("dataswamp export-openmetadata") < workflow_text.index("--dry-run")
+
+
+def test_the_run_directory_exists_before_the_always_steps_need_it(
+    workflow_text: str, workflow: dict[str, object]
+) -> None:
+    """Diagnostics and teardown use RUN_DIR as their working directory.
+
+    A job failing before RUN_DIR existed lost both — which is precisely when
+    they are worth most, and is how the first live run reported nothing about
+    itself beyond the failing step.
+    """
+    assert 'mkdir -p "$RUNNER_TEMP/live-om-run"' in workflow_text
+    steps = _job(workflow)["steps"]
+    assert isinstance(steps, list)
+    names = [str(step.get("name", "")) for step in steps]
+    creation = names.index("Choose working directories")
+    for step_name in ("Collect diagnostics", "Tear down the OpenMetadata stack"):
+        assert creation < names.index(step_name), step_name
 
 
 def test_the_live_marker_is_deselected_by_default() -> None:
