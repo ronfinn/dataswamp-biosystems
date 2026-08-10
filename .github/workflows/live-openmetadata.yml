@@ -1,0 +1,298 @@
+# The first tested compatibility point against a real OpenMetadata release.
+#
+# Everything in `ci.yml` proves the OpenMetadata contract offline: the emitted
+# plan is validated against upstream's own vendored JSON schemas, and the live
+# path is replayed into a strict fake that derives its routes from upstream's
+# resource classes rather than from our client. That is a lot of evidence, and
+# none of it is evidence that a real server accepts what we send. A payload can
+# satisfy every schema and still be refused; a fake can be green while the model
+# of OpenMetadata encoded in it is wrong. This job exists to find that out, and
+# for nothing else.
+#
+# It is deliberately **not** a required check. It boots MySQL, Elasticsearch, a
+# migration container and the OpenMetadata server, which takes minutes; as a
+# merge gate it would be red often enough to train reviewers to ignore it, which
+# is exactly how a canary stops being one. As a scheduled canary its red means
+# something, and #39's A/B/C/D triage decides what.
+#
+# No repository secret is involved anywhere. The instance runs with
+# OpenMetadata's own NoopAuthorizer/NoopFilter — classes that exist at the pinned
+# commit and are selected by variables the pinned `conf/openmetadata.yaml`
+# already interpolates — so there is no credential to leak and
+# OPENMETADATA_JWT_TOKEN is never set.
+name: live-openmetadata
+
+on:
+  # No inputs. The release under test is not a knob: it is whatever the pinned
+  # upstream compose file hardcodes at OPENMETADATA_SOURCE_COMMIT. An input
+  # would suggest the images follow it, and they would not.
+  workflow_dispatch:
+  schedule:
+    # Weekly, early Tuesday UTC — a day off live-datahub so two heavy stacks
+    # never contend for the same scheduled window.
+    - cron: "41 5 * * 2"
+  # Opt-in per pull request, by applying the `live-openmetadata` label. A change
+  # to the adapter's live path can then be checked against a real server *before*
+  # it merges rather than by the next canary. An unlabelled PR never starts a
+  # container.
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+# A serial queue: two OpenMetadata stacks on one runner would contend for
+# memory, and two runs reporting a compatibility point for different releases
+# would be worse than either.
+concurrency:
+  group: live-openmetadata
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: live OpenMetadata round-trip
+    # Forks get no value from burning runner time on somebody else's canary, and
+    # the scheduled trigger would otherwise fire in every one.
+    if: >-
+      github.repository == 'ronfinn/dataswamp-biosystems'
+      && (github.event_name != 'pull_request'
+          || contains(github.event.pull_request.labels.*.name, 'live-openmetadata'))
+    runs-on: ubuntu-latest
+    # Upstream's own `validate-docker-compose-quickstart.yml` gives this exact
+    # compose file 30 minutes on ubuntu-latest. This job runs strictly less of it
+    # — the Airflow service is dropped — plus the benchmark generation and the
+    # round trip, so 30 is a bound taken from upstream evidence rather than a
+    # guess.
+    timeout-minutes: 30
+
+    env:
+      # The pin. This is the whole point of the job: a *named* release the live
+      # path is verified against, not "whatever is latest". Bumping it is a
+      # deliberate act with a diff, which is what makes the compatibility
+      # statement in docs/openmetadata.md mean something. It is declared here and
+      # *checked* against the images the pinned compose actually resolves to,
+      # rather than injected into them.
+      OPENMETADATA_VERSION: "1.13.3"
+      # The commit the deployment is rendered from. It is the same commit the
+      # adapter's vendored schemas came from (OPENMETADATA_SCHEMA_COMMIT), and
+      # tests/adapters/openmetadata/test_live_om_pin.py asserts that.
+      OPENMETADATA_SOURCE_COMMIT: 255f6694913b84797064a42859cda3f2a3425dc6
+      # Read by OpenMetadataClient.from_environment(). OPENMETADATA_JWT_TOKEN is
+      # deliberately never set: the rendered deployment disables authorization,
+      # so this job needs no credential at all.
+      OPENMETADATA_HOST_PORT: http://localhost:8585/api
+      # Isolated from any other compose project that might exist on the runner.
+      # Note that this is *not* what isolates the stack — the rendered compose
+      # file is, by removing the fixed container names, the host bind mount and
+      # the hardcoded subnet upstream's file declares.
+      COMPOSE_PROJECT_NAME: dataswamp-live-om
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Outside the checkout: generation replaces a whole directory, and a
+      # generated tree inside the repository is a trap waiting for the next
+      # command that treats the checkout as a protected input. Set here rather
+      # than in the job's `env:`, where the `runner` context does not exist.
+      - name: Choose working directories
+        run: |
+          {
+            echo "DEMO_DIR=$RUNNER_TEMP/live-om-demo"
+            echo "RUN_DIR=$RUNNER_TEMP/live-om-run"
+          } >> "$GITHUB_ENV"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-groups --python 3.12
+
+      # Offline, and first: generating the export costs seconds, while standing
+      # up OpenMetadata costs minutes. If the benchmark cannot emit a valid
+      # export there is no reason to boot a catalogue to find that out.
+      - name: Generate a benchmark bundle and an observed OpenMetadata export
+        run: uv run --frozen dataswamp demo --output-dir "$DEMO_DIR"
+
+      # Verifies digests, plan validity, reference closure and privilege mode,
+      # and opens no socket. Proves the export is transmissible before any
+      # network failure can be blamed for it not being.
+      - name: Verify the export offline (opens no socket)
+        run: |
+          uv run --frozen dataswamp ingest-openmetadata \
+            --export-dir "$DEMO_DIR/export/openmetadata" --dry-run
+
+      - name: Fetch the pinned quickstart compose file
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUN_DIR"
+          curl -fsSL --retry 3 --retry-delay 5 \
+            "https://raw.githubusercontent.com/open-metadata/OpenMetadata/$OPENMETADATA_SOURCE_COMMIT/docker/docker-compose-quickstart/docker-compose.yml" \
+            -o "$RUN_DIR/upstream-docker-compose.yml"
+
+      # Upstream's file cannot be run as-is on a shared machine: it declares a
+      # fixed container_name per service, a `./docker-volume/db-data` host bind
+      # mount that outlives `down -v`, and a hardcoded 172.16.240.0/24 subnet.
+      # COMPOSE_PROJECT_NAME does not isolate any of those. The renderer applies
+      # the smallest set of edits that fix it, drops the Airflow service the
+      # server does not depend on, and prints every edit it made — see the
+      # script's docstring for why each one is necessary.
+      - name: Render the throwaway CI deployment
+        run: |
+          uv run --frozen python scripts/render_live_openmetadata_compose.py \
+            --source "$RUN_DIR/upstream-docker-compose.yml" \
+            --output "$RUN_DIR/docker-compose.yml" | tee "$RUN_DIR/compose-sanitization.txt"
+
+      - name: Record the pin
+        working-directory: ${{ env.RUN_DIR }}
+        run: |
+          set -euo pipefail
+          {
+            echo "openmetadata_version=$OPENMETADATA_VERSION"
+            echo "openmetadata_source_commit=$OPENMETADATA_SOURCE_COMMIT"
+            echo "compose_ref=https://github.com/open-metadata/OpenMetadata/blob/$OPENMETADATA_SOURCE_COMMIT/docker/docker-compose-quickstart/docker-compose.yml"
+            echo "adapter_commit=$GITHUB_SHA"
+          } | tee pinned-versions.txt
+          # The images the pinned compose actually resolves to, so a run's
+          # evidence says exactly what ran rather than what was meant to.
+          docker compose config --images | sort -u | tee -a pinned-versions.txt
+          # The declared pin is a claim about what this job tests. Upstream's
+          # compose hardcodes the tag, so the claim can be *checked* rather than
+          # asserted — and must be, or a source-commit bump would silently move
+          # the release while every stored report kept naming the old one.
+          server_image="$(docker compose config --images | grep 'openmetadata/server' | sort -u)"
+          if [ "$server_image" != "docker.getcollate.io/openmetadata/server:$OPENMETADATA_VERSION" ]; then
+            echo "the pinned compose resolves $server_image, but this job claims to test $OPENMETADATA_VERSION" >&2
+            exit 1
+          fi
+
+      # `config` interpolates and validates without starting anything. It is
+      # uploaded as evidence; the rendered file carries no credential, because
+      # the deployment has none.
+      - name: Record the effective compose configuration
+        working-directory: ${{ env.RUN_DIR }}
+        run: docker compose config > effective-compose.yml
+
+      - name: Pull the pinned images and record their digests
+        working-directory: ${{ env.RUN_DIR }}
+        run: |
+          set -euo pipefail
+          docker compose pull --quiet
+          for image in $(docker compose config --images | sort -u); do
+            docker image inspect "$image" \
+              --format '{{.RepoTags}} {{join .RepoDigests ","}}' | tee -a image-digests.txt
+          done
+
+      - name: Start the throwaway OpenMetadata stack
+        working-directory: ${{ env.RUN_DIR }}
+        run: docker compose up -d
+
+      # Readiness in three widening steps, each bounded, because "the container
+      # is running" is not readiness for any of them. The migration container
+      # must *complete*, the server's own health endpoint must answer, and then
+      # the API this adapter actually speaks to must answer on the mapped port.
+      #
+      # The server's upstream healthcheck declares no interval or start_period,
+      # so Docker's defaults would mark a still-booting server unhealthy well
+      # before it finishes migrating. Polling the endpoint from the runner is
+      # both more honest and more stable than reading that health state.
+      - name: Wait for schema migration to complete
+        working-directory: ${{ env.RUN_DIR }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            state="$(docker compose ps --all --format '{{.Service}} {{.State}} {{.ExitCode}}' \
+              | awk '$1 == "execute-migrate-all" {print $2, $3}')"
+            case "$state" in
+              "exited 0") echo "migration completed after ${attempt} attempt(s)."; exit 0 ;;
+              exited*)    echo "migration failed: $state" >&2; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "migration did not complete within 600s." >&2
+          exit 1
+
+      - name: Wait for the server health endpoint
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if curl -fsS --max-time 5 "http://localhost:8586/healthcheck" > /dev/null; then
+              echo "server healthy after ${attempt} attempt(s)."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "the server health endpoint did not answer within 300s." >&2
+          exit 1
+
+      # The health endpoint proves the process is up. This proves the REST API
+      # the adapter talks to is serving on the mapped port, which is a different
+      # claim and the one that matters.
+      - name: Wait for the API to answer
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if curl -fsS --max-time 10 "$OPENMETADATA_HOST_PORT/v1/system/version" \
+                | tee "$RUN_DIR/server-version.json" | grep -q version; then
+              echo "API answering after ${attempt} attempt(s)."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "the API did not answer within 150s." >&2
+          exit 1
+
+      - name: Ingest the observed export
+        run: |
+          uv run --frozen dataswamp ingest-openmetadata \
+            --export-dir "$DEMO_DIR/export/openmetadata" --yes
+
+      # Exits non-zero on any discrepancy or leak finding, so "zero
+      # discrepancies and zero leak findings" is the step's own exit status
+      # rather than a grep over its output. The report is uploaded either way —
+      # a red canary is worth far more with its evidence attached.
+      - name: Verify the round trip
+        run: |
+          uv run --frozen dataswamp verify-om-ingestion \
+            --export-dir "$DEMO_DIR/export/openmetadata" \
+            --output-dir "$RUN_DIR/roundtrip"
+
+      # The same four claims asserted structurally, per entity family, plus the
+      # live-only negative controls that prove the readback returns the server's
+      # data rather than an empty set that would compare clean against anything.
+      - name: Run the live test suite
+        env:
+          DATASWAMP_LIVE_OM_EXPORT_DIR: ${{ env.DEMO_DIR }}/export/openmetadata
+        run: |
+          uv run --frozen pytest -q -m live_openmetadata \
+            tests/adapters/openmetadata/test_live_openmetadata.py \
+            --junitxml="$RUN_DIR/live-pytest.xml"
+
+      - name: Collect diagnostics
+        if: always()
+        working-directory: ${{ env.RUN_DIR }}
+        run: |
+          mkdir -p diagnostics
+          docker compose ps --all > diagnostics/compose-ps.txt 2>&1 || true
+          docker compose logs --no-color --tail 2000 > diagnostics/compose-logs.txt 2>&1 || true
+
+      - name: Upload the round-trip report and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-openmetadata-${{ env.OPENMETADATA_VERSION }}-${{ github.run_id }}
+          path: ${{ env.RUN_DIR }}
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Unconditional, and `-v`: the instance is throwaway, and leaving its
+      # volumes behind would let one run's state reach the next one, which is
+      # precisely the kind of contamination this job exists to detect.
+      - name: Tear down the OpenMetadata stack
+        if: always()
+        working-directory: ${{ env.RUN_DIR }}
+        run: docker compose down -v --remove-orphans || true

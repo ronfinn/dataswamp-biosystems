@@ -567,6 +567,122 @@ or a fake having agreed.
 
 ---
 
+## The live canary
+
+`.github/workflows/live-openmetadata.yml` is what can earn that point, and the
+only thing that can. It stands up a real, pinned, throwaway OpenMetadata and runs
+the whole product path through it:
+
+```text
+dataswamp demo → ingest-openmetadata --dry-run → [start the server] →
+ingest-openmetadata --yes → verify-om-ingestion → pytest -m live_openmetadata
+```
+
+It is **optional and non-blocking**: `workflow_dispatch`, a weekly schedule, and
+pull requests carrying the `live-openmetadata` label. There is no `push` trigger
+and it is never a required check — a canary that blocks merges gets clicked past.
+
+### What is pinned, and how
+
+| Thing | Value | Where |
+| --- | --- | --- |
+| Release under test | `1.13.3` | `OPENMETADATA_VERSION` in the workflow |
+| Deployment source | `255f6694913b84797064a42859cda3f2a3425dc6` | `OPENMETADATA_SOURCE_COMMIT`, and `OPENMETADATA_SCHEMA_COMMIT` in `mapping.py` |
+| Images | `openmetadata/server:1.13.3`, `openmetadata/db:1.13.3`, `elasticsearch:9.3.0` | hardcoded by upstream's compose at that commit |
+
+The release is not an input. Upstream's compose hardcodes the tags, so an input
+would imply the images follow it and they would not; instead the job *checks*
+that the images the pinned compose resolves to carry the release it claims to
+test, and fails if they disagree. `tests/adapters/openmetadata/test_live_om_pin.py`
+holds the constants, the workflow and this document to the same pin offline.
+
+The deployment commit is deliberately the same commit the vendored schemas came
+from. Validating payloads against one version of OpenMetadata's model while
+running against another, and reporting the result as one compatibility point,
+would be worse than testing neither.
+
+### The deployment is upstream's, sanitized
+
+`scripts/render_live_openmetadata_compose.py` fetches upstream's own
+`docker/docker-compose-quickstart/docker-compose.yml` at the pinned commit and
+applies the smallest set of edits that make it safe on a shared machine. Running
+a hand-written approximation instead would drift, and a drifted canary stops
+testing the real thing.
+
+Upstream's file is written for a laptop, and `COMPOSE_PROJECT_NAME` does **not**
+isolate it. The renderer therefore:
+
+* drops the `ingestion` (Airflow) service — the server's `depends_on` names only
+  `elasticsearch`, `mysql` and `execute-migrate-all`, and DataSwamp speaks to the
+  REST API directly;
+* removes every fixed `container_name`, which would otherwise collide;
+* replaces the `./docker-volume/db-data:/var/lib/mysql` **host bind mount** with a
+  named volume, so `down -v` really destroys the database;
+* removes the hardcoded `172.16.240.0/24` subnet;
+* publishes only `8585` (API) and `8586` (health) to the host;
+* removes `restart: always`, which would turn a crash loop into a job that hangs
+  to its timeout.
+
+It is **total**: if something it expects to sanitize is absent, it fails rather
+than rendering a quietly weaker deployment. That failure is the signal to read
+the upstream diff.
+
+### No secret, anywhere
+
+Authorization is switched to OpenMetadata's own `NoopAuthorizer` / `NoopFilter`
+— classes that exist at the pinned commit, selected through the
+`AUTHORIZER_CLASS_NAME` / `AUTHORIZER_REQUEST_FILTER` variables the pinned
+`conf/openmetadata.yaml` already interpolates. Nothing is invented, and the
+throwaway instance needs no credential at all, so `OPENMETADATA_JWT_TOKEN` is
+never set, no repository secret is used, and there is no token to keep out of a
+log or an artifact.
+
+### Readiness, in three widening steps
+
+"The container is running" is not readiness for any of them, and each is bounded:
+
+1. the migration container must *complete* with exit code 0;
+2. the server's own health endpoint on `8586` must answer;
+3. the REST API on `8585` — the thing the adapter actually talks to — must answer.
+
+The server's upstream healthcheck declares no `interval` or `start_period`, so
+Docker's defaults would mark a still-migrating server unhealthy well before it
+finishes. Polling the endpoint from the runner is both more honest and stabler
+than reading that health state.
+
+### A red canary is data
+
+A red run is classified **before** any semantic change, exactly as for DataHub:
+
+* **A — a DataSwamp bug.** Wrong path, verb, envelope, FQN encoding, pagination,
+  attachment or lineage semantics. Fix the bug, and add coverage so the fake can
+  catch it next time. Never widen normalization because the fake accepted it.
+* **B — genuine server-derived or server-owned state.** The *only* branch that may
+  widen normalization, and only with all six of: real-run evidence; a
+  justification that the value is genuinely server-generated; a focused
+  forgiveness test; a paired test proving an adjacent DataSwamp-sent mutation is
+  still caught; an `OM_NORMALIZATION_VERSION` bump; and a changelog entry.
+* **C — an upstream API or model difference.** Record the evidence. Transport
+  corrections stay in `client.py`. If deterministic export bytes would have to
+  move, **stop** and explain the incompatibility before touching a fixture.
+* **D — infrastructure or transient.** Image pull failure, runner exhaustion,
+  startup timeout, a flaky Elasticsearch. Keep the artifacts and re-run the same
+  pin. Never normalize.
+
+The question that settles A versus B is always the same: **did DataSwamp send a
+value at this exact path?** If it did and the server changed it, that is not a
+normalization candidate under any circumstances.
+
+### Evidence
+
+Artifacts upload on success and failure alike: the pin and resolved image
+digests, the sanitization log, the effective compose configuration, container
+status and logs, readiness evidence, the live pytest output, and
+`roundtrip-report.json` / `discrepancies.jsonl` / `leak-findings.jsonl`. None of
+it can contain a credential, because the deployment has none.
+
+---
+
 ## The live path
 
 ```text

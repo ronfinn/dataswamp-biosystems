@@ -394,7 +394,13 @@ referential integrity, not just happy-path execution.
   on them, never the reverse. `tests/adapters/test_isolation.py` enforces this.
 - **Never claim a live OpenMetadata compatibility point.**
   `VERIFIED_OPENMETADATA_VERSION` is `None` and stays `None` until a real-server
-  canary has actually run. Reading, vendoring or refreshing OpenMetadata's JSON
+  canary has actually run *completely green* — server started, ingest succeeded,
+  readback succeeded, all four claims green, negative controls passed. A workflow
+  existing is not a workflow having run; containers starting, a partial ingest or
+  a compiling test suite earn nothing. When it is earned it moves together with
+  the workflow pin, `docs/openmetadata.md`, the CHANGELOG and
+  `tests/adapters/openmetadata/test_live_om_pin.py`, and it names a *tested
+  point*, never a range. Reading, vendoring or refreshing OpenMetadata's JSON
   schemas establishes nothing about a running server, and neither does schema
   validity: a payload can satisfy every schema and still be refused. **A green
   offline fake establishes nothing either** — the fake is a contract simulator,
@@ -483,6 +489,25 @@ referential integrity, not just happy-path execution.
   strengthen a leak probe. Leak probes use only markers the export contract itself
   defines: the reserved `dataswampTruth*` namespace and the privileged tag.
   `tests/adapters/test_isolation.py` enforces this.
+- **Never point the OpenMetadata canary at anything but a throwaway CI instance.**
+  Not a developer's local OpenMetadata, not a shared or third-party catalogue.
+  The deployment is rendered from upstream's pinned compose by
+  `scripts/render_live_openmetadata_compose.py`, which must keep removing the
+  fixed container names, the `./docker-volume/db-data` host bind mount and the
+  hardcoded subnet — `COMPOSE_PROJECT_NAME` isolates none of them. Teardown is
+  `down -v` under `if: always()`. Never make the job a required check, never let
+  it run on `push` or on an unlabelled pull request, and never give it a
+  repository secret: authorization is disabled with OpenMetadata's own
+  `NoopAuthorizer`/`NoopFilter`, so there is no credential to hold.
+- **Never respond to a red OpenMetadata canary before classifying it.** Every
+  live discrepancy gets a verdict first: **A** DataSwamp bug, **B** genuine
+  server-derived/server-owned metadata, **C** upstream API/model difference, or
+  **D** infrastructure/transient. Only **B** may widen normalization, and only
+  with all six requirements. **C** must stop before any deterministic export
+  fixture moves — explain the incompatibility first. **D** never justifies a
+  normalization change: keep the artifacts and re-run the same pin. The decision
+  tree is in `docs/openmetadata.md`; never disable, skip or unpin the canary to
+  make it green.
 - **Never accept an OpenMetadata JWT as a CLI argument**, and never write one
   into a log, report, exception, provenance record or recorded URL. Configuration
   is `OPENMETADATA_HOST_PORT` and `OPENMETADATA_JWT_TOKEN`, from the environment

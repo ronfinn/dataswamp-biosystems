@@ -171,6 +171,7 @@ remain future work.
 [#29]: https://github.com/ronfinn/dataswamp-biosystems/issues/29
 [#33]: https://github.com/ronfinn/dataswamp-biosystems/issues/33
 [#35]: https://github.com/ronfinn/dataswamp-biosystems/issues/35
+[#39]: https://github.com/ronfinn/dataswamp-biosystems/issues/39
 
 ### v0.2 — Metadata and Lineage Integrations
 
@@ -233,8 +234,15 @@ remain future work.
   until a real-server canary earns a point, per
   [ADR 0006](adr/0006-compatibility-points-not-ranges.md). A green offline fake is
   not evidence about a server — that is what the fake being a *contract simulator*
-  means. A pinned real-server canary, and the compatibility point it would earn,
-  remain future work. See [openmetadata.md](openmetadata.md).
+  means.
+
+  The optional `live-openmetadata` canary ([#39]) now exists to earn that point:
+  it stands up a real, pinned, throwaway OpenMetadata `1.13.3` — upstream's own
+  quickstart compose, sanitized for CI, with no repository secret — and runs the
+  whole product path through it. It is non-blocking and never a required check.
+  **Implementing a canary is not running one**, so the constant is unchanged
+  until a completely green real-server run exists. See
+  [openmetadata.md](openmetadata.md).
 * OpenLineage event export
 * Neo4j graph export
 * Integration examples

@@ -15,6 +15,48 @@ entries below.
 
 ## [Unreleased]
 
+### Added
+
+- **Optional live OpenMetadata canary.**
+  `.github/workflows/live-openmetadata.yml` stands up a real, pinned, throwaway
+  OpenMetadata `1.13.3` and runs the whole product path through it —
+  `demo` → `ingest-openmetadata --dry-run` → start → `ingest-openmetadata --yes`
+  → `verify-om-ingestion` → a live pytest suite. It is optional and
+  non-blocking: `workflow_dispatch`, a weekly schedule, and pull requests
+  carrying the `live-openmetadata` label. There is no `push` trigger and it is
+  never a required check. Closes
+  [#39](https://github.com/ronfinn/dataswamp-biosystems/issues/39).
+
+  The deployment is upstream's own quickstart compose at
+  `255f6694913b84797064a42859cda3f2a3425dc6` — the same commit the vendored
+  schemas came from — sanitized by
+  `scripts/render_live_openmetadata_compose.py` rather than reimplemented: fixed
+  container names, the `./docker-volume/db-data` host bind mount and the
+  hardcoded subnet are removed, the Airflow service the server does not depend
+  on is dropped, and only `8585`/`8586` reach the host. The renderer is total —
+  an upstream change that removes something it expects to sanitize is a render
+  failure to read, not a quietly weaker deployment.
+
+  Authorization uses OpenMetadata's own `NoopAuthorizer`/`NoopFilter`, selected
+  through variables the pinned `conf/openmetadata.yaml` already interpolates, so
+  the job needs **no repository secret and no token**: `OPENMETADATA_JWT_TOKEN`
+  is never set.
+
+  A new `live_openmetadata` pytest marker carries the real-server suite, and is
+  deselected by default alongside `live`. The suite skips with a clear reason
+  when `OPENMETADATA_HOST_PORT` is unset and never falls back to a local guess.
+  It asserts the four claims independently, per-family materialization for every
+  supported entity family, the corrected DataProduct identity and asset
+  attachments from #37, and three load-bearing negative controls — a withheld
+  entity must be reported as an extra, a mutated expectation must be reported
+  against the real readback, and a deliberately foreign entity must *not* be
+  accused of being a DataSwamp extra — so that an empty or broken readback can
+  never produce a green canary.
+
+  No version constant moved. `VERIFIED_OPENMETADATA_VERSION` remains `None`:
+  implementing a canary is not running one, and only a completely green
+  real-server run can set it.
+
 ### Fixed
 
 - **OpenMetadata DataProduct identity and asset-attachment transport.** One
