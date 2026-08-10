@@ -101,7 +101,7 @@ study             dataswamp-biosystems.<study-id>
 dataset           dataswamp-biosystems.<study-id>.<dataset-id>
 file              dataswamp-biosystems.<study-id>.<dataset-id>.<file-id>
 domain            dataswamp-<programme-id>
-data product      dataswamp-<programme-id>.<product-id>
+data product      dataswamp-<encoded programme-id "." product-id>
 team              dataswamp-<team-id>
 glossary          dataswamp-<vocabulary-id>
 term              dataswamp-<vocabulary-id>.<term-id>
@@ -121,7 +121,18 @@ copy beside the first instead of updating it.
 Team, Glossary and Classification namespaces are *global* — unlike a Container,
 there is no service to scope them under. A bare `genomics` domain would collide
 with any other producer's, so every root-level identity carries the `dataswamp`
-prefix.
+prefix — and is a **single segment**, because the server derives a root entity's
+FQN from `quoteName(name)` alone. A dotted root-level identity would imply a
+parent no server can supply: the DataProduct identity was exactly that until #37,
+declaring `dataswamp-<programme>.<product>` while sending `name: <product>`, so a
+real catalogue would have created the unnamespaced `<product>` instead.
+
+That is also why a data product's two ids are joined *before* encoding rather
+than with a literal separator. `.` would trigger OpenMetadata's `needsQuoting`
+and come back as a quoted FQN; `-` is inside the codec's safe alphabet, so
+programme `a-b` + product `c` and programme `a` + product `b-c` would collapse
+onto one name. Encoding the pair leaves the separator as `~2e`, which no encoded
+id can otherwise produce.
 
 **The safe-id codec is injective.** Anything outside `[a-z0-9-]` becomes `~`
 followed by two hex digits per UTF-8 byte, and `~` escapes itself, so
@@ -507,9 +518,11 @@ precisely because these get conflated:
 | `OPENMETADATA_MODEL_TARGET_RANGE` | A **declared target** for payload shape. Not evidence, not a statement about any REST endpoint | Nothing. It is an intention | `>=1.9,<2` |
 | `VERIFIED_OPENMETADATA_VERSION` | The one release the live path was actually **run** against | A green canary run, and only that | **`None`** |
 
-`OM_ADAPTER_VERSION` is `1.0.0`, bumped when the emitted plan changes for
-unchanged input. It did **not** move for the live path: the emitted bytes are
-unchanged, and the Issue A fixtures are byte-identical.
+`OM_ADAPTER_VERSION` is `1.1.0`, bumped when the emitted plan changes for
+unchanged input. It did **not** move for the live path — those emitted bytes were
+unchanged. It *did* move for #37, which corrected the root-level DataProduct
+identity: a consumer holding a DataProduct FQN emitted by `1.0.0` cannot match one
+emitted now.
 
 Two more versions belong to the live path, and to nothing else:
 
@@ -637,7 +650,7 @@ operations cannot be fully written offline:
 | Operation | Upstream contract |
 | --- | --- |
 | custom-property registration | `GET /api/v1/metadata/types/name/{entityType}` for the type's UUID, then `PUT /api/v1/metadata/types/{id}` with a `CustomProperty` body |
-| data-product asset attachment | `PUT /api/v1/dataProducts/name/{fqn}/assets/add` with a `BulkAssets` body |
+| data-product asset attachment | `PUT /api/v1/dataProducts/{fqn}/assets/add` with a `BulkAssets` body |
 | lineage | `PUT /api/v1/lineage` with an `AddLineage` body whose endpoints are `EntityReference` values |
 
 The emitted plan already declares each of those targets as a `Reference` block
@@ -655,13 +668,11 @@ converge on one estate instead of conflicting. Readback is
 
 > **A note on the emitted `endpoint` annotation.** Plan records carry an
 > `endpoint` string from Issue A. `client.py` deliberately ignores it and owns the
-> paths itself, because a transport path is a live fact. One of those annotations
-> is in fact wrong — `data-product-assets` records name
-> `/api/v1/dataProducts/assets/add`, while the real endpoint is
-> `/api/v1/dataProducts/name/{fqn}/assets/add`. Because the annotation is inert
-> documentation rather than something the transport reads, the live path is
-> unaffected and the Issue A fixtures were left byte-identical. Correcting the
-> annotation would move those fixtures and is a separate, deliberate change.
+> paths itself, because a transport path is a live fact. That independence earned
+> its keep: the annotation and the client disagreed until #37, and because the
+> transport never read the annotation, the disagreement was a documentation defect
+> rather than a live one. Both now name `/api/v1/dataProducts/{fqn}/assets/add`,
+> and they are held together by a test rather than by attentiveness.
 
 ---
 

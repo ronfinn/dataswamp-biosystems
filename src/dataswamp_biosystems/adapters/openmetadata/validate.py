@@ -64,7 +64,10 @@ FQN_PATTERNS: dict[str, re.Pattern[str]] = {
     "domain": re.compile(rf"^{NAMESPACE}-{_SEGMENT}$"),
     "storageService": re.compile(rf"^{re.escape(SERVICE_NAME)}$"),
     "container": re.compile(rf"^{re.escape(SERVICE_NAME)}(\.{_SEGMENT}){{1,3}}$"),
-    "dataProduct": re.compile(rf"^{NAMESPACE}-{_SEGMENT}\.{_SEGMENT}$"),
+    # One segment, not two. A DataProduct is root-level in OpenMetadata — the
+    # server derives its FQN from ``name`` alone and keeps the owning Domain in a
+    # field — so a dotted identity here would be a prefix no server could restore.
+    "dataProduct": re.compile(rf"^{NAMESPACE}-{_SEGMENT}$"),
     "lineageEdge": re.compile(
         rf"^{re.escape(SERVICE_NAME)}(\.{_SEGMENT}){{1,3}}"
         rf"->{re.escape(SERVICE_NAME)}(\.{_SEGMENT}){{1,3}}$"

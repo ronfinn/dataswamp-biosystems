@@ -14,6 +14,11 @@ from dataswamp_biosystems.adapters.openmetadata import ExportMode, SourceGraph, 
 from dataswamp_biosystems.adapters.openmetadata import fqn as om_fqn
 from dataswamp_biosystems.adapters.openmetadata.validate import FQN_PATTERNS
 
+# Upstream's own segment-quoting rule, transcribed in the fake from
+# FullyQualifiedName at the pinned tree. Imported from there rather than restated
+# here so there is exactly one statement of what the server does.
+from tests.adapters.openmetadata.fake_om import _quote_name
+
 # Ordinary slugs, then values a *defect* could plausibly inject. An observed
 # graph is deliberately allowed to hold things the strict truth models forbid, so
 # the codec has to survive all of them.
@@ -212,3 +217,134 @@ def test_the_adapter_does_not_import_datahub_identity_helpers() -> None:
             assert "datahub" not in node.module
         elif isinstance(node, ast.Import):
             assert all("datahub" not in alias.name for alias in node.names)
+
+
+# ---------------------------------------------------------------------------
+# DataProduct: a root-level identity, and the only one that had to be rebuilt
+# ---------------------------------------------------------------------------
+#
+# OpenMetadata derives a DataProduct's FQN from its ``name`` alone, so the
+# identity has to be a single segment that is already its own FQN. See #37.
+
+
+def test_a_data_product_identity_is_one_root_level_segment() -> None:
+    """No dot, so no parent is implied that no server could supply."""
+    fqn = om_fqn.data_product_fqn("prog-nsclc", "dp-omics")
+    assert om_fqn.SEPARATOR not in fqn
+    assert fqn.startswith(f"{om_fqn.NAMESPACE}-")
+    assert om_fqn.parent_fqn(fqn) is None
+    assert om_fqn.name_of(fqn) == fqn
+
+
+def test_a_data_product_name_is_what_the_server_would_store(mini_truth: object) -> None:
+    """The emitted ``name`` and the declared FQN must be the same string.
+
+    They are what a server compares: it stores ``quoteName(name)`` and DataSwamp
+    addresses the result by FQN. If they ever diverge again, every FQN-addressed
+    read and write goes to an entity the catalogue never created.
+    """
+    products = [
+        r
+        for r in mini_truth.entities  # type: ignore[attr-defined]
+        if r.entity_type == "dataProduct" and r.create
+    ]
+    assert products
+    for record in products:
+        assert record.create["name"] == record.fqn
+        assert _quote_name(record.create["name"]) == record.fqn
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        (("a-b", "c"), ("a", "b-c")),  # a literal hyphen join would collapse these
+        (("prog", "dp-1"), ("prog-dp", "1")),
+        (("a.b", "c"), ("a", "b.c")),  # …and so would a literal dot join
+        (("a~b", "c"), ("a", "b~c")),
+        (("a", "b"), ("b", "a")),
+    ],
+)
+def test_distinct_id_pairs_never_share_a_data_product_identity(
+    left: tuple[str, str], right: tuple[str, str]
+) -> None:
+    assert om_fqn.data_product_fqn(*left) != om_fqn.data_product_fqn(*right)
+
+
+@pytest.mark.parametrize("programme", HOSTILE_IDS)
+@pytest.mark.parametrize("product", ["dp-omics", "dp.omics", "dp~omics"])
+def test_a_data_product_identity_survives_a_hostile_id(programme: str, product: str) -> None:
+    """Injective, reversible, and never in need of server-side quoting."""
+    fqn = om_fqn.data_product_fqn(programme, product)
+    assert om_fqn.data_product_ids_from_fqn(fqn) == (programme, product)
+    assert om_fqn.SAFE_SEGMENT.fullmatch(fqn.removeprefix(f"{om_fqn.NAMESPACE}-"))
+    # The server-side rule, modelled independently in the fake from upstream's
+    # FullyQualifiedName. A name it would quote is a name whose stored FQN is not
+    # the string DataSwamp declared.
+    assert _quote_name(fqn) == fqn
+
+
+def test_a_data_product_identity_is_not_recovered_by_the_generic_helper() -> None:
+    """The generic helper's answer is family-dependent, and stays visible.
+
+    ``id_from_fqn`` recovers a *single* id, which a data product does not have —
+    its identity is a pair. Rather than teach the generic helper an entity-specific
+    special case, the pair has its own decoder, and the generic one refuses the
+    pair separator outright instead of returning a plausible-looking id.
+    """
+    fqn = om_fqn.data_product_fqn("prog-nsclc", "dp-omics")
+    with pytest.raises(ValueError, match="not an encoded DataSwamp id"):
+        om_fqn.id_from_fqn(fqn)
+    assert om_fqn.data_product_ids_from_fqn(fqn) == ("prog-nsclc", "dp-omics")
+
+
+def test_the_data_product_decoder_refuses_something_that_is_not_one() -> None:
+    with pytest.raises(ValueError, match="root-level identity"):
+        om_fqn.data_product_ids_from_fqn(om_fqn.classification_fqn())
+    with pytest.raises(ValueError, match="DataProduct identity"):
+        om_fqn.data_product_ids_from_fqn(om_fqn.team_fqn("team-genomics"))
+    with pytest.raises(ValueError, match="DataProduct identity"):
+        om_fqn.data_product_ids_from_fqn(om_fqn.dataset_fqn("study-a", "ds-b"))
+
+
+# ---------------------------------------------------------------------------
+# The 256-character entityName bound, prefix included
+# ---------------------------------------------------------------------------
+
+
+def test_a_root_level_name_is_bounded_including_its_namespace_prefix() -> None:
+    """``encode_id`` bounds the segment; the emitted name is what must fit.
+
+    A root-level identity carries a constant prefix on top of its encoded id, so
+    checking only the encoding leaves those characters unaccounted for and lets an
+    over-long name reach a server that will refuse it.
+    """
+    limit = om_fqn.MAX_NAME_LENGTH
+    prefix = len(f"{om_fqn.NAMESPACE}-")
+
+    at_limit = "a" * (limit - prefix)
+    assert len(om_fqn.team_fqn(at_limit)) == limit
+
+    with pytest.raises(ValueError, match="entityName limit"):
+        om_fqn.team_fqn("a" * (limit - prefix + 1))
+    with pytest.raises(ValueError, match="entityName limit"):
+        om_fqn.domain_fqn("a" * (limit - prefix + 1))
+    with pytest.raises(ValueError, match="entityName limit"):
+        om_fqn.glossary_fqn("a" * (limit - prefix + 1))
+
+
+def test_a_data_product_name_is_bounded_across_both_of_its_ids() -> None:
+    """The bound applies to the pair, not to either id alone."""
+    limit = om_fqn.MAX_NAME_LENGTH
+    # prefix + programme + the pair separator + product
+    budget = limit - len(f"{om_fqn.NAMESPACE}-") - len(om_fqn.DATA_PRODUCT_KEY_SEPARATOR)
+    programme = "a" * (budget // 2)
+    product = "b" * (budget - len(programme))
+
+    assert len(om_fqn.data_product_fqn(programme, product)) == limit
+    assert om_fqn.data_product_ids_from_fqn(om_fqn.data_product_fqn(programme, product)) == (
+        programme,
+        product,
+    )
+
+    with pytest.raises(ValueError, match="entityName limit"):
+        om_fqn.data_product_fqn(programme, product + "b")

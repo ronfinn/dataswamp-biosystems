@@ -66,7 +66,14 @@ from dataswamp_biosystems.adapters.openmetadata import fqn as om_fqn
 from dataswamp_biosystems.adapters.openmetadata.coverage import ConceptCounts, build_coverage
 
 # Bumped when the emitted plan changes for unchanged input.
-OM_ADAPTER_VERSION = "1.0.0"
+#
+# 1.1.0 corrected the root-level DataProduct identity (#37): OpenMetadata derives
+# a DataProduct's FQN from its ``name`` alone, so the previous dotted, programme-
+# prefixed identity named an entity no server would have created. A consumer
+# holding a DataProduct FQN emitted by 1.0.0 cannot match one emitted now — a
+# different emitted contract rather than a corrected annotation, which is why
+# this is a minor rather than a patch.
+OM_ADAPTER_VERSION = "1.1.0"
 
 # The exact OpenMetadata schema revision this adapter's payloads were written
 # against and are validated against offline. A *named artefact*, not a claim
@@ -140,7 +147,12 @@ ENDPOINTS: dict[str, str] = {
     "storageService": "/api/v1/services/storageServices",
     "container": "/api/v1/containers",
     "dataProduct": "/api/v1/dataProducts",
-    "dataProductAssets": "/api/v1/dataProducts/assets/add",
+    # Addressed by the data product's fully-qualified name. OpenMetadata's
+    # DataProductResource exposes the asset *write* only in this form — there is
+    # no ``/name/{fqn}/assets/add`` — and the repository resolves the segment
+    # through ``getByName``, so what goes there is an FQN despite the upstream
+    # parameter being called ``name``.
+    "dataProductAssets": "/api/v1/dataProducts/{fqn}/assets/add",
     "lineage": "/api/v1/lineage",
 }
 

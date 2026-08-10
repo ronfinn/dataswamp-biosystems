@@ -36,6 +36,7 @@ from dataswamp_biosystems.adapters.openmetadata.mapping import (
     TRUTH_ONLY_PROPERTY_PREFIX,
     ExportMode,
 )
+from dataswamp_biosystems.adapters.openmetadata.normalize import is_platform_generated
 
 from .conftest import LiveFixture
 
@@ -426,3 +427,54 @@ def test_truth_mode_does_not_report_its_own_markers_as_leaks(om_live_truth: Live
     """A privileged export is *meant* to carry them; the probe is observed-only."""
     result = compare(om_live_truth.export.records, om_live_truth.read(), ExportMode.TRUTH)
     assert result.leak_findings == ()
+
+
+# ---------------------------------------------------------------------------
+# The reverse edge an attachment creates
+# ---------------------------------------------------------------------------
+#
+# ``bulkAddAssets`` writes one DATA_PRODUCT --HAS--> asset relationship, and
+# OpenMetadata reads that same relationship back to populate the *asset's*
+# ``dataProducts`` field. So a container carrying its product is the visible half
+# of a write the export asked for — expected state, not server-added metadata,
+# and therefore compared rather than forgiven. See #37.
+
+
+def test_the_reverse_data_product_edge_is_expected_not_forgiven(om_live: LiveFixture) -> None:
+    """A clean run proves the field is expected; this proves it is *compared*.
+
+    If it were on the forgiveness list instead, the assertion below would pass for
+    the wrong reason — an attachment landing on a container DataSwamp never named
+    would be just as invisible.
+    """
+    assert not is_platform_generated("container", "dataProducts"), (
+        "dataProducts must not be forgiven as platform-generated"
+    )
+
+    attached = {
+        asset
+        for record in om_live.export.records
+        if record.phase == "data-product-assets"
+        for asset in (
+            str(item.get("fullyQualifiedName"))
+            for item in (record.plan or {}).get("assets", [])
+            if isinstance(item, dict)
+        )
+    }
+    assert attached, "the export attaches no assets, so there is nothing to prove"
+    assert om_live.compare().clean
+
+
+def test_an_unexpected_data_product_on_a_container_is_still_reported(
+    om_live: LiveFixture,
+) -> None:
+    """The paired case: a product association the export never asked for.
+
+    This is the failure the forgiveness route would have hidden — someone else's
+    data product claiming a DataSwamp container, or our own attachment landing on
+    the wrong one.
+    """
+    product = _a_data_product(om_live)
+    om_live.state.inject_assets[product] = ["dataswamp-biosystems.study-x.uninvited"]
+    result = om_live.compare()
+    assert not result.clean

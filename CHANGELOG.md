@@ -15,6 +15,54 @@ entries below.
 
 ## [Unreleased]
 
+### Fixed
+
+- **OpenMetadata DataProduct identity and asset-attachment transport.** One
+  defect across four surfaces, found while confirming what looked like an inert
+  endpoint-annotation typo. Closes
+  [#37](https://github.com/ronfinn/dataswamp-biosystems/issues/37).
+
+  OpenMetadata derives a DataProduct's `fullyQualifiedName` from its `name`
+  alone — `DataProductRepository` does not override the root-level default, and
+  the owning Domain is a field rather than a path component. The adapter declared
+  `dataswamp-<programme>.<product>` while sending `name: <product>`, so a real
+  catalogue would have created the unnamespaced `<product>`: every FQN-addressed
+  read and write named an entity no server had. The identity is now the single
+  root-level segment `dataswamp-<encoded programme>~~<encoded product>`, with the
+  two ids encoded *separately* — joining first and encoding after is not
+  injective, because the codec escapes a separator inside an id and the joining
+  one identically.
+
+  The live client sent `PUT /api/v1/dataProducts/name/{fqn}/assets/add`, which
+  `DataProductResource` does not declare in any form; the write is
+  `/{fqn}/assets/add`, and only the *read* uses `/name/{fqn}/assets`. The emitted
+  `ENDPOINTS["dataProductAssets"]` annotation named a third path again, and is now
+  correct and pinned against the client's route by a test.
+
+  None of it was caught offline because `fake_om.py` agreed with the client on
+  all three points — it derived a DataProduct FQN as `domain.name`, matched
+  `/name/{fqn}` plus any tail, and stored only the forward half of an attachment.
+  It now derives every FQN from upstream's `quoteName(name)`, enumerates the two
+  asset routes separately, and materializes the reverse `dataProducts` edge that
+  `bulkAddAssets` creates. A test asserts it imports nothing from `client.py`.
+
+  A container's `dataProducts` is therefore compared as expected readback state
+  derived from the plan's own attachments, not forgiven:
+  `OM_NORMALIZATION_VERSION` stays `1` and `OM_ROUNDTRIP_SCHEMA_VERSION` stays
+  `1`. `VERIFIED_OPENMETADATA_VERSION` stays `None` — this was proved from pinned
+  source, and no server has been run.
+
+  **`OM_ADAPTER_VERSION` moves `1.0.0` → `1.1.0`**: emitted DataProduct identity
+  changes, so a consumer holding an FQN from a `1.0.0` export cannot match one
+  emitted now. Only the two `data-product` and `data-product-assets` records in
+  the committed OpenMetadata entity fixtures move; mapping coverage, lineage,
+  test results, custom properties, the DataHub fixtures and the benchmark golden
+  digests are byte-identical.
+
+  Also fixed while proving the 256-character bound: `encode_id` checked only the
+  *encoded segment*, leaving every root-level identity's `dataswamp-` prefix
+  unaccounted for. The bound now applies to the emitted name.
+
 ### Added
 
 - **OpenMetadata live ingestion and round-trip validation, offline-testable.**

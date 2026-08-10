@@ -170,11 +170,84 @@ def test_the_fake_refuses_the_wrong_request_envelope_for_assets() -> None:
         status, body = _raw(
             server.host_port,
             "PUT",
-            "/api/v1/dataProducts/name/dataswamp-x.p/assets/add",
+            "/api/v1/dataProducts/p/assets/add",
             [{"id": "x", "type": "container"}],
         )
     assert status == 400
     assert "BulkAssets" in body
+
+
+def test_the_fake_rejects_the_asset_write_route_upstream_does_not_declare() -> None:
+    """``/name/{fqn}/assets/add`` is not a spelling of the write — it is a 404.
+
+    ``DataProductResource`` declares the asset *read* at ``/name/{fqn}/assets``
+    and the *write* at ``/{name}/assets/add``; there is no ``/name`` form of the
+    write at all. The client sent the phantom route for the whole of #35 and the
+    fake accepted it, because the fake matched ``/name/{fqn}`` plus any tail. See
+    #37 — a fake that generalises a route the server enumerates cannot catch the
+    client.
+    """
+    with FakeOpenMetadataServer() as server:
+        _raw(
+            server.host_port,
+            "PUT",
+            "/api/v1/domains",
+            {"name": "dataswamp-x", "description": "d", "domainType": "Source-aligned"},
+        )
+        _raw(
+            server.host_port,
+            "PUT",
+            "/api/v1/dataProducts",
+            {"name": "p", "description": "d", "domains": ["dataswamp-x"]},
+        )
+        phantom, body = _raw(
+            server.host_port,
+            "PUT",
+            "/api/v1/dataProducts/name/p/assets/add",
+            {"assets": []},
+        )
+        real, _ = _raw(
+            server.host_port,
+            "PUT",
+            "/api/v1/dataProducts/p/assets/add",
+            {"assets": []},
+        )
+        read, _ = _raw(server.host_port, "GET", "/api/v1/dataProducts/name/p/assets", None)
+
+    assert phantom == 404
+    assert "/{fqn}/assets/add" in body
+    assert real == 200
+    # The read keeps its ``/name`` form. The asymmetry is upstream's, not ours.
+    assert read == 200
+
+
+def test_the_fake_derives_a_data_product_fqn_from_its_name_alone() -> None:
+    """Not from its Domain. ``DataProductRepository`` does not override the default.
+
+    The fake used to compute ``domain.name``, which is the prefix DataSwamp's own
+    identity assumed and no server adds. That agreement between fake and export is
+    what hid the identity bug through #33 and #35.
+    """
+    with FakeOpenMetadataServer() as server:
+        _raw(
+            server.host_port,
+            "PUT",
+            "/api/v1/domains",
+            {"name": "dataswamp-x", "description": "d", "domainType": "Source-aligned"},
+        )
+        _raw(
+            server.host_port,
+            "PUT",
+            "/api/v1/dataProducts",
+            {"name": "p", "description": "d", "domains": ["dataswamp-x"]},
+        )
+        by_name, _ = _raw(server.host_port, "GET", "/api/v1/dataProducts/name/p", None)
+        domain_scoped, _ = _raw(
+            server.host_port, "GET", "/api/v1/dataProducts/name/dataswamp-x.p", None
+        )
+
+    assert by_name == 200
+    assert domain_scoped == 404
 
 
 def test_the_fake_refuses_an_unknown_field_because_upstream_forbids_it() -> None:
@@ -302,3 +375,46 @@ def test_create_or_update_is_idempotent_and_bumps_only_the_server_version() -> N
         assert json.loads(second)["version"] == 0.2
         listing = json.loads(_raw(server.host_port, "GET", "/api/v1/classifications")[1])
     assert len(listing["data"]) == 1
+
+
+def test_the_emitted_annotation_and_the_client_route_agree() -> None:
+    """Two independent statements of one contract, checked against each other.
+
+    ``mapping.ENDPOINTS`` is frozen export *data* and ``client.py`` owns the live
+    path; neither imports the other, and the transport deliberately never reads
+    the annotation. That independence is what kept the #37 mismatch from becoming
+    a live bug — and it is also what let the two drift apart unnoticed, so the
+    agreement is asserted here rather than left to attentiveness.
+    """
+    from urllib.parse import quote
+
+    from dataswamp_biosystems.adapters.openmetadata.mapping import ENDPOINTS
+
+    fqn = "dataswamp-prog~~dp-omics"
+    seen: list[str] = []
+
+    client = OpenMetadataClient("http://127.0.0.1:1", token=None)
+    client._request = lambda method, path, payload=None, **kw: seen.append(path) or {}  # type: ignore[method-assign]
+    client.add_data_product_assets(fqn, [])
+
+    annotated = ENDPOINTS["dataProductAssets"].format(fqn=quote(fqn, safe=""))
+    assert seen == [annotated.removeprefix("/api")]
+
+
+def test_the_fake_server_does_not_model_the_client() -> None:
+    """The one structural guarantee that lets the fake disagree with the client.
+
+    A fake that imports the client's collection table, field names or route
+    helpers can only ever confirm what the client already believes. That is
+    precisely how the DataHub dialect mismatch survived 111 offline tests, and how
+    the #37 route and FQN defects survived this suite.
+    """
+    import ast
+    from pathlib import Path
+
+    source = Path(__file__).with_name("fake_om.py").read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert "client" not in node.module.split(".")
+        elif isinstance(node, ast.Import):
+            assert all("client" not in alias.name.split(".") for alias in node.names)

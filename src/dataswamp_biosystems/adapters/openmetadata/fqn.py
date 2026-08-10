@@ -19,7 +19,10 @@ Three properties are enforced rather than hoped for.
 Classification namespaces are **global** — there is no service to scope them
 under, the way a Container is scoped under its StorageService. A bare
 ``genomics`` domain would collide with any other producer's. So every root-level
-identity carries the ``dataswamp`` / ``dataswamp-biosystems`` prefix.
+identity carries the ``dataswamp`` / ``dataswamp-biosystems`` prefix — and is a
+*single segment*, because the server derives a root entity's FQN from its ``name``
+alone (``quoteName(name)``) and there is no parent to restore a prefix a dotted
+identity would imply.
 
 *Injectivity.* :func:`encode_id` is reversible, and :func:`decode_id` inverts it
 exactly. This matters more than it looks: an *observed* graph is deliberately
@@ -112,12 +115,40 @@ def decode_id(value: str) -> str:
     while index < len(value):
         char = value[index]
         if char == "~":
-            out.append(int(value[index + 1 : index + 3], 16))
+            escape = value[index + 1 : index + 3]
+            if len(escape) != 2 or any(digit not in "0123456789abcdef" for digit in escape):
+                # Not something :func:`encode_id` can have produced. Refusing
+                # beats returning a plausible-looking id built from a guess.
+                raise ValueError(f"{value!r} is not an encoded DataSwamp id")
+            out.append(int(escape, 16))
             index += 3
         else:
             out.extend(char.encode("utf-8"))
             index += 1
     return out.decode("utf-8")
+
+
+def _root_name(*parts: str) -> str:
+    """Return a root-level ``name``, checked against the whole-name length bound.
+
+    :func:`encode_id` bounds the *encoded segment*, which leaves the constant
+    prefix every root-level identity carries unaccounted for: a
+    ``dataswamp``-prefixed name can exceed OpenMetadata's ``entityName`` limit
+    while each of its encoded parts is individually inside it. Root-level names
+    are built through here so the bound is applied to the string the server will
+    actually receive.
+
+    The failure is loud on purpose. Truncating would break injectivity, and
+    hashing would break reversibility — either would trade a load-time error for
+    two estates silently sharing one identity.
+    """
+    name = "".join(parts)
+    if len(name) > MAX_NAME_LENGTH:
+        raise ValueError(
+            f"root-level name {name[:40]!r}… is {len(name)} characters, "
+            f"over OpenMetadata's {MAX_NAME_LENGTH}-character entityName limit"
+        )
+    return name
 
 
 def _join(*segments: str) -> str:
@@ -152,28 +183,76 @@ def file_fqn(study_id: str, dataset_id: str, file_id: str) -> str:
 
 def domain_fqn(programme_id: str) -> str:
     """Return the Domain FQN for a DataSwamp programme id."""
-    return f"{NAMESPACE}-{encode_id(programme_id)}"
+    return _root_name(f"{NAMESPACE}-", encode_id(programme_id))
+
+
+# The separator between a data product's two *already-encoded* ids.
+#
+# ``~~`` cannot occur inside an encoded id: :func:`encode_id` emits ``~`` only as
+# the start of a ``~hh`` triple, so a ``~`` is always followed by two hex digits
+# and never by another ``~``. That makes it the one sequence that can split the
+# pair unambiguously, while staying inside the safe alphabet the plan validator
+# holds every name segment to.
+#
+# Encoding the two ids *separately* is load-bearing. Joining first and encoding
+# afterwards looks equivalent and is not: the codec would escape the separator
+# and any separator inside an id identically, so programme ``a.b`` + product
+# ``c`` and programme ``a`` + product ``b.c`` would produce the same name.
+DATA_PRODUCT_KEY_SEPARATOR = "~~"
 
 
 def data_product_fqn(programme_id: str, product_id: str) -> str:
     """Return the DataProduct FQN for a product within its programme's domain.
 
-    OpenMetadata's DataProduct name is globally unique in its own right, so the
-    programme prefix is part of the *name*, not a parent path — but it is written
-    with the same dotted shape so the domain a product belongs to is legible from
-    its identity alone.
+    OpenMetadata's DataProduct is a **root-level** entity: its repository does not
+    override ``setFullyQualifiedName``, so the server assigns
+    ``fullyQualifiedName = quoteName(name)`` and the owning Domain is a field, not
+    a path component. The identity therefore has to be a single segment that is
+    already its own FQN, and it has to carry the programme itself — nothing on the
+    server side can restore a prefix the way a Container's parent does.
+
+    Each id is encoded separately and the results joined with
+    ``DATA_PRODUCT_KEY_SEPARATOR``, which keeps the identity injective over
+    ``(programme_id, product_id)``. A literal ``-`` join would not: ``-`` is inside
+    the codec's safe alphabet, so programme ``a-b`` + product ``c`` and programme
+    ``a`` + product ``b-c`` would be the same name. The result is free of ``.`` and
+    ``"``, the two characters OpenMetadata's ``needsQuoting`` treats as quoting
+    triggers, so the server stores the name unchanged.
     """
-    return f"{NAMESPACE}-{encode_id(programme_id)}{SEPARATOR}{encode_id(product_id)}"
+    return _root_name(
+        f"{NAMESPACE}-",
+        encode_id(programme_id),
+        DATA_PRODUCT_KEY_SEPARATOR,
+        encode_id(product_id),
+    )
+
+
+def data_product_ids_from_fqn(fqn: str) -> tuple[str, str]:
+    """Recover ``(programme_id, product_id)`` from a DataProduct FQN.
+
+    The DataProduct-specific inverse of :func:`data_product_fqn`. It exists as its
+    own function rather than as behaviour inside :func:`id_from_fqn` because a
+    data product's identity is a *pair*: overloading the generic helper would make
+    what it returns depend on which family the caller happened to pass, which is
+    exactly the ambiguity this module exists to remove.
+    """
+    prefix = f"{NAMESPACE}-"
+    if not fqn.startswith(prefix):
+        raise ValueError(f"{fqn!r} is not a DataSwamp root-level identity")
+    programme, separator, product = fqn[len(prefix) :].partition(DATA_PRODUCT_KEY_SEPARATOR)
+    if not separator:
+        raise ValueError(f"{fqn!r} is not a DataSwamp DataProduct identity")
+    return decode_id(programme), decode_id(product)
 
 
 def team_fqn(team_id: str) -> str:
     """Return the Team FQN for a DataSwamp owning/stewarding team id."""
-    return f"{NAMESPACE}-{encode_id(team_id)}"
+    return _root_name(f"{NAMESPACE}-", encode_id(team_id))
 
 
 def glossary_fqn(vocabulary_id: str) -> str:
     """Return the Glossary FQN standing for one controlled vocabulary."""
-    return f"{NAMESPACE}-{encode_id(vocabulary_id)}"
+    return _root_name(f"{NAMESPACE}-", encode_id(vocabulary_id))
 
 
 def glossary_term_fqn(vocabulary_id: str, term_id: str) -> str:
@@ -222,6 +301,13 @@ def id_from_fqn(fqn: str) -> str:
     Traceability, not identity: the emitted entities also carry a ``dataswampId``
     custom property, and nothing in the adapter re-derives an identity by parsing
     an FQN or a property back out.
+
+    What it returns is family-dependent, and deliberately not smoothed over. For a
+    Container or a GlossaryTerm — whose FQNs nest — it recovers the entity's own
+    id. For a root-level identity it recovers the whole namespaced name, because
+    that *is* the entity's name; for a DataProduct specifically that means the
+    encoded ``programme.product`` pair rather than the bare product id. Use
+    :func:`data_product_ids_from_fqn` when the pair is what is wanted.
     """
     return decode_id(name_of(fqn))
 
@@ -241,7 +327,9 @@ __all__ = [
     "dataset_fqn",
     "file_fqn",
     "domain_fqn",
+    "DATA_PRODUCT_KEY_SEPARATOR",
     "data_product_fqn",
+    "data_product_ids_from_fqn",
     "team_fqn",
     "glossary_fqn",
     "glossary_term_fqn",
