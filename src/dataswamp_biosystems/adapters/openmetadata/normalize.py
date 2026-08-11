@@ -9,12 +9,39 @@ because it looks like evidence.
 
 **This contract is entirely independent of the DataHub one.** The two catalogues
 have different models, different server-owned state and different evidence behind
-them; :data:`OM_NORMALIZATION_VERSION` starts at 1 and has no relationship to
-DataHub's ``NORMALIZATION_VERSION``. Nothing here imports from that adapter.
+them; :data:`OM_NORMALIZATION_VERSION` has no relationship to DataHub's
+``NORMALIZATION_VERSION``, and the two currently reading the same number is a
+coincidence of arithmetic, not a coupling. Nothing here imports from that adapter.
 
-Four rules hold the line.
+Two stages, and the distinction between them is the whole design
+--------------------------------------------------------------
+This module owns two different jobs, and conflating them is how a fidelity check
+turns into a function that always passes. They run in order, and the guardrail
+that separates them does not bend:
 
-**Version 1 forgives only what OpenMetadata's own schemas prove it generates.**
+    **A DataSwamp-sent semantic value is never a normalization-forgiveness
+    candidate. Exact proven representation reconciliation is performed
+    separately, before semantic comparison.**
+
+**Stage 1 — representation reconciliation.** OpenMetadata sometimes stores or
+returns a value DataSwamp sent in a *different encoding of the same value*: a
+reference expanded from an FQN into an ``EntityReference``, a relationship list
+returned in another order, free text re-encoded with HTML entities. Reconciling
+those is not forgiveness and grants no leniency — it is decoding, and it is
+admitted only where the adapter can prove an exact, catalogue-specific,
+invertible transformation. Every sent value still has to be there afterwards, and
+still has to match. Nothing at this stage may absorb a word change, a punctuation
+loss, a double-encoding ambiguity, or one sent value collapsing onto another.
+
+**Stage 2 — normalization.** Only server-owned, server-generated or
+server-defaulted state that DataSwamp did *not* semantically send is eligible for
+forgiveness here, under the A/B classification policy in ``docs/openmetadata.md``.
+Stage 2 never looks at a path stage 1 reconciled; it applies exclusively where the
+emitted plan had no opinion at all.
+
+Six rules hold the line — three in each stage.
+
+**Stage 2 forgives only what OpenMetadata's own schemas prove it generates.**
 The bar is not "a server might add this". It is: *the ``Create<Entity>`` request
 schema sets* ``additionalProperties: false`` *and does not declare the field,
 while the entity schema does* — so DataSwamp cannot send it, cannot have sent it,
@@ -43,6 +70,36 @@ to the target's ``fullyQualifiedName`` — which is exactly the value the emitte
 plan declared — and compared as that. Nothing is forgiven: a reference pointing
 somewhere else still fails.
 
+**A materialized default is not a fact.** Version 2 adds the one thing the first
+real-server canary showed and no schema reading could have settled: OpenMetadata
+answers an *omitted optional* field with an empty relationship set or with the
+default its own schema declares. ``owners: []`` on an entity DataSwamp gave no
+owner asserts nothing about ownership — it is the storage layer's representation
+of "nothing here". Forgiveness is exact and doubly conditional: the plan must
+have omitted the field, *and* the returned value must equal the declared default
+exactly. ``owners: [someone]`` on that same entity is still a containment
+discrepancy, which is the case the rule exists to keep catchable.
+
+**HTML escaping of a free-text description is an encoding, not a value change.**
+*Stage 1.* OpenMetadata escapes markup-significant characters in ``description``
+on write, so ``study 'x'`` comes back as ``study &#39;x&#39;``. Comparing
+literally would report every described entity in the estate as mutated.
+
+This is emphatically **not** an exception to the guardrail above, and must never
+be described as one. The description is still compared, in full, against what
+DataSwamp sent; what is reconciled is the transport encoding of it. The check is
+the inversion itself, and it is
+admitted only where that inversion is provably unambiguous: the sent text must
+carry no HTML entity of its own, so exactly one decoding round can relate the two
+strings, and decoding the retrieved text must then reproduce the sent text
+character for character.
+
+That first condition is what closes the ambiguity cases. A description DataSwamp
+sent containing a literal ``&#39;`` is never reconciled, so a double-encoded
+readback cannot decode onto it and entity-like literal text cannot collapse onto
+another sent value. A truncation, a rewrite or a dropped sentence fails too:
+none of them is the identity this rule requires.
+
 **Unknown additions are differences.** A field the server adds that is not on one
 of the lists below is reported, not silently dropped. The default is suspicion;
 forgiveness is opt-in, justified and paired with a test proving an adjacent field
@@ -51,6 +108,7 @@ is still caught.
 
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass
 from typing import Any
 
@@ -60,7 +118,24 @@ from typing import Any
 # 1: the initial contract. Deliberately close to the minimum: it ships with no
 #    evidence from a running OpenMetadata, and inventing forgiveness rules for
 #    behaviour nobody has observed is exactly the erosion described above.
-OM_NORMALIZATION_VERSION = 1
+# 2: the first version with real-server evidence behind it. This counter tracks
+#    **stage 2 only** — what the comparison forgives. It moved for exactly one
+#    reason: the 1.13.3 canary showed OpenMetadata materializing state DataSwamp
+#    never sent, in 830 discrepancies across two verdict-B rule classes (fields
+#    absent from every create schema, and optional fields answered with their
+#    declared default).
+#
+#    The stage-1 description reconciliation added at the same time is *not* a
+#    reason for this bump and must never be cited as one. It forgives nothing:
+#    it decodes a transport encoding before the values are compared, and every
+#    description DataSwamp sent is still compared in full.
+#
+#    Note what changed about the *evidence*, not just the rules. ``entityStatus``
+#    was excluded in version 1 on an offline assumption — that only a PATCH sets
+#    it. The canary showed the server writing it on create, on 799 entities nobody
+#    patched. Live evidence superseded an unverified assumption; a red check is
+#    never itself a reason to forgive anything.
+OM_NORMALIZATION_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -82,6 +157,13 @@ class PlatformGeneratedField:
         return not self.entity_types or entity_type in self.entity_types
 
 
+# ==========================================================================
+# STAGE 2 — normalization: server-owned state DataSwamp never sent.
+#
+# Everything from here to the reference-projection banner below is forgiveness,
+# and is eligible only where the emitted plan carried no value at the path.
+# ==========================================================================
+
 # --------------------------------------------------------------------------
 # Platform-generated entity fields.
 # --------------------------------------------------------------------------
@@ -90,12 +172,14 @@ class PlatformGeneratedField:
 # is NOT on this list still surfaces as a mutation. See
 # ``tests/adapters/openmetadata/test_normalize.py``.
 #
-# Note what is deliberately absent. ``retentionPeriod``, ``sampleData``,
-# ``certification`` and ``entityStatus`` are also missing from the create
-# schemas, but OpenMetadata does not *generate* them — a user or another tool
-# sets them through PATCH. A value appearing there is somebody else writing to
-# DataSwamp's entities, which is precisely what containment exists to notice, so
-# they stay off this list and remain discrepancies by default.
+# Note what is deliberately absent. ``retentionPeriod``, ``sampleData`` and
+# ``certification`` are also missing from the create schemas, but OpenMetadata
+# does not *generate* them — a user or another tool sets them through PATCH. A
+# value appearing there is somebody else writing to DataSwamp's entities, which
+# is precisely what containment exists to notice, so they stay off this list and
+# remain discrepancies by default. ``entityStatus`` was on that list in version 1
+# for the same reason and left it in version 2, on evidence rather than argument:
+# see its entry below.
 PLATFORM_GENERATED_FIELDS: tuple[PlatformGeneratedField, ...] = (
     PlatformGeneratedField(
         path="id",
@@ -186,6 +270,244 @@ PLATFORM_GENERATED_FIELDS: tuple[PlatformGeneratedField, ...] = (
         ),
         entity_types=frozenset({"container"}),
     ),
+    PlatformGeneratedField(
+        path="entityStatus",
+        justification=(
+            "The server's ingestion/approval lifecycle state, written on create. Absent "
+            "from every Create<Entity> schema while the entity schemas declare it, and "
+            "the 1.13.3 canary returned it on 799 entities nobody patched — "
+            "'Unprocessed' everywhere except a GlossaryTerm, which the server's own "
+            "approval workflow settles as 'Approved'. Version 1 excluded it on the "
+            "reasoning that only a PATCH sets it; that reasoning was wrong and the "
+            "observation is what corrected it."
+        ),
+    ),
+    PlatformGeneratedField(
+        path="followers",
+        justification=(
+            "The set of users following the entity, maintained by the server's follow "
+            "endpoints. Absent from every Create<Entity> schema, so it cannot be part of "
+            "an export, and DataSwamp models no user subscriptions at all."
+        ),
+    ),
+    PlatformGeneratedField(
+        path="lifecycleStage",
+        justification=(
+            "The DataProduct's stage in OpenMetadata's own product lifecycle, defaulted "
+            "by the server. Absent from createDataProduct while dataProduct declares it; "
+            "DataSwamp's programmes carry no such stage and inventing one would be a "
+            "fabricated governance fact."
+        ),
+        entity_types=frozenset({"dataProduct"}),
+    ),
+    PlatformGeneratedField(
+        path="childrenCount",
+        justification=(
+            "The number of child teams, counted by the server from relationships it "
+            "already stores. Absent from createTeam while team declares it — a derived "
+            "count, not an input."
+        ),
+        entity_types=frozenset({"team"}),
+    ),
+    PlatformGeneratedField(
+        path="userCount",
+        justification=(
+            "The number of users in the team, counted by the server the same way and for "
+            "the same reason as childrenCount."
+        ),
+        entity_types=frozenset({"team"}),
+    ),
+    PlatformGeneratedField(
+        path="deprecated",
+        justification=(
+            "Whether the tag has been deprecated, maintained through OpenMetadata's own "
+            "tag lifecycle. Absent from createTag while tag declares it, so DataSwamp "
+            "cannot state it; the canary returns the server's false."
+        ),
+        entity_types=frozenset({"tag"}),
+    ),
+    PlatformGeneratedField(
+        path="disabled",
+        justification=(
+            "Whether the tag or classification has been disabled, maintained through the "
+            "same lifecycle. Absent from createTag and createClassification while both "
+            "entity schemas declare it."
+        ),
+        entity_types=frozenset({"tag", "classification"}),
+    ),
+)
+
+# --------------------------------------------------------------------------
+# Materialized defaults.
+# --------------------------------------------------------------------------
+# Fields the Create schema *does* accept, which DataSwamp omitted, and which the
+# server answered with an empty relationship set or with the default its own
+# schema declares. Evidence is the first live canary against 1.13.3, corroborated
+# by the vendored schemas: every scalar below is a literal ``default:`` in the
+# create or entity schema, and every collection is declared with no default and
+# returned as ``[]``.
+#
+# The forgiveness is exact in both directions. It applies only where the plan
+# carried no value at that path, and only where the retrieved value equals the
+# declared default *exactly*: ``owners: []`` is forgiven, ``owners: [someone]`` on
+# an entity DataSwamp gave no owner is a containment discrepancy, which is the
+# entire reason ownership is tracked at all.
+EMPTY = "<empty-collection>"
+
+
+@dataclass(frozen=True)
+class MaterializedDefault:
+    """One field the server fills in when the request omits it.
+
+    ``value`` is the exact retrieved value forgiven — :data:`EMPTY` for a field
+    returned as an empty list, or the literal scalar the schema declares as its
+    default. Anything else at that path is still reported.
+    """
+
+    path: str
+    value: Any
+    justification: str
+    entity_types: frozenset[str] = frozenset()
+
+    def applies_to(self, entity_type: str) -> bool:
+        return not self.entity_types or entity_type in self.entity_types
+
+    def matches(self, retrieved: Any) -> bool:
+        if self.value is EMPTY:
+            return isinstance(retrieved, list) and not retrieved
+        return type(retrieved) is type(self.value) and retrieved == self.value
+
+
+_EMPTY_SET_JUSTIFICATION = (
+    "Declared in the Create schema with no default, and stored by OpenMetadata as a "
+    "relationship set. A request that omits it is answered with an empty list, which "
+    "asserts nothing: it is the storage layer's representation of 'nothing here'. "
+    "Forgiven only when it comes back empty — a populated value DataSwamp never sent "
+    "is somebody else writing to its entities and stays a containment discrepancy."
+)
+
+# Each collection is scoped to the entity types whose Create schema actually
+# accepts it. That is not tidiness: ``dataProducts`` is creatable on a Container
+# but entity-only on a GlossaryTerm, so an unscoped rule would forgive, on the
+# term, a field the term's own request could never have carried — the stricter
+# platform-generated standard, reached by the wrong door.
+_EMPTY_COLLECTIONS: tuple[tuple[str, frozenset[str]], ...] = (
+    ("assets", frozenset({"dataProduct"})),
+    ("conceptMappings", frozenset({"glossaryTerm"})),
+    ("dataProducts", frozenset({"container", "storageService"})),
+    (
+        "domains",
+        frozenset(
+            {
+                "classification",
+                "container",
+                "dataProduct",
+                "glossary",
+                "glossaryTerm",
+                "storageService",
+                "tag",
+                "team",
+            }
+        ),
+    ),
+    ("experts", frozenset({"dataProduct", "domain"})),
+    (
+        "owners",
+        frozenset(
+            {
+                "classification",
+                "container",
+                "dataProduct",
+                "domain",
+                "glossary",
+                "glossaryTerm",
+                "storageService",
+                "tag",
+                "team",
+            }
+        ),
+    ),
+    ("recognizers", frozenset({"tag"})),
+    ("references", frozenset({"glossaryTerm"})),
+    ("reviewers", frozenset({"classification", "dataProduct", "glossary", "glossaryTerm", "tag"})),
+    ("synonyms", frozenset({"glossaryTerm"})),
+    (
+        "tags",
+        frozenset(
+            {"container", "dataProduct", "domain", "glossary", "glossaryTerm", "storageService"}
+        ),
+    ),
+    ("users", frozenset({"team"})),
+)
+
+MATERIALIZED_DEFAULTS: tuple[MaterializedDefault, ...] = tuple(
+    MaterializedDefault(
+        path=path,
+        value=EMPTY,
+        justification=_EMPTY_SET_JUSTIFICATION,
+        entity_types=entity_types,
+    )
+    for path, entity_types in _EMPTY_COLLECTIONS
+) + (
+    MaterializedDefault(
+        path="provider",
+        value="user",
+        entity_types=frozenset({"classification", "glossary", "glossaryTerm", "tag"}),
+        justification=(
+            "OpenMetadata distinguishes entities it ships with ('system') from those a "
+            "user or tool created. The server stamps 'user' on anything it did not seed "
+            "itself, so the value is a statement about who created the entity rather "
+            "than metadata DataSwamp holds. A 'system' provider on a DataSwamp entity "
+            "would still be reported."
+        ),
+    ),
+    MaterializedDefault(
+        path="mutuallyExclusive",
+        value=False,
+        entity_types=frozenset({"classification", "glossary", "glossaryTerm", "tag"}),
+        justification=(
+            "A literal `default: false` in createTag, createClassification, "
+            "createGlossary and createGlossaryTerm. DataSwamp's vocabularies impose no "
+            "exclusivity, so the field is omitted and the server's declared default "
+            "comes back."
+        ),
+    ),
+    MaterializedDefault(
+        path="isJoinable",
+        value=True,
+        justification="A literal `default: true` in createTeam and in the team entity schema.",
+        entity_types=frozenset({"team"}),
+    ),
+    MaterializedDefault(
+        path="autoClassificationEnabled",
+        value=False,
+        justification=(
+            "A literal `default: false` in createTag. DataSwamp never asks OpenMetadata "
+            "to auto-apply a tag; the whole point is that the export states what it "
+            "means."
+        ),
+        entity_types=frozenset({"tag"}),
+    ),
+    MaterializedDefault(
+        path="autoClassificationPriority",
+        value=50,
+        justification=(
+            "A literal `default: 50` in createTag, meaningful only when "
+            "autoClassificationEnabled is true, which DataSwamp leaves at its default "
+            "false."
+        ),
+        entity_types=frozenset({"tag"}),
+    ),
+    MaterializedDefault(
+        path="visibility",
+        value="PRIVATE",
+        justification=(
+            "The DataProduct's visibility, defaulted by the server to the closed value. "
+            "DataSwamp expresses no visibility policy — a synthetic estate has no "
+            "audience — so the field is omitted and the server's default returns."
+        ),
+        entity_types=frozenset({"dataProduct"}),
+    ),
 )
 
 # --------------------------------------------------------------------------
@@ -202,6 +524,30 @@ PLATFORM_GENERATED_FIELDS: tuple[PlatformGeneratedField, ...] = (
 TAG_LABEL_DERIVED_FIELDS: frozenset[str] = frozenset(
     {"name", "displayName", "description", "style", "href", "appliedAt", "appliedBy", "metadata"}
 )
+
+
+# ==========================================================================
+# STAGE 1 — representation reconciliation: one value, two encodings.
+#
+# Nothing below this banner forgives anything. Each rule relates two encodings
+# of a value DataSwamp *did* send, and every such value is still compared. They
+# live in this module because canonicalizing a representation and forgiving
+# server state are both "put the two sides in comparable form" — but they are
+# different operations under different rules, and the banners exist so that
+# distinction survives future edits.
+# ==========================================================================
+
+# --------------------------------------------------------------------------
+# Server-side HTML escaping.
+# --------------------------------------------------------------------------
+# OpenMetadata escapes markup-significant characters in free-text description
+# fields on write, so an apostrophe returns as ``&#39;``. Every one of the 83
+# fidelity failures in the first live canary was this and nothing else.
+#
+# Reconciled, never forgiven: see reconcile_html_escaping for the four conditions
+# that keep the inversion exact and unambiguous. This rule is not a reason to
+# move OM_NORMALIZATION_VERSION, which counts stage-2 forgiveness alone.
+ESCAPED_TEXT_FIELDS: frozenset[str] = frozenset({"description"})
 
 # --------------------------------------------------------------------------
 # Reference-valued fields.
@@ -240,6 +586,52 @@ def is_platform_generated(entity_type: str, path: str) -> bool:
     return any(
         field.path == path and field.applies_to(entity_type) for field in PLATFORM_GENERATED_FIELDS
     )
+
+
+def is_materialized_default(entity_type: str, path: str, retrieved: Any) -> bool:
+    """Return whether ``retrieved`` at ``path`` is exactly the default the server fills in.
+
+    Callers apply this only where the emitted plan carried no value at ``path``;
+    the value check here is the second half of the condition, and it is exact. A
+    field that comes back holding something is never forgiven, whatever its
+    declared default is.
+    """
+    return any(
+        rule.path == path and rule.applies_to(entity_type) and rule.matches(retrieved)
+        for rule in MATERIALIZED_DEFAULTS
+    )
+
+
+def reconcile_html_escaping(field: str, sent: Any, retrieved: Any) -> Any:
+    """Decode the server's transport encoding of ``sent``. **Stage 1, not forgiveness.**
+
+    This grants no leniency whatsoever: the description is still compared in full
+    against what DataSwamp sent, and this only relates the two encodings of it.
+    Four conditions must all hold, and each one closes a specific way the
+    reconciliation could otherwise absorb a real change:
+
+    * the field is one OpenMetadata is known to escape, and both sides are
+      strings — so this never touches a reference, an enum or an identity;
+    * the sent text carries **no HTML entity of its own**, so exactly one decoding
+      round can relate the two strings. This is what makes the inversion
+      unambiguous: a double-encoded readback cannot decode onto a description that
+      already contained an entity, and entity-like literal text cannot collapse
+      onto another sent value;
+    * decoding the retrieved text reproduces the sent text character for
+      character — no word change, no punctuation loss, no truncation.
+
+    Anything else is returned untouched and compared normally, so a rewritten
+    description still fails fidelity.
+    """
+    if field not in ESCAPED_TEXT_FIELDS:
+        return retrieved
+    if not isinstance(sent, str) or not isinstance(retrieved, str):
+        return retrieved
+    if retrieved == sent or html.unescape(sent) != sent:
+        return retrieved
+    if html.unescape(retrieved) == sent:
+        return sent
+    return retrieved
 
 
 def project_reference(value: Any) -> Any:
@@ -298,6 +690,19 @@ def normalization_contract() -> dict[str, Any]:
         "independent_of": (
             "the DataHub normalization contract; the two share no rules, no version and no evidence"
         ),
+        "comparison_model": (
+            "Two stages. Stage 1 reconciles representation: where a value DataSwamp "
+            "sent comes back in another encoding of the same value, and the adapter can "
+            "prove an exact invertible transformation, the encodings are related before "
+            "comparison. That is decoding, not forgiveness, and every sent value is "
+            "still compared. Stage 2 is normalization: only server-owned state DataSwamp "
+            "did not semantically send is eligible for forgiveness. A DataSwamp-sent "
+            "semantic value is never a normalization-forgiveness candidate."
+        ),
+        "version_counts": (
+            "stage 2 only. The normalization_version records what the comparison "
+            "forgives; a stage-1 representation rule is never a reason to move it."
+        ),
         "evidence_standard": (
             "A field is forgiven only where OpenMetadata's own Create<Entity> schema "
             "sets additionalProperties: false and omits it while the entity schema "
@@ -316,6 +721,44 @@ def normalization_contract() -> dict[str, Any]:
             }
             for field in PLATFORM_GENERATED_FIELDS
         ],
+        "materialized_defaults": {
+            "justification": (
+                "OpenMetadata answers an omitted optional field with an empty "
+                "relationship set or the default its own schema declares. Forgiven only "
+                "where the plan omitted the field AND the retrieved value equals the "
+                "declared default exactly; a populated value DataSwamp never sent stays "
+                "a containment discrepancy."
+            ),
+            "evidence": (
+                "the first live canary against OpenMetadata 1.13.3, corroborated by "
+                "literal `default:` declarations in the vendored create schemas"
+            ),
+            "fields": [
+                {
+                    "path": rule.path,
+                    "value": rule.value,
+                    "entity_types": sorted(rule.entity_types) or ["*"],
+                    "justification": rule.justification,
+                }
+                for rule in MATERIALIZED_DEFAULTS
+            ],
+        },
+        "escaped_text_reconciliation": {
+            "stage": 1,
+            "forgives": False,
+            "fields": sorted(ESCAPED_TEXT_FIELDS),
+            "justification": (
+                "OpenMetadata escapes markup-significant characters in free-text "
+                "descriptions on write, so the same value arrives in another encoding. "
+                "The two encodings are related, not forgiven: the description is still "
+                "compared in full. Admitted only where the inversion is unambiguous — "
+                "the sent text carries no HTML entity of its own, so exactly one "
+                "decoding round can relate the two strings — and where decoding the "
+                "retrieved text then reproduces the sent text character for character. "
+                "A truncation, a rewrite, a double-encoded entity or a decode landing "
+                "on another sent value all still fail fidelity."
+            ),
+        },
         "tag_label_derived_fields": {
             "fields": sorted(TAG_LABEL_DERIVED_FIELDS),
             "justification": (
@@ -351,12 +794,18 @@ def normalization_contract() -> dict[str, Any]:
 
 __all__ = [
     "OM_NORMALIZATION_VERSION",
+    "EMPTY",
     "PlatformGeneratedField",
+    "MaterializedDefault",
     "PLATFORM_GENERATED_FIELDS",
+    "MATERIALIZED_DEFAULTS",
+    "ESCAPED_TEXT_FIELDS",
     "TAG_LABEL_DERIVED_FIELDS",
     "REFERENCE_FIELDS",
     "UNORDERED_FIELDS",
     "is_platform_generated",
+    "is_materialized_default",
+    "reconcile_html_escaping",
     "project_reference",
     "normalize_field",
     "forgive_additions",

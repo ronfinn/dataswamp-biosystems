@@ -51,6 +51,13 @@ def _a_dataset_container(fixture: LiveFixture) -> str:
     raise AssertionError("the export has no dataset container")
 
 
+def _a_glossary_term(fixture: LiveFixture) -> str:
+    for record in fixture.export.records:
+        if record.entity_type == "glossaryTerm":
+            return record.fqn
+    raise AssertionError("the export has no glossary term")
+
+
 def _a_data_product(fixture: LiveFixture) -> str:
     for record in fixture.export.records:
         if record.phase == "data-product-assets":
@@ -250,6 +257,71 @@ def test_an_adjacent_field_beside_the_forgiven_ones_is_still_caught(
         for difference in item.differences
     }
     assert adjacent in reported
+
+
+def test_a_materialized_default_is_forgiven(om_live: LiveFixture) -> None:
+    """The shape the first real 1.13.3 canary returned, replayed offline.
+
+    830 of its 913 discrepancies were exactly this: optional fields the export
+    omitted, answered with an empty relationship set or the schema's declared
+    default.
+    """
+    # A GlossaryTerm, because the mapping gives one no owner, no domain and no
+    # synonyms — so these really are fields the plan omitted, which is the
+    # condition the whole rule hangs on.
+    fqn = _a_glossary_term(om_live)
+    om_live.state.mutate[("glossaryTerm", fqn)] = {
+        "entityStatus": "Approved",
+        "owners": [],
+        "domains": [],
+        "synonyms": [],
+        "provider": "user",
+    }
+    assert om_live.compare().clean
+
+
+def test_a_populated_value_beside_a_materialized_default_is_still_caught(
+    om_live: LiveFixture,
+) -> None:
+    """The paired half. An empty owner list asserts nothing; an owner does.
+
+    This is the test that fails if the rule is ever loosened from "the exact
+    declared default" to "this field is ignored", which is the difference between
+    a normalization contract and a check that always passes.
+    """
+    fqn = _a_glossary_term(om_live)
+    om_live.state.mutate[("glossaryTerm", fqn)] = {
+        "synonyms": [],
+        "owners": [{"id": "u", "type": "team", "fullyQualifiedName": "dataswamp-someone-else"}],
+    }
+    result = om_live.compare()
+    _only_claim_failing(result, Claim.CONTAINMENT)
+    assert "owners" in {
+        difference.path
+        for item in result.discrepancies
+        if item.fqn == fqn
+        for difference in item.differences
+    }
+
+
+def test_server_side_html_escaping_of_a_description_is_forgiven(om_live: LiveFixture) -> None:
+    """The other 83, also replayed offline: an apostrophe returning as ``&#39;``."""
+    fqn = _a_dataset_container(om_live)
+    sent = om_live.state.entities[("container", fqn)]["description"]
+    om_live.state.mutate[("container", fqn)] = {"description": sent.replace("'", "&#39;")}
+    assert om_live.compare().clean
+
+
+def test_a_rewritten_description_beside_the_escaping_rule_is_still_caught(
+    om_live: LiveFixture,
+) -> None:
+    """The paired half: only escaping is forgiven, never an edit."""
+    fqn = _a_dataset_container(om_live)
+    sent = om_live.state.entities[("container", fqn)]["description"]
+    om_live.state.mutate[("container", fqn)] = {
+        "description": sent.replace("'", "&#39;") + " and something nobody sent"
+    }
+    assert not om_live.compare().claim_passed(Claim.FIDELITY)
 
 
 def test_an_unknown_server_added_field_is_a_discrepancy_by_default(

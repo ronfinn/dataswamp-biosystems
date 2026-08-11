@@ -1465,6 +1465,11 @@ def export_openmetadata_command(
             "  No live OpenMetadata compatibility point is claimed: this plan has never "
             "been loaded into a running instance by this project."
         )
+    else:
+        typer.echo(
+            f"  Verified against OpenMetadata {VERIFIED_OPENMETADATA_VERSION} in observed "
+            "mode (a tested point, not a range)."
+        )
     typer.echo(f"  mapping coverage: {output_dir / 'mapping-coverage.json'}")
 
 
@@ -1848,6 +1853,11 @@ def verify_om_ingestion_command(
         typer.echo(
             "  No live OpenMetadata compatibility point is claimed: no pinned real-server "
             "canary has run against this adapter."
+        )
+    else:
+        typer.echo(
+            f"  Verified against OpenMetadata {VERIFIED_OPENMETADATA_VERSION} in observed "
+            "mode (a tested point, not a range)."
         )
     if total or leaks:
         raise typer.Exit(code=1)

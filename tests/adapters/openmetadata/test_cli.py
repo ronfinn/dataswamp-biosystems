@@ -89,10 +89,10 @@ def test_truth_mode_warns_that_it_is_privileged(full_bundle_dir: Path, tmp_path:
     assert "ground truth" in result.output
 
 
-def test_the_command_says_no_live_compatibility_is_claimed(
+def test_the_command_states_the_verified_point_and_its_scope(
     full_bundle_dir: Path, tmp_path: Path
 ) -> None:
-    """A user should not have to read an ADR to learn what has not been tested."""
+    """A user should not have to read an ADR to learn what has and has not been tested."""
     result = runner.invoke(
         app,
         [
@@ -103,7 +103,9 @@ def test_the_command_says_no_live_compatibility_is_claimed(
             str(tmp_path / "export"),
         ],
     )
-    assert "No live OpenMetadata compatibility point is claimed" in result.output
+    assert "Verified against OpenMetadata 1.13.3 in observed mode" in result.output
+    # A point, not a range — the wording a user quotes must not imply otherwise.
+    assert "not a range" in result.output
 
 
 def test_an_unreadable_bundle_exits_two(tmp_path: Path) -> None:
@@ -241,7 +243,7 @@ def test_the_live_commands_are_present_and_strictly_downstream() -> None:
         assert "--bundle" not in options
 
 
-def test_the_live_commands_still_claim_no_compatibility_point() -> None:
+def test_the_live_commands_claim_exactly_the_point_a_canary_earned() -> None:
     from dataswamp_biosystems.adapters.openmetadata import VERIFIED_OPENMETADATA_VERSION
 
-    assert VERIFIED_OPENMETADATA_VERSION is None
+    assert VERIFIED_OPENMETADATA_VERSION == "1.13.3"

@@ -13,15 +13,22 @@ OpenMetadata release moves an endpoint, exactly one file changes.
 CLI argument, never rendered by :meth:`OpenMetadataClient.__repr__`, never
 interpolated into an exception and never written to a file.
 
-**No compatibility is claimed.** :data:`LIVE_SUPPORT` says so, and it is written
-into every round-trip report, so a stored report cannot outlive its evidence.
-Everything below was read from OpenMetadata's own JAX-RS resource classes at the
-revision pinned by
+**One compatibility point is claimed, and only one.** :data:`LIVE_SUPPORT` states
+its exact scope and is written into every round-trip report, so a stored report
+cannot outlive its evidence. Everything below was read from OpenMetadata's own
+JAX-RS resource classes at the revision pinned by
 :data:`~dataswamp_biosystems.adapters.openmetadata.mapping.OPENMETADATA_SCHEMA_COMMIT`
-(the ``1.13.3-release`` tree). *Reading a resource class is not running against a
-server*: this module has never exchanged a byte with a real OpenMetadata, and
+(the ``1.13.3-release`` tree), and *then actually run against a server of that
+release*:
 :data:`~dataswamp_biosystems.adapters.openmetadata.mapping.VERIFIED_OPENMETADATA_VERSION`
-stays ``None`` until it has.
+is ``"1.13.3"``.
+
+Read that narrowly. It is a **tested point, not a range** — no other release is
+claimed, including other 1.13.x patches — and what ran was the **observed-mode**
+path end to end. Truth mode still rests on the offline contract and the vendored
+schemas alone. Reading a resource class is still not running against a server, so
+any endpoint below that the canary did not exercise remains as unverified as it
+was before.
 
 Verified upstream contract
 --------------------------
@@ -124,9 +131,10 @@ API_ROOT = "/api"
 # evidence about the *shape* of a request and nothing at all about a running
 # server. Written into every round-trip report.
 LIVE_SUPPORT = (
-    "unverified: request shapes were read from the OpenMetadata 1.13.3-release "
-    "resource classes, but this project has never exchanged a byte with a running "
-    "OpenMetadata instance and claims no compatibility point"
+    "verified against OpenMetadata 1.13.3 in observed mode: a pinned throwaway server "
+    "accepted this adapter's export and returned it with zero discrepancies and zero "
+    "leak findings. A tested point, never a range — no other release is claimed. Truth "
+    "mode rests on the offline contract and has not been run against a real server"
 )
 
 # --------------------------------------------------------------------------

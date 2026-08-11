@@ -15,6 +15,136 @@ entries below.
 
 ## [Unreleased]
 
+### Added
+
+- **First verified OpenMetadata compatibility point: `1.13.3`.**
+  `VERIFIED_OPENMETADATA_VERSION` moves `None` → `"1.13.3"`, earned by canary run
+  `31528890425` against a pinned, throwaway server
+  (`server@sha256:997d666b01f674fc4d587f034759c826082ea7666cd7bc0e6db8fdbb707df010`,
+  self-reporting revision `255f6694913b84797064a42859cda3f2a3425dc6`): 830/830
+  entities retrieved and matched, completeness, fidelity, containment and
+  non-leakage all green, **0** discrepancies, **0** leak findings, 19 live tests
+  including the negative controls that prove a clean result is not a comparison of
+  nothing against nothing. Normalization contract v2.
+
+  **A tested point, never a range.** No other release is claimed, including other
+  `1.13.x` patches; `OPENMETADATA_MODEL_TARGET_RANGE` remains a declared target for
+  the payload shape and is not evidence.
+
+  **Scope: observed mode.** What ran end to end was `bundle → export-openmetadata
+  --mode observed → ingest-openmetadata → real OpenMetadata 1.13.3 → readback →
+  round-trip verification → negative controls`. **Truth mode has not been run
+  against a real server** and continues to rest on the deterministic offline
+  contract and the vendored schemas. The canary does prove that an *observed*
+  ingestion leaves no `dataswampTruth*` property and no privileged tag in a real
+  catalogue — that is non-leakage, not truth-mode verification. The export
+  manifest states which of the two an export carries, per mode, so a stored truth
+  export cannot quote an observed export's evidence.
+
+  No report schema field was added for this: `OM_ROUNDTRIP_SCHEMA_VERSION` stays
+  `1`, `OM_ADAPTER_VERSION` stays `1.1.0`, and no deterministic plan fixture,
+  golden digest or DataHub artefact moves. Emitted export *manifests* do change,
+  because they record the constant.
+
+### Changed
+
+- **OpenMetadata normalization is at version 2, on real-server evidence.**
+  `OM_NORMALIZATION_VERSION` moves `1` → `2`, which changes the
+  `normalization_version` recorded in every `roundtrip-report.json`. The first
+  live 1.13.3 canary produced 913 discrepancies, classified before anything was
+  changed. **The version moved for the 830 server-materialized ones alone**; the
+  counter tracks forgiveness, and the description behaviour below forgives
+  nothing.
+
+  *Materialized defaults* (830 of them, verdict **B**). OpenMetadata answers an omitted optional
+  field with an empty relationship set or the default its own schema declares —
+  `owners: []`, `provider: user`, `isJoinable: true`, `autoClassificationPriority:
+  50`. Forgiveness is doubly conditional: the plan must have omitted the field
+  *and* the retrieved value must equal the declared default exactly, so
+  `owners: [someone]` on an entity DataSwamp gave no owner is still a containment
+  discrepancy. Each path is scoped to the entity types whose `Create` schema
+  actually accepts it, and a mechanical test asserts this list and the
+  platform-generated list stay disjoint.
+
+  Seven fields also joined the platform-generated list under the existing
+  create-schema exclusion standard: `entityStatus`, `followers`, `lifecycleStage`,
+  `childrenCount`, `userCount`, `deprecated` and `disabled`. `entityStatus` had
+  been *deliberately excluded* in v1 on an offline assumption — that only a PATCH
+  sets it. The canary showed the server writing it on create, on 799 entities
+  nobody patched, and pinned schema evidence was then vendored behind it: live
+  evidence superseded an unverified assumption, which is not the same thing as a
+  red check justifying forgiveness. `retentionPeriod`, `sampleData` and
+  `certification` remain excluded.
+
+  Four upstream entity schemas (`tag`, `classification`, `glossary`,
+  `glossaryTerm`) are now vendored at the same pinned commit, because a
+  forgiveness rule is only mechanically checkable where both halves of the
+  create/entity pair are present. No compatibility point is claimed:
+  `VERIFIED_OPENMETADATA_VERSION` stays `None` until a canary runs completely
+  green.
+
+- **Round-trip comparison is documented as two explicit stages.** The guardrail
+  is unchanged and unqualified — *a DataSwamp-sent semantic value is never a
+  normalization-forgiveness candidate* — and the code, the emitted contract and
+  `docs/openmetadata.md` now name the two stages it separates. Stage 1 relates two
+  encodings of the same sent value (reference projection, unordered relationship
+  lists) where the transformation is exact and invertible; stage 2 is forgiveness
+  of server-owned state, and `OM_NORMALIZATION_VERSION` counts stage 2 alone.
+
+### Added
+
+- **Stage-1 reconciliation of OpenMetadata's server-side HTML escaping.** The
+  remaining 83 discrepancies from the first live canary: OpenMetadata escapes
+  markup-significant characters in `description` on write, so `study 'x'` returns
+  as `study &#39;x&#39;`. This **forgives nothing and did not move
+  `OM_NORMALIZATION_VERSION`** — the description is still compared in full, and
+  only its two encodings are related. Admitted only where the inversion is
+  provably unambiguous: the sent text must carry no HTML entity of its own, so
+  exactly one decoding round can relate the two strings, and decoding the readback
+  must then reproduce the sent text character for character. A truncation, a
+  rewrite, a double-encoded readback or an escaped `displayName` all still fail
+  fidelity.
+
+- **Optional live OpenMetadata canary.**
+  `.github/workflows/live-openmetadata.yml` stands up a real, pinned, throwaway
+  OpenMetadata `1.13.3` and runs the whole product path through it —
+  `demo` → `ingest-openmetadata --dry-run` → start → `ingest-openmetadata --yes`
+  → `verify-om-ingestion` → a live pytest suite. It is optional and
+  non-blocking: `workflow_dispatch`, a weekly schedule, and pull requests
+  carrying the `live-openmetadata` label. There is no `push` trigger and it is
+  never a required check. Closes
+  [#39](https://github.com/ronfinn/dataswamp-biosystems/issues/39).
+
+  The deployment is upstream's own quickstart compose at
+  `255f6694913b84797064a42859cda3f2a3425dc6` — the same commit the vendored
+  schemas came from — sanitized by
+  `scripts/render_live_openmetadata_compose.py` rather than reimplemented: fixed
+  container names, the `./docker-volume/db-data` host bind mount and the
+  hardcoded subnet are removed, the Airflow service the server does not depend
+  on is dropped, and only `8585`/`8586` reach the host. The renderer is total —
+  an upstream change that removes something it expects to sanitize is a render
+  failure to read, not a quietly weaker deployment.
+
+  Authorization uses OpenMetadata's own `NoopAuthorizer`/`NoopFilter`, selected
+  through variables the pinned `conf/openmetadata.yaml` already interpolates, so
+  the job needs **no repository secret and no token**: `OPENMETADATA_JWT_TOKEN`
+  is never set.
+
+  A new `live_openmetadata` pytest marker carries the real-server suite, and is
+  deselected by default alongside `live`. The suite skips with a clear reason
+  when `OPENMETADATA_HOST_PORT` is unset and never falls back to a local guess.
+  It asserts the four claims independently, per-family materialization for every
+  supported entity family, the corrected DataProduct identity and asset
+  attachments from #37, and three load-bearing negative controls — a withheld
+  entity must be reported as an extra, a mutated expectation must be reported
+  against the real readback, and a deliberately foreign entity must *not* be
+  accused of being a DataSwamp extra — so that an empty or broken readback can
+  never produce a green canary.
+
+  No version constant moved. `VERIFIED_OPENMETADATA_VERSION` remains `None`:
+  implementing a canary is not running one, and only a completely green
+  real-server run can set it.
+
 ### Fixed
 
 - **OpenMetadata DataProduct identity and asset-attachment transport.** One

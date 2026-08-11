@@ -392,9 +392,25 @@ referential integrity, not just happy-path execution.
   `estate/`, `observed/`, `evaluation/`, `comparison/` and `bundle/` must stay
   catalogue-independent — neither DataHub nor OpenMetadata; the adapters depend
   on them, never the reverse. `tests/adapters/test_isolation.py` enforces this.
-- **Never claim a live OpenMetadata compatibility point.**
-  `VERIFIED_OPENMETADATA_VERSION` is `None` and stays `None` until a real-server
-  canary has actually run. Reading, vendoring or refreshing OpenMetadata's JSON
+- **Never widen the live OpenMetadata compatibility point.**
+  `VERIFIED_OPENMETADATA_VERSION` is `"1.13.3"`, earned by canary run
+  `31528890425` running *completely green* — server started, ingest succeeded,
+  readback succeeded, all four claims green, zero discrepancies, zero leak
+  findings, negative controls passed. It names a **tested point, never a range**:
+  no other release, including another 1.13.x patch, may be added without its own
+  green run, and it moves together with the workflow pin, `docs/openmetadata.md`,
+  the CHANGELOG and `tests/adapters/openmetadata/test_live_om_pin.py`. A workflow
+  existing is not a workflow having run; containers starting, a partial ingest or
+  a compiling test suite earn nothing.
+- **Never let the OpenMetadata compatibility point outgrow observed mode.** What
+  ran end to end was `bundle → export --mode observed → ingest → real server →
+  readback → verification → negative controls`. **Truth mode has not been run
+  against a real server** — it rests on the deterministic offline contract and the
+  vendored schemas. The live non-leakage claim proves an *observed* ingestion
+  leaves no truth marker in a real catalogue; that is not truth-mode verification
+  and must never be described as one. Do not add a second compatibility constant
+  or a `verified_mode` report field to express this: the export manifest already
+  states its evidence per mode, and the round-trip report carries `live_support`. Reading, vendoring or refreshing OpenMetadata's JSON
   schemas establishes nothing about a running server, and neither does schema
   validity: a payload can satisfy every schema and still be refused. **A green
   offline fake establishes nothing either** — the fake is a contract simulator,
@@ -451,16 +467,37 @@ referential integrity, not just happy-path execution.
   outside the module that owns it. `mapping.py` keeps its `ENDPOINTS` table as
   frozen Issue A export *data*; that exemption is deliberate and narrow.
 - **Never widen OpenMetadata normalization on the strength of the fake.**
-  `OM_NORMALIZATION_VERSION` is 1 and independent of DataHub's 2 — they share no
-  rules, no counter and no evidence. A field is forgiven only where OpenMetadata's
-  own `Create<Entity>` schema sets `additionalProperties: false` and omits it
-  while the entity schema declares it, which proves DataSwamp cannot have sent it.
-  "The fake returns it" is not evidence that a real server generates it, and
-  neither is "a real server might". Forgiveness is additive-only — a value
+  `OM_NORMALIZATION_VERSION` is 2 and independent of DataHub's 2 — the equal
+  numbers are a coincidence; they share no rules, no counter and no evidence. A
+  field is forgiven only where OpenMetadata's own `Create<Entity>` schema sets
+  `additionalProperties: false` and omits it while the entity schema declares it
+  (proving DataSwamp cannot have sent it), or — since v2, on real-run evidence —
+  where the request omitted an optional field and the server answered with an
+  empty relationship set or its schema's literal declared default, matched
+  *exactly*. "The fake returns it" is not evidence that a real server generates
+  it, and neither is "a real server might". Forgiveness is additive-only — a value
   DataSwamp sent is always compared — and every rule needs a justification, a
   focused forgiveness test and a paired test proving an adjacent field is still
-  caught. `retentionPeriod`, `sampleData`, `certification` and `entityStatus` stay
-  off the list on purpose: OpenMetadata does not generate them.
+  caught. `retentionPeriod`, `sampleData` and `certification` stay off the list on
+  purpose: OpenMetadata does not generate them. `entityStatus` was excluded on an
+  offline assumption until the first live canary showed the server writing it on
+  create — live evidence may supersede an unverified assumption; a red check is
+  never itself a reason to forgive anything.
+- **Never conflate representation reconciliation with normalization.** Comparison
+  is two stages and the guardrail between them is absolute: *a DataSwamp-sent
+  semantic value is never a normalization-forgiveness candidate; exact proven
+  representation reconciliation is performed separately, before semantic
+  comparison.* Stage 1 relates two encodings of the same sent value — reference
+  projection, unordered relationship lists, `description` HTML escaping — only
+  where the transformation is exact, catalogue-specific and invertible, and it
+  forgives nothing: the value is still compared in full. It must never absorb a
+  word change, a punctuation loss, a double-encoding ambiguity or one sent value
+  collapsing onto another, so `reconcile_html_escaping` refuses any case where the
+  sent text carries an HTML entity of its own. Stage 2 is forgiveness, and
+  `OM_NORMALIZATION_VERSION` counts stage 2 alone — never cite a stage-1 rule as a
+  reason to move it. Do not describe stage 1 as an "exception" to the guardrail,
+  and do not create a module for it: `normalize.py` owns both stages deliberately,
+  under explicit banners.
 - **Never let the OpenMetadata fake server model `client.py`.**
   `tests/adapters/openmetadata/fake_om.py` must import nothing from the client and
   must derive its routes and validation from upstream's resource classes and the
@@ -483,6 +520,25 @@ referential integrity, not just happy-path execution.
   strengthen a leak probe. Leak probes use only markers the export contract itself
   defines: the reserved `dataswampTruth*` namespace and the privileged tag.
   `tests/adapters/test_isolation.py` enforces this.
+- **Never point the OpenMetadata canary at anything but a throwaway CI instance.**
+  Not a developer's local OpenMetadata, not a shared or third-party catalogue.
+  The deployment is rendered from upstream's pinned compose by
+  `scripts/render_live_openmetadata_compose.py`, which must keep removing the
+  fixed container names, the `./docker-volume/db-data` host bind mount and the
+  hardcoded subnet — `COMPOSE_PROJECT_NAME` isolates none of them. Teardown is
+  `down -v` under `if: always()`. Never make the job a required check, never let
+  it run on `push` or on an unlabelled pull request, and never give it a
+  repository secret: authorization is disabled with OpenMetadata's own
+  `NoopAuthorizer`/`NoopFilter`, so there is no credential to hold.
+- **Never respond to a red OpenMetadata canary before classifying it.** Every
+  live discrepancy gets a verdict first: **A** DataSwamp bug, **B** genuine
+  server-derived/server-owned metadata, **C** upstream API/model difference, or
+  **D** infrastructure/transient. Only **B** may widen normalization, and only
+  with all six requirements. **C** must stop before any deterministic export
+  fixture moves — explain the incompatibility first. **D** never justifies a
+  normalization change: keep the artifacts and re-run the same pin. The decision
+  tree is in `docs/openmetadata.md`; never disable, skip or unpin the canary to
+  make it green.
 - **Never accept an OpenMetadata JWT as a CLI argument**, and never write one
   into a log, report, exception, provenance record or recorded URL. Configuration
   is `OPENMETADATA_HOST_PORT` and `OPENMETADATA_JWT_TOKEN`, from the environment

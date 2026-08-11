@@ -11,13 +11,15 @@ uv run dataswamp export-openmetadata --bundle dist/benchmark \
     --mode observed --output-dir export/openmetadata
 ```
 
-> **What this does not prove.** There is no live path, no ingestion command and
-> no canary. This project has never loaded the emitted plan into a running
-> OpenMetadata instance. `VERIFIED_OPENMETADATA_VERSION` is `None` and stays
-> `None` until a real-server run earns it. The schemas were *read*, which is not
-> the same as having been *tested against* — see
-> [ADR 0006](adr/0006-compatibility-points-not-ranges.md) and
-> [What Issue A does not prove](#what-this-milestone-does-not-prove).
+> **What this proves, exactly.** `VERIFIED_OPENMETADATA_VERSION` is `1.13.3`,
+> earned by a green canary against a real, pinned, throwaway server: 830/830
+> entities retrieved and matched, all four claims green, zero discrepancies, zero
+> leak findings. Read it narrowly — it is a **tested point, never a range** (no
+> other release, including other 1.13.x patches, is claimed), and what ran was the
+> **observed-mode** path. **Truth mode has not been run against a real server**;
+> it rests on the deterministic offline contract and the vendored schemas, as it
+> did before. See [ADR 0006](adr/0006-compatibility-points-not-ranges.md) and
+> [The verified compatibility point](#the-verified-compatibility-point).
 
 ---
 
@@ -516,7 +518,7 @@ precisely because these get conflated:
 | --- | --- | --- | --- |
 | `OPENMETADATA_SCHEMA_TARGET` | The exact schema revision payloads were written against and are validated against | The vendored subset + committed fixtures | `1.13.3-release` |
 | `OPENMETADATA_MODEL_TARGET_RANGE` | A **declared target** for payload shape. Not evidence, not a statement about any REST endpoint | Nothing. It is an intention | `>=1.9,<2` |
-| `VERIFIED_OPENMETADATA_VERSION` | The one release the live path was actually **run** against | A green canary run, and only that | **`None`** |
+| `VERIFIED_OPENMETADATA_VERSION` | The one release the live path was actually **run** against, in observed mode | A green canary run, and only that | **`1.13.3`** |
 
 `OM_ADAPTER_VERSION` is `1.1.0`, bumped when the emitted plan changes for
 unchanged input. It did **not** move for the live path — those emitted bytes were
@@ -528,42 +530,223 @@ Two more versions belong to the live path, and to nothing else:
 
 | | What it is | Value |
 | --- | --- | --- |
-| `OM_NORMALIZATION_VERSION` | The forgiveness rules in force when a round-trip report was produced | `1` |
+| `OM_NORMALIZATION_VERSION` | The forgiveness rules in force when a round-trip report was produced | `2` |
 | `OM_ROUNDTRIP_SCHEMA_VERSION` | The shape of `roundtrip-report.json` | `1` |
 
-Both are **entirely independent of DataHub's**. DataHub's `NORMALIZATION_VERSION`
-is `2` and reached that value through a real canary run against a pinned release;
-OpenMetadata's is `1` and has no such evidence behind it. They share no rules, no
-counter and no justification, and neither moves when the other does.
+Both are **entirely independent of DataHub's**. Both normalization counters
+happen to read `2`, and that is a coincidence of arithmetic, not a relationship:
+each moved once, at a different time, on evidence from a different server about a
+different model. They share no rules, no counter and no justification, and
+neither moves when the other does.
 
 ---
 
 ## What this milestone does *not* prove
 
-Stated plainly, because a reader should not have to infer it:
+Stated plainly, because a reader should not have to infer it. One release has
+been run against; everything below is what that run did *not* settle.
 
-* **Nothing has been loaded into a running OpenMetadata.** Not once. The live
-  path is proved end to end against a strict *offline fake* — see below — which
-  is a contract simulator and not a server.
-* **No REST endpoint has been exercised against a real instance.** The paths and
-  verbs in `client.py` were read from OpenMetadata's own JAX-RS resource classes
-  at the `1.13.3-release` tree. Reading a resource class establishes the shape of
-  a request and nothing whatever about a running server.
+* **Truth mode has never been loaded into a running OpenMetadata.** The canary
+  ingested an *observed* export. The privileged path is proved end to end against
+  a strict *offline fake* — see below — which is a contract simulator and not a
+  server.
+* **No endpoint outside the observed path has been exercised against a real
+  instance.** The paths and verbs in `client.py` were read from OpenMetadata's own
+  JAX-RS resource classes at the `1.13.3-release` tree. Reading a resource class
+  establishes the shape of a request and nothing whatever about a running server,
+  and that remains true of every route the canary did not use.
+* **No release other than `1.13.3` has been run against**, including other
+  `1.13.x` patches.
 * **The declared model range is not evidence.** `>=1.9,<2` is where the payload
-  shape is *aimed*. Exactly one revision inside it has been read, and zero have
-  been run against.
+  shape is *aimed*. Exactly one revision inside it has been read, and exactly one
+  has been run against.
 * **Schema validity is not load success.** A payload can satisfy every JSON
   schema and still be rejected by server-side business rules, authorization, or
   reference resolution. Only a real run settles that.
-* **A green fake is not a green server.** Every round-trip test in this
-  repository passes, and `VERIFIED_OPENMETADATA_VERSION` is still `None`. Those
-  two facts are not in tension; the second is what the first is worth.
+* **A green fake is not a green server.** The offline suite passing said nothing
+  about a real OpenMetadata, and the first canary proved it: 913 discrepancies
+  against a server the fake had been green about all along.
 
-Treat OpenMetadata support as **offline-only and experimental**. When a
-compatibility point is earned it will be a named release in
-`VERIFIED_OPENMETADATA_VERSION`, moving together with a workflow pin and this
-document — never a range, and never on the strength of a schema having been read
-or a fake having agreed.
+The point below was earned by a run, moving together with the workflow pin, this
+document and `tests/adapters/openmetadata/test_live_om_pin.py` — never on the
+strength of a schema having been read or a fake having agreed.
+
+## The verified compatibility point
+
+| | |
+| --- | --- |
+| Verified release | **`1.13.3`** — a tested point, never a range |
+| Server self-report | `version 1.13.3`, `revision 255f6694913b84797064a42859cda3f2a3425dc6` |
+| Server image | `docker.getcollate.io/openmetadata/server@sha256:997d666b01f674fc4d587f034759c826082ea7666cd7bc0e6db8fdbb707df010` |
+| Canary run | `31528890425`, against commit `3203d7af98baaf589a1668651398e880cd254bc9` |
+| Scope | **observed mode** |
+| Result | completeness, fidelity, containment, non-leakage all **pass**; **0** discrepancies, **0** leak findings; 830/830 entities retrieved and matched; 19 live tests, negative controls included |
+| Normalization contract | v2 |
+
+The path that ran, end to end:
+
+```text
+deterministic bundle → export-openmetadata --mode observed → ingest-openmetadata
+  → real OpenMetadata 1.13.3 → readback → round-trip verification → negative controls
+```
+
+**What this does not cover.** Truth mode. The privileged export is a diagnostic
+surface, and no canary has loaded one into a running server — it rests on the
+deterministic offline contract and the vendored schemas exactly as it did before.
+The canary does establish the property that matters most in that direction: an
+*observed* ingestion leaves no `dataswampTruth*` property and no privileged tag in
+a real catalogue, proven by three probes against the live server. That is
+non-leakage, not truth-mode verification, and the two must not be conflated. The
+export manifest says which of the two an export carries, per mode, so a stored
+truth export cannot quote an observed export's green.
+
+Nor does it cover any other release. `1.13.4` and `1.14.0` are untested;
+`OPENMETADATA_MODEL_TARGET_RANGE` (`>=1.9,<2`) remains a declared target for the
+payload *shape* and is not evidence about any of them.
+
+---
+
+## The live canary
+
+`.github/workflows/live-openmetadata.yml` is what can earn that point, and the
+only thing that can. It stands up a real, pinned, throwaway OpenMetadata and runs
+the whole product path through it:
+
+```text
+dataswamp demo → ingest-openmetadata --dry-run → [start the server] →
+ingest-openmetadata --yes → verify-om-ingestion → pytest -m live_openmetadata
+```
+
+It is **optional and non-blocking**: `workflow_dispatch`, a weekly schedule, and
+pull requests carrying the `live-openmetadata` label. There is no `push` trigger
+and it is never a required check — a canary that blocks merges gets clicked past.
+
+### What is pinned, and how
+
+| Thing | Value | Where |
+| --- | --- | --- |
+| Release under test | `1.13.3` | `OPENMETADATA_VERSION` in the workflow |
+| Deployment source | `255f6694913b84797064a42859cda3f2a3425dc6` | `OPENMETADATA_SOURCE_COMMIT`, and `OPENMETADATA_SCHEMA_COMMIT` in `mapping.py` |
+| Images | `openmetadata/server:1.13.3`, `openmetadata/db:1.13.3`, `elasticsearch:9.3.0` | hardcoded by upstream's compose at that commit |
+
+The release is not an input. Upstream's compose hardcodes the tags, so an input
+would imply the images follow it and they would not; instead the job *checks*
+that the images the pinned compose resolves to carry the release it claims to
+test, and fails if they disagree. `tests/adapters/openmetadata/test_live_om_pin.py`
+holds the constants, the workflow and this document to the same pin offline.
+
+The deployment commit is deliberately the same commit the vendored schemas came
+from. Validating payloads against one version of OpenMetadata's model while
+running against another, and reporting the result as one compatibility point,
+would be worse than testing neither.
+
+### The deployment is upstream's, sanitized
+
+`scripts/render_live_openmetadata_compose.py` fetches upstream's own
+`docker/docker-compose-quickstart/docker-compose.yml` at the pinned commit and
+applies the smallest set of edits that make it safe on a shared machine. Running
+a hand-written approximation instead would drift, and a drifted canary stops
+testing the real thing.
+
+Upstream's file is written for a laptop, and `COMPOSE_PROJECT_NAME` does **not**
+isolate it. The renderer therefore:
+
+* drops the `ingestion` (Airflow) service — the server's `depends_on` names only
+  `elasticsearch`, `mysql` and `execute-migrate-all`, and DataSwamp speaks to the
+  REST API directly;
+* removes every fixed `container_name`, which would otherwise collide;
+* replaces the `./docker-volume/db-data:/var/lib/mysql` **host bind mount** with a
+  named volume, so `down -v` really destroys the database;
+* removes the hardcoded `172.16.240.0/24` subnet;
+* publishes only `8585` (API) and `8586` (health) to the host;
+* removes `restart: always`, which would turn a crash loop into a job that hangs
+  to its timeout.
+
+It is **total**: if something it expects to sanitize is absent, it fails rather
+than rendering a quietly weaker deployment. That failure is the signal to read
+the upstream diff.
+
+### No secret, anywhere
+
+Authorization is switched to OpenMetadata's own `NoopAuthorizer` / `NoopFilter`
+— classes that exist at the pinned commit, selected through the
+`AUTHORIZER_CLASS_NAME` / `AUTHORIZER_REQUEST_FILTER` variables the pinned
+`conf/openmetadata.yaml` already interpolates. Nothing is invented, and the
+throwaway instance needs no credential at all, so `OPENMETADATA_JWT_TOKEN` is
+never set, no repository secret is used, and there is no token to keep out of a
+log or an artifact.
+
+### Readiness, in three widening steps
+
+"The container is running" is not readiness for any of them, and each is bounded:
+
+1. the migration container must *complete* with exit code 0;
+2. the server's own health endpoint on `8586` must answer;
+3. the REST API on `8585` — the thing the adapter actually talks to — must answer.
+
+The server's upstream healthcheck declares no `interval` or `start_period`, so
+Docker's defaults would mark a still-migrating server unhealthy well before it
+finishes. Polling the endpoint from the runner is both more honest and stabler
+than reading that health state.
+
+### A red canary is data
+
+A red run is classified **before** any semantic change, exactly as for DataHub:
+
+* **A — a DataSwamp bug.** Wrong path, verb, envelope, FQN encoding, pagination,
+  attachment or lineage semantics. Fix the bug, and add coverage so the fake can
+  catch it next time. Never widen normalization because the fake accepted it.
+* **B — genuine server-derived or server-owned state.** The *only* branch that may
+  widen normalization, and only with all six of: real-run evidence; a
+  justification that the value is genuinely server-generated; a focused
+  forgiveness test; a paired test proving an adjacent DataSwamp-sent mutation is
+  still caught; an `OM_NORMALIZATION_VERSION` bump; and a changelog entry.
+* **C — an upstream API or model difference.** Record the evidence. Transport
+  corrections stay in `client.py`. If deterministic export bytes would have to
+  move, **stop** and explain the incompatibility before touching a fixture.
+* **D — infrastructure or transient.** Image pull failure, runner exhaustion,
+  startup timeout, a flaky Elasticsearch. Keep the artifacts and re-run the same
+  pin. Never normalize.
+
+The question that settles A versus B is always the same: **did DataSwamp send a
+value at this exact path?** If it did and the server changed it, that is not a
+normalization candidate under any circumstances.
+
+That rule stands unqualified, and the description-escaping behaviour is not an
+exception to it — it is not normalization at all. Comparison runs in two stages,
+and keeping them distinct is what lets the guardrail stay absolute:
+
+* **Stage 1, representation reconciliation.** A value DataSwamp sent may be
+  related to a differently-encoded readback of *the same value*, but only where
+  the adapter can prove an exact, catalogue-specific, invertible transformation.
+  Nothing is ignored or skipped; the value is still compared in full. This is
+  where reference projection, unordered relationship lists and `description`
+  escaping live.
+* **Stage 2, normalization.** Only server-owned, server-generated or
+  server-defaulted state DataSwamp did *not* semantically send is eligible for
+  forgiveness, under the A/B policy above.
+
+    A DataSwamp-sent semantic value is never a normalization-forgiveness
+    candidate. Exact proven representation reconciliation is performed
+    separately, before semantic comparison.
+
+`OM_NORMALIZATION_VERSION` counts **stage 2 only**. A stage-1 rule forgives
+nothing and is never a reason to move it.
+
+The first live run against 1.13.3 was classified before anything moved: 830
+discrepancies **B** (materialized defaults — stage 2, and the sole reason the
+version is now `2`), and 83 the escaping behaviour above, which needed a stage-1
+rule and no forgiveness. The earlier 17-second failure was **A** — a missing
+export step in the workflow, found before any server contact and so carrying no
+information about OpenMetadata at all.
+
+### Evidence
+
+Artifacts upload on success and failure alike: the pin and resolved image
+digests, the sanitization log, the effective compose configuration, container
+status and logs, readiness evidence, the live pytest output, and
+`roundtrip-report.json` / `discrepancies.jsonl` / `leak-findings.jsonl`. None of
+it can contain a credential, because the deployment has none.
 
 ---
 
@@ -714,7 +897,7 @@ scan was clean" are different statements and the report distinguishes them.
 
 ---
 
-## Normalization v1
+## Normalization v2
 
 The highest-risk part of the live path, and the risk is not a bug — it is
 *erosion*. When a round-trip fails, the cheapest fix is to add the offending
@@ -729,21 +912,91 @@ found there is the platform's. That test is mechanical and runs against the
 vendored schemas in `tests/adapters/openmetadata/test_normalize.py`. **A fake
 server returning a field is not evidence that a real OpenMetadata generates it.**
 
-Version 1 forgives:
+Version 2 forgives, as platform-generated:
 
 | Path | Why |
 | --- | --- |
 | `id`, `href`, `version`, `updatedAt`, `updatedBy`, `impersonatedBy` | Server-assigned identity, URI, version counter, clock and auth principal |
 | `changeDescription`, `incrementalChangeDescription` | Server-computed diffs against what it already stored |
 | `deleted` | The server's soft-delete lifecycle flag |
+| `entityStatus` | The server's ingestion/approval lifecycle state, written on create |
+| `followers` | The follow relationship, maintained by the server's follow endpoints |
 | `children` (Container) | The server-materialised inverse of `parent`; the export declares containment one way only |
 | `serviceType` (Container) | Copied from the StorageService by the server; DataSwamp states it once, on the service, where it *is* compared |
+| `lifecycleStage` (DataProduct) | The server's product lifecycle stage; DataSwamp's programmes carry none |
+| `childrenCount`, `userCount` (Team) | Counts the server derives from relationships it already stores |
+| `deprecated` (Tag), `disabled` (Tag, Classification) | OpenMetadata's own tag lifecycle flags |
 
-Deliberately **not** forgiven: `retentionPeriod`, `sampleData`, `certification`,
-`entityStatus`. They are also absent from the create schemas, but OpenMetadata
-does not *generate* them — a user or another tool sets them through PATCH. A
-value appearing there is somebody writing to DataSwamp's entities, which is
-exactly what containment exists to notice.
+Deliberately **not** forgiven: `retentionPeriod`, `sampleData`, `certification`.
+They are also absent from the create schemas, but OpenMetadata does not
+*generate* them — a user or another tool sets them through PATCH. A value
+appearing there is somebody writing to DataSwamp's entities, which is exactly
+what containment exists to notice.
+
+#### `entityStatus`: live evidence superseding an unverified assumption
+
+`entityStatus` sat on that excluded list in v1 and no longer does. The old
+statement is corrected rather than preserved, because it was wrong:
+
+1. **The v1 conclusion was an offline assumption.** It read the create schemas,
+   saw the field absent, and reasoned from the source that only a PATCH could set
+   it. No server had been observed.
+2. **The live 1.13.3 canary showed otherwise** — the field materialized on 799
+   entities nobody patched, `Unprocessed` throughout except on GlossaryTerms,
+   which the server's own approval workflow settles as `Approved`.
+3. **Pinned schema evidence was then added**, vendoring the entity schemas that
+   declare it so the exclusion test is mechanical for those families too.
+4. **It is now handled under v2** with the same narrow, proven condition as every
+   other stage-2 rule: forgiven only where the plan carried no value at that path.
+
+The lesson is *live evidence superseded an unverified assumption* — **not** that a
+red check is itself a reason to forgive anything. A red canary is classified
+first, and only verdict **B** may widen normalization.
+
+### Materialized defaults (new in v2)
+
+The same canary showed OpenMetadata answering an *omitted optional* field with an
+empty relationship set or the default its own schema declares — 830 of its 913
+discrepancies. `owners: []` on an entity DataSwamp gave no owner asserts nothing
+about ownership; it is the storage layer's representation of "nothing here".
+
+Forgiveness is doubly conditional and exact: the plan must have **omitted** the
+field, *and* the retrieved value must equal the declared default exactly.
+`owners: [someone]` on that same entity is still a containment discrepancy, which
+is the case the rule exists to keep catchable.
+
+| Kind | Paths | Value forgiven |
+| --- | --- | --- |
+| Empty relationship sets | `assets`, `conceptMappings`, `dataProducts`, `domains`, `experts`, `owners`, `recognizers`, `references`, `reviewers`, `synonyms`, `tags`, `users` | `[]` only |
+| Declared scalar defaults | `provider`, `mutuallyExclusive`, `isJoinable`, `autoClassificationEnabled`, `autoClassificationPriority`, `visibility` | The schema's literal default only |
+
+Each path is scoped to the entity types whose `Create` schema actually accepts
+it. That is not tidiness: `dataProducts` is creatable on a Container but
+entity-only on a GlossaryTerm, so an unscoped rule would forgive, on the term, a
+field the term's request could never have carried — reaching the stricter
+platform-generated standard through the wrong door. The mechanical test asserts
+the two lists stay disjoint.
+
+### Server-side HTML escaping — stage 1, added alongside v2
+
+OpenMetadata escapes markup-significant characters in `description` on write, so
+`study 'x'` returns as `study &#39;x&#39;` — the other 83 discrepancies. Comparing
+literally would report every described entity in the estate as mutated.
+
+**This forgives nothing and did not move `OM_NORMALIZATION_VERSION`.** The
+description is still compared, in full, against what DataSwamp sent; only the two
+encodings of it are related. Four conditions must hold, each closing one way the
+reconciliation could otherwise absorb a real change:
+
+| Condition | What it prevents |
+| --- | --- |
+| The field is `description` and both sides are strings | Touching a reference, an enum or an identity |
+| The sent text carries **no HTML entity of its own** | Double-encoding ambiguity; entity-like literal text collapsing onto another sent value |
+| Exactly one decoding round relates the two strings | "Decode until it matches" |
+| Decoding the readback reproduces the sent text character for character | Word changes, punctuation loss, truncation |
+
+A truncation, a rewrite, a dropped sentence, a double-encoded readback or an
+escaped `displayName` all still fail fidelity.
 
 Three further rules:
 
@@ -785,7 +1038,8 @@ opt-in `fields` that were not requested, so a client that forgets to ask sees a
 lean entity and fails — the correct outcome, not something to paper over.
 
 It is a contract simulator. It is not evidence about a real OpenMetadata, and no
-amount of green from it moves `VERIFIED_OPENMETADATA_VERSION`.
+amount of green from it moves `VERIFIED_OPENMETADATA_VERSION` — the first real
+canary found 913 discrepancies the fake had been green about.
 
 ---
 

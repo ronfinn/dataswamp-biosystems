@@ -106,9 +106,12 @@ testpaths = ["tests"]
 markers = [
     "slow: marks slower tests (e.g. full demo-profile generation); deselect with -m 'not slow'",
     "live: requires a real DataHub instance at $DATAHUB_GMS_URL; deselected by default",
+    "live_openmetadata: requires a real OpenMetadata instance at $OPENMETADATA_HOST_PORT; deselected by default",
 ]
-# The live suite needs Docker, several minutes and a running catalogue, so it is
-# not part of what `pytest` means. Select it explicitly with `-m live`; a `-m`
-# on the command line replaces this one, and the suite then skips cleanly rather
-# than erroring when no catalogue is configured.
-addopts = ["-m", "not live"]
+# The live suites need Docker, several minutes and a running catalogue, so they
+# are not part of what `pytest` means. Select one explicitly with `-m live` or
+# `-m live_openmetadata`; a `-m` on the command line replaces this one, and the
+# suite then skips cleanly rather than erroring when no catalogue is configured.
+# The two markers are independent: the catalogues are unrelated, and a run
+# against one must never be read as evidence about the other.
+addopts = ["-m", "not live and not live_openmetadata"]

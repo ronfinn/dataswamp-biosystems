@@ -171,6 +171,7 @@ remain future work.
 [#29]: https://github.com/ronfinn/dataswamp-biosystems/issues/29
 [#33]: https://github.com/ronfinn/dataswamp-biosystems/issues/33
 [#35]: https://github.com/ronfinn/dataswamp-biosystems/issues/35
+[#39]: https://github.com/ronfinn/dataswamp-biosystems/issues/39
 
 ### v0.2 — Metadata and Lineage Integrations
 
@@ -228,13 +229,20 @@ remain future work.
   vendored schemas rather than against the client. Still no catalogue-client
   dependency ([ADR 0007](adr/0007-no-catalogue-client-dependency.md)).
 
-  **There is still no compatibility claim.** Nothing has been loaded into a
-  running OpenMetadata; `VERIFIED_OPENMETADATA_VERSION` is `None` and stays `None`
-  until a real-server canary earns a point, per
-  [ADR 0006](adr/0006-compatibility-points-not-ranges.md). A green offline fake is
-  not evidence about a server — that is what the fake being a *contract simulator*
-  means. A pinned real-server canary, and the compatibility point it would earn,
-  remain future work. See [openmetadata.md](openmetadata.md).
+  **The compatibility claim is now exactly one point.** A green canary loaded an
+  *observed* export into a real, pinned OpenMetadata `1.13.3`, so
+  `VERIFIED_OPENMETADATA_VERSION` names that release and nothing else, per
+  [ADR 0006](adr/0006-compatibility-points-not-ranges.md). Truth mode has not been
+  run against a server. The first canary is also what proved the point of the
+  rule: the offline fake was green while a real server disagreed 913 times.
+
+  The optional `live-openmetadata` canary ([#39]) now exists to earn that point:
+  it stands up a real, pinned, throwaway OpenMetadata `1.13.3` — upstream's own
+  quickstart compose, sanitized for CI, with no repository secret — and runs the
+  whole product path through it. It is non-blocking and never a required check.
+  **Implementing a canary is not running one**, so the constant is unchanged
+  until a completely green real-server run exists. See
+  [openmetadata.md](openmetadata.md).
 * OpenLineage event export
 * Neo4j graph export
 * Integration examples

@@ -177,11 +177,12 @@ Usable and documented, but the shapes are still settling:
   `plan_ingestion`, `execute_ingestion`, `read_back`, `compare`,
   `write_roundtrip`, and the claim/coverage model (`Claim`, `Coverage`,
   `DiscrepancyKind`, `Readback`, `RoundTripResult`). Versioned by
-  `OM_ROUNDTRIP_SCHEMA_VERSION` and `OM_NORMALIZATION_VERSION`, both of which are
-  `1` and **entirely independent of DataHub's**. Credentials come from
+  `OM_ROUNDTRIP_SCHEMA_VERSION` (`1`) and `OM_NORMALIZATION_VERSION` (`2`), both
+  **entirely independent of DataHub's**. Credentials come from
   `OPENMETADATA_HOST_PORT` / `OPENMETADATA_JWT_TOKEN` and nowhere else; a token is
   never a CLI argument and never reaches a report. `VERIFIED_OPENMETADATA_VERSION`
-  is `None` and every emitted manifest and round-trip report says so. See
+  is `1.13.3` — a point earned in **observed mode**, never a range — and every
+  emitted manifest and round-trip report states that scope. See
   [docs/openmetadata.md](openmetadata.md) and
   [ADR 0007](adr/0007-no-catalogue-client-dependency.md).
 * **`company.load_config` and the config models** — the YAML schema is versioned
@@ -221,13 +222,12 @@ Stated plainly, so nobody builds on a promise that was never made:
   bundle manifest record all four so a comparison can be checked.
 * **A verified live OpenMetadata compatibility point.** Stronger than the DataHub
   caveat below. `ingest-openmetadata` and `verify-om-ingestion` exist and work,
-  but **no plan has ever been loaded into a running OpenMetadata instance**. The
-  endpoint paths and verbs were read from OpenMetadata's own resource classes and
-  the whole live path is proved against a strict *offline fake* — a contract
-  simulator, not a server — so `VERIFIED_OPENMETADATA_VERSION` is `None`. The
-  declared `>=1.9,<2` model range is a target for the emitted payload shape, not
-  tested evidence. Schema validity is not load success, and a green fake is not a
-  green server.
+  and an **observed-mode** plan has now been loaded into a real, pinned
+  OpenMetadata `1.13.3` by a green canary, so `VERIFIED_OPENMETADATA_VERSION` is
+  `1.13.3`. That is a tested point, not a range, and **truth mode has not been run
+  against a real server**. The declared `>=1.9,<2` model range remains a target for
+  the emitted payload shape, not tested evidence: schema validity is not load
+  success, and a green fake is not a green server.
 * **A verified live DataHub compatibility point.** `ingest-datahub` and
   `verify-ingestion` do talk to a server, and round-trip validation is
   implemented and offline-testable — but the REST endpoints they use have not

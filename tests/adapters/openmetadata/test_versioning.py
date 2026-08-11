@@ -27,9 +27,14 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DOC = REPO_ROOT / "docs" / "openmetadata.md"
 
 
-def test_there_is_no_verified_live_version() -> None:
-    """The single most important assertion in this file."""
-    assert VERIFIED_OPENMETADATA_VERSION is None
+def test_the_verified_live_version_names_the_release_a_canary_ran() -> None:
+    """The single most important assertion in this file.
+
+    It was ``None`` until a real 1.13.3 canary went completely green. It names one
+    release because one release was run — never a range, and never a release whose
+    schemas were merely read.
+    """
+    assert VERIFIED_OPENMETADATA_VERSION == "1.13.3"
 
 
 def test_no_normalization_version_exists_yet() -> None:
@@ -69,15 +74,19 @@ def test_the_adapter_version_is_semantic() -> None:
     assert re.fullmatch(r"\d+\.\d+\.\d+", OM_ADAPTER_VERSION)
 
 
-def test_the_documentation_states_the_absence_plainly() -> None:
-    """A reader should not have to infer what has not been tested."""
+def test_the_documentation_states_the_remaining_absences_plainly() -> None:
+    """A reader should not have to infer what has *not* been tested.
+
+    One release has been run against in one mode. The doc has to keep saying what
+    that leaves unproven, or the point quietly reads as broader than it is.
+    """
     text = DOC.read_text(encoding="utf-8")
     assert "VERIFIED_OPENMETADATA_VERSION" in text
     assert "What this milestone does *not* prove" in text
     for claim in (
-        "no ingestion command",
-        "Schema validity is not load success",
-        "never loaded",
+        "truth mode has never been loaded",
+        "schema validity is not load success",
+        "no release other than",
     ):
         assert claim.lower() in text.lower(), claim
 
