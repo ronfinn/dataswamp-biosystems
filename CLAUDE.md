@@ -392,15 +392,25 @@ referential integrity, not just happy-path execution.
   `estate/`, `observed/`, `evaluation/`, `comparison/` and `bundle/` must stay
   catalogue-independent — neither DataHub nor OpenMetadata; the adapters depend
   on them, never the reverse. `tests/adapters/test_isolation.py` enforces this.
-- **Never claim a live OpenMetadata compatibility point.**
-  `VERIFIED_OPENMETADATA_VERSION` is `None` and stays `None` until a real-server
-  canary has actually run *completely green* — server started, ingest succeeded,
-  readback succeeded, all four claims green, negative controls passed. A workflow
+- **Never widen the live OpenMetadata compatibility point.**
+  `VERIFIED_OPENMETADATA_VERSION` is `"1.13.3"`, earned by canary run
+  `31528890425` running *completely green* — server started, ingest succeeded,
+  readback succeeded, all four claims green, zero discrepancies, zero leak
+  findings, negative controls passed. It names a **tested point, never a range**:
+  no other release, including another 1.13.x patch, may be added without its own
+  green run, and it moves together with the workflow pin, `docs/openmetadata.md`,
+  the CHANGELOG and `tests/adapters/openmetadata/test_live_om_pin.py`. A workflow
   existing is not a workflow having run; containers starting, a partial ingest or
-  a compiling test suite earn nothing. When it is earned it moves together with
-  the workflow pin, `docs/openmetadata.md`, the CHANGELOG and
-  `tests/adapters/openmetadata/test_live_om_pin.py`, and it names a *tested
-  point*, never a range. Reading, vendoring or refreshing OpenMetadata's JSON
+  a compiling test suite earn nothing.
+- **Never let the OpenMetadata compatibility point outgrow observed mode.** What
+  ran end to end was `bundle → export --mode observed → ingest → real server →
+  readback → verification → negative controls`. **Truth mode has not been run
+  against a real server** — it rests on the deterministic offline contract and the
+  vendored schemas. The live non-leakage claim proves an *observed* ingestion
+  leaves no truth marker in a real catalogue; that is not truth-mode verification
+  and must never be described as one. Do not add a second compatibility constant
+  or a `verified_mode` report field to express this: the export manifest already
+  states its evidence per mode, and the round-trip report carries `live_support`. Reading, vendoring or refreshing OpenMetadata's JSON
   schemas establishes nothing about a running server, and neither does schema
   validity: a payload can satisfy every schema and still be refused. **A green
   offline fake establishes nothing either** — the fake is a contract simulator,

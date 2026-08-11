@@ -240,8 +240,12 @@ def test_the_report_is_deterministic_and_records_its_own_limits(
     report = json.loads((first / ROUNDTRIP_REPORT_NAME).read_text())
     assert report["roundtrip_schema_version"] == 1
     assert report["normalization_version"] == 2
-    assert report["catalogue"]["verified_openmetadata_version"] is None
-    assert "unverified" in report["catalogue"]["live_support"]
+    assert report["catalogue"]["verified_openmetadata_version"] == "1.13.3"
+    # The report states what was run and what was not, so a stored report cannot
+    # be quoted as broader evidence than the canary earned.
+    assert "observed mode" in report["catalogue"]["live_support"]
+    assert "never a range" in report["catalogue"]["live_support"]
+    assert "truth mode" in report["catalogue"]["live_support"].lower()
     assert set(report["claims"]) == {
         "completeness",
         "fidelity",

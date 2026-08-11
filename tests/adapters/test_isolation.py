@@ -263,11 +263,11 @@ def test_the_live_path_fabricates_no_table_column_or_test_entity() -> None:
                 assert fragment not in rendered, f"{path.name} names {fragment!r}: {rendered}"
 
 
-def test_the_openmetadata_adapter_claims_no_verified_live_version() -> None:
-    """No canary has run, so no compatibility point exists. See ADR 0006."""
+def test_the_openmetadata_adapter_claims_exactly_one_verified_live_version() -> None:
+    """A point earned by a green canary, never a range. See ADR 0006."""
     from dataswamp_biosystems.adapters.openmetadata import VERIFIED_OPENMETADATA_VERSION
 
-    assert VERIFIED_OPENMETADATA_VERSION is None
+    assert VERIFIED_OPENMETADATA_VERSION == "1.13.3"
 
 
 def test_the_openmetadata_adapter_only_reaches_the_project_through_the_bundle_reader() -> None:

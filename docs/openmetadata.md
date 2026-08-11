@@ -11,13 +11,15 @@ uv run dataswamp export-openmetadata --bundle dist/benchmark \
     --mode observed --output-dir export/openmetadata
 ```
 
-> **What this does not prove.** There is no live path, no ingestion command and
-> no canary. This project has never loaded the emitted plan into a running
-> OpenMetadata instance. `VERIFIED_OPENMETADATA_VERSION` is `None` and stays
-> `None` until a real-server run earns it. The schemas were *read*, which is not
-> the same as having been *tested against* — see
-> [ADR 0006](adr/0006-compatibility-points-not-ranges.md) and
-> [What Issue A does not prove](#what-this-milestone-does-not-prove).
+> **What this proves, exactly.** `VERIFIED_OPENMETADATA_VERSION` is `1.13.3`,
+> earned by a green canary against a real, pinned, throwaway server: 830/830
+> entities retrieved and matched, all four claims green, zero discrepancies, zero
+> leak findings. Read it narrowly — it is a **tested point, never a range** (no
+> other release, including other 1.13.x patches, is claimed), and what ran was the
+> **observed-mode** path. **Truth mode has not been run against a real server**;
+> it rests on the deterministic offline contract and the vendored schemas, as it
+> did before. See [ADR 0006](adr/0006-compatibility-points-not-ranges.md) and
+> [The verified compatibility point](#the-verified-compatibility-point).
 
 ---
 
@@ -516,7 +518,7 @@ precisely because these get conflated:
 | --- | --- | --- | --- |
 | `OPENMETADATA_SCHEMA_TARGET` | The exact schema revision payloads were written against and are validated against | The vendored subset + committed fixtures | `1.13.3-release` |
 | `OPENMETADATA_MODEL_TARGET_RANGE` | A **declared target** for payload shape. Not evidence, not a statement about any REST endpoint | Nothing. It is an intention | `>=1.9,<2` |
-| `VERIFIED_OPENMETADATA_VERSION` | The one release the live path was actually **run** against | A green canary run, and only that | **`None`** |
+| `VERIFIED_OPENMETADATA_VERSION` | The one release the live path was actually **run** against, in observed mode | A green canary run, and only that | **`1.13.3`** |
 
 `OM_ADAPTER_VERSION` is `1.1.0`, bumped when the emitted plan changes for
 unchanged input. It did **not** move for the live path — those emitted bytes were
@@ -541,30 +543,66 @@ neither moves when the other does.
 
 ## What this milestone does *not* prove
 
-Stated plainly, because a reader should not have to infer it:
+Stated plainly, because a reader should not have to infer it. One release has
+been run against; everything below is what that run did *not* settle.
 
-* **Nothing has been loaded into a running OpenMetadata.** Not once. The live
-  path is proved end to end against a strict *offline fake* — see below — which
-  is a contract simulator and not a server.
-* **No REST endpoint has been exercised against a real instance.** The paths and
-  verbs in `client.py` were read from OpenMetadata's own JAX-RS resource classes
-  at the `1.13.3-release` tree. Reading a resource class establishes the shape of
-  a request and nothing whatever about a running server.
+* **Truth mode has never been loaded into a running OpenMetadata.** The canary
+  ingested an *observed* export. The privileged path is proved end to end against
+  a strict *offline fake* — see below — which is a contract simulator and not a
+  server.
+* **No endpoint outside the observed path has been exercised against a real
+  instance.** The paths and verbs in `client.py` were read from OpenMetadata's own
+  JAX-RS resource classes at the `1.13.3-release` tree. Reading a resource class
+  establishes the shape of a request and nothing whatever about a running server,
+  and that remains true of every route the canary did not use.
+* **No release other than `1.13.3` has been run against**, including other
+  `1.13.x` patches.
 * **The declared model range is not evidence.** `>=1.9,<2` is where the payload
-  shape is *aimed*. Exactly one revision inside it has been read, and zero have
-  been run against.
+  shape is *aimed*. Exactly one revision inside it has been read, and exactly one
+  has been run against.
 * **Schema validity is not load success.** A payload can satisfy every JSON
   schema and still be rejected by server-side business rules, authorization, or
   reference resolution. Only a real run settles that.
-* **A green fake is not a green server.** Every round-trip test in this
-  repository passes, and `VERIFIED_OPENMETADATA_VERSION` is still `None`. Those
-  two facts are not in tension; the second is what the first is worth.
+* **A green fake is not a green server.** The offline suite passing said nothing
+  about a real OpenMetadata, and the first canary proved it: 913 discrepancies
+  against a server the fake had been green about all along.
 
-Treat OpenMetadata support as **offline-only and experimental**. When a
-compatibility point is earned it will be a named release in
-`VERIFIED_OPENMETADATA_VERSION`, moving together with a workflow pin and this
-document — never a range, and never on the strength of a schema having been read
-or a fake having agreed.
+The point below was earned by a run, moving together with the workflow pin, this
+document and `tests/adapters/openmetadata/test_live_om_pin.py` — never on the
+strength of a schema having been read or a fake having agreed.
+
+## The verified compatibility point
+
+| | |
+| --- | --- |
+| Verified release | **`1.13.3`** — a tested point, never a range |
+| Server self-report | `version 1.13.3`, `revision 255f6694913b84797064a42859cda3f2a3425dc6` |
+| Server image | `docker.getcollate.io/openmetadata/server@sha256:997d666b01f674fc4d587f034759c826082ea7666cd7bc0e6db8fdbb707df010` |
+| Canary run | `31528890425`, against commit `3203d7af98baaf589a1668651398e880cd254bc9` |
+| Scope | **observed mode** |
+| Result | completeness, fidelity, containment, non-leakage all **pass**; **0** discrepancies, **0** leak findings; 830/830 entities retrieved and matched; 19 live tests, negative controls included |
+| Normalization contract | v2 |
+
+The path that ran, end to end:
+
+```text
+deterministic bundle → export-openmetadata --mode observed → ingest-openmetadata
+  → real OpenMetadata 1.13.3 → readback → round-trip verification → negative controls
+```
+
+**What this does not cover.** Truth mode. The privileged export is a diagnostic
+surface, and no canary has loaded one into a running server — it rests on the
+deterministic offline contract and the vendored schemas exactly as it did before.
+The canary does establish the property that matters most in that direction: an
+*observed* ingestion leaves no `dataswampTruth*` property and no privileged tag in
+a real catalogue, proven by three probes against the live server. That is
+non-leakage, not truth-mode verification, and the two must not be conflated. The
+export manifest says which of the two an export carries, per mode, so a stored
+truth export cannot quote an observed export's green.
+
+Nor does it cover any other release. `1.13.4` and `1.14.0` are untested;
+`OPENMETADATA_MODEL_TARGET_RANGE` (`>=1.9,<2`) remains a declared target for the
+payload *shape* and is not evidence about any of them.
 
 ---
 
@@ -1000,7 +1038,8 @@ opt-in `fields` that were not requested, so a client that forgets to ask sees a
 lean entity and fails — the correct outcome, not something to paper over.
 
 It is a contract simulator. It is not evidence about a real OpenMetadata, and no
-amount of green from it moves `VERIFIED_OPENMETADATA_VERSION`.
+amount of green from it moves `VERIFIED_OPENMETADATA_VERSION` — the first real
+canary found 913 discrepancies the fake had been green about.
 
 ---
 

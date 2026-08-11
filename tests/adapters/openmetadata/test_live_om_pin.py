@@ -87,16 +87,16 @@ def test_the_deployment_commit_is_the_commit_the_schemas_came_from() -> None:
     assert 'UPSTREAM_RELEASE = "1.13.3"' in text
 
 
-def test_the_verified_point_is_unset_until_a_real_run_earns_it() -> None:
+def test_the_verified_point_is_earned_and_coherent() -> None:
     """The constant is evidence, not intent.
 
-    If this test is the one failing, the question is not how to satisfy it: it is
-    whether a completely green run against that exact release actually exists.
+    Earned by run 31528890425 against a pinned OpenMetadata 1.13.3: all four
+    claims green, zero discrepancies, zero leak findings. If this test is the one
+    failing, the question is not how to satisfy it: it is whether a completely
+    green run against that exact release actually exists.
     """
-    if VERIFIED_OPENMETADATA_VERSION is None:
-        assert "no compatibility" in LIVE_SUPPORT.lower() or "not" in LIVE_SUPPORT.lower()
-        return
-    # Once set, it must name the release the canary actually pins.
+    assert VERIFIED_OPENMETADATA_VERSION == "1.13.3"
+    # It must name the release the canary actually pins.
     assert WORKFLOW.is_file(), "a verified point requires a canary workflow"
     text = WORKFLOW.read_text(encoding="utf-8")
     assert f'OPENMETADATA_VERSION: "{VERIFIED_OPENMETADATA_VERSION}"' in text
@@ -104,8 +104,59 @@ def test_the_verified_point_is_unset_until_a_real_run_earns_it() -> None:
     # A point, not a range. Reports are stored and quoted; "supported" would be
     # read as a promise about releases nobody has run this against.
     assert "supported" not in LIVE_SUPPORT.lower()
-    if DOCS.is_file():
-        assert f"`{VERIFIED_OPENMETADATA_VERSION}`" in DOCS.read_text(encoding="utf-8")
+    assert DOCS.is_file()
+    assert f"`{VERIFIED_OPENMETADATA_VERSION}`" in DOCS.read_text(encoding="utf-8")
+
+
+def test_the_verified_point_stays_distinct_from_the_schema_target() -> None:
+    """Two different questions that happen to name the same release.
+
+    ``OPENMETADATA_SCHEMA_TARGET`` is a *read artefact* — the revision the
+    payloads are validated against offline. The verified point is a *run*. They
+    must never be derived from one another, or "the schemas were refreshed"
+    silently becomes "a server was tested".
+    """
+    assert OPENMETADATA_SCHEMA_TARGET == "1.13.3-release"
+    assert OPENMETADATA_SCHEMA_COMMIT == "255f6694913b84797064a42859cda3f2a3425dc6"
+    assert VERIFIED_OPENMETADATA_VERSION != OPENMETADATA_SCHEMA_TARGET
+
+
+def test_the_verified_claim_is_scoped_to_observed_mode() -> None:
+    """What actually ran was the observed path. The claim may not outgrow it.
+
+    Truth mode is a privileged diagnostic surface resting on the deterministic
+    offline contract; no canary has loaded one into a real server. Asserted on
+    substance rather than on paragraph shape: the words must appear somewhere in
+    the doc and in LIVE_SUPPORT, not in a particular sentence.
+    """
+    assert "observed" in LIVE_SUPPORT
+    assert "truth" in LIVE_SUPPORT.lower()
+
+    doc = DOCS.read_text(encoding="utf-8").lower()
+    assert "observed" in doc and "truth mode" in doc
+    # Nothing may claim the privileged path was live-tested.
+    for forbidden in (
+        "truth mode has been verified",
+        "truth-mode ingestion has been verified",
+        "truth mode is verified against",
+        "both modes have been verified",
+    ):
+        assert forbidden not in doc
+
+
+def test_no_range_is_claimed_anywhere_the_point_is_stated() -> None:
+    """Adjacent patch releases are untested and must never be *claimed*.
+
+    Naming ``1.13.x`` is fine — the doc does it twice, both times to deny it.
+    What must not appear is a sentence asserting one, so the check is on claim
+    phrasings rather than on the token, which would forbid saying the true thing.
+    """
+    doc = DOCS.read_text(encoding="utf-8").lower()
+    for verb in ("verified against", "compatible with", "tested against", "supports"):
+        for target in ("1.13.x", "1.13.*", ">=1.13.3", "1.13.3+", "1.13.3 and later"):
+            assert f"{verb} {target}" not in doc, f"{verb} {target!r} claims a range, not a point"
+    # And the point is stated as one, explicitly, somewhere in the document.
+    assert "never a range" in doc or "not a range" in doc
 
 
 def test_the_version_constants_stay_independent() -> None:

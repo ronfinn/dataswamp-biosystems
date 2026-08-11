@@ -97,5 +97,8 @@ file's Upstream table. Bumping the vendored schemas is a **reviewable change**:
 
 Refreshing the schemas establishes **no live compatibility claim whatsoever**.
 Reading a schema is not running against a server. `VERIFIED_OPENMETADATA_VERSION`
-stays `None` until a real-server canary earns a point, per
+is `1.13.3` because a canary *ran* against that release, not because these files
+were read from it — refreshing them to a new revision moves the schema target and
+nothing else, and the verified point stays where it is until a canary earns the
+next one, per
 [ADR 0006](../../../../docs/adr/0006-compatibility-points-not-ranges.md).

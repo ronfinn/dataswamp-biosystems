@@ -141,12 +141,17 @@ def test_the_manifest_digests_every_content_file(om_observed_export_dir: Path) -
     assert set(manifest["files"]) == EXPECTED_FILES - {EXPORT_MANIFEST_NAME, PROVENANCE_NAME}
 
 
-def test_the_manifest_claims_no_verified_live_version(om_observed_export_dir: Path) -> None:
-    """The whole point of the versioning amendment: schemas read is not server tested."""
+def test_the_manifest_carries_the_verified_live_version(om_observed_export_dir: Path) -> None:
+    """The whole point of the versioning amendment: schemas read is not server tested.
+
+    The manifest now records a point that a run earned, and it travels with the
+    export so a stored export cannot outlive or overstate its evidence.
+    """
     manifest = _manifest(om_observed_export_dir)
-    assert manifest["verified_openmetadata_version"] is None
-    assert VERIFIED_OPENMETADATA_VERSION is None
-    assert "no compatibility point is claimed" in manifest["live_support"]
+    assert manifest["verified_openmetadata_version"] == VERIFIED_OPENMETADATA_VERSION == "1.13.3"
+    assert "observed mode" in manifest["live_support"]
+    # Still not a range, and still not a claim about the privileged path.
+    assert "supported" not in manifest["live_support"].lower()
 
 
 def test_the_manifest_separates_schema_target_from_declared_range(
@@ -162,8 +167,10 @@ def test_the_declared_range_is_a_target_not_a_tested_range() -> None:
     """A range with no tested point inside it must not masquerade as evidence."""
     assert OPENMETADATA_MODEL_TARGET_RANGE.startswith(">=")
     assert OPENMETADATA_SCHEMA_TARGET.startswith("1.13")
-    # The tested-point rule: there is no tested point at all yet.
-    assert VERIFIED_OPENMETADATA_VERSION is None
+    # The tested-point rule: exactly one release inside that declared range has
+    # actually been run, and the range itself remains a target, never evidence.
+    assert VERIFIED_OPENMETADATA_VERSION == "1.13.3"
+    assert OPENMETADATA_MODEL_TARGET_RANGE != VERIFIED_OPENMETADATA_VERSION
 
 
 def test_the_manifest_records_the_load_order(om_observed_export_dir: Path) -> None:

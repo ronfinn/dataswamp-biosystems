@@ -89,10 +89,25 @@ OPENMETADATA_SCHEMA_COMMIT = "255f6694913b84797064a42859cda3f2a3425dc6"
 # it has actually been read: OPENMETADATA_SCHEMA_TARGET.
 OPENMETADATA_MODEL_TARGET_RANGE = ">=1.9,<2"
 
-# The one OpenMetadata release the live path has been *run* against. There is no
-# live path yet and no canary has ever run, so this is ``None`` and must stay
-# ``None`` until a real-server run earns it. Reading a schema is not a test.
-VERIFIED_OPENMETADATA_VERSION: str | None = None
+# The one OpenMetadata release the live path has been *run* against. A tested
+# point, never a range: 1.13.4 and 1.14.0 are untested until a canary says
+# otherwise, and neither this constant nor OPENMETADATA_MODEL_TARGET_RANGE above
+# may be read as covering them.
+#
+# Earned by run 31528890425 against a pinned, throwaway OpenMetadata 1.13.3
+# (server image sha256:997d666b01f674fc4d587f034759c826082ea7666cd7bc0e6db8fdbb707df010,
+# self-reporting revision 255f6694913b84797064a42859cda3f2a3425dc6): 830/830
+# entities retrieved and matched, all four claims green, zero discrepancies, zero
+# leak findings, 19 live tests including the negative controls that prove a clean
+# result is not a comparison of nothing against nothing.
+#
+# **Scope: observed mode.** What ran end to end is
+# bundle -> export-openmetadata --mode observed -> ingest -> real server ->
+# readback -> round-trip verification -> negative controls. Truth mode is a
+# privileged diagnostic surface; it rests on the deterministic offline contract
+# and the vendored schemas, and has *not* been exercised against a real server.
+# This constant must not be read as covering it. See docs/openmetadata.md.
+VERIFIED_OPENMETADATA_VERSION: str | None = "1.13.3"
 
 # Tag facets. The privileged marker is one of three independent signals that an
 # export carries ground truth; see ``docs/openmetadata.md``.

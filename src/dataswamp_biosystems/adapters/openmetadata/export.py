@@ -132,6 +132,33 @@ def _jsonl_bytes(records: tuple[PlanRecord, ...]) -> bytes:
     )
 
 
+def _live_support(mode: ExportMode) -> str:
+    """Return the live-evidence statement true of an export in ``mode``.
+
+    The canary ran an *observed* export end to end, so that is the only mode with
+    live evidence behind it. A truth export is the privileged diagnostic surface:
+    it rests on the deterministic offline contract and the vendored schemas, and
+    no canary has loaded one into a running server. Saying so per mode keeps a
+    stored truth export from quoting somebody else's green.
+    """
+    if VERIFIED_OPENMETADATA_VERSION is None:
+        return (
+            "none: this export has never been loaded into a running OpenMetadata "
+            "instance by this project, and no compatibility point is claimed"
+        )
+    if mode is ExportMode.TRUTH:
+        return (
+            f"observed mode is verified against OpenMetadata {VERIFIED_OPENMETADATA_VERSION}; "
+            "this is a truth export, and the privileged path has not been run against a "
+            "real server. A tested point, never a range"
+        )
+    return (
+        f"verified against OpenMetadata {VERIFIED_OPENMETADATA_VERSION} in observed mode: "
+        "a pinned throwaway server accepted an export of this shape and returned it with "
+        "zero discrepancies and zero leak findings. A tested point, never a range"
+    )
+
+
 def _export_manifest(
     reader: BundleReader,
     plan: ExportPlan,
@@ -149,13 +176,13 @@ def _export_manifest(
         # A declared target for the emitted payload shape, not tested evidence and
         # not a statement about any REST endpoint. See ADR 0006.
         "openmetadata_model_target_range": OPENMETADATA_MODEL_TARGET_RANGE,
-        # No live path exists and no canary has run, so there is no verified
-        # compatibility point. This stays null until one is earned.
+        # The one release a green canary has run this path against. A tested
+        # point, never a range.
         "verified_openmetadata_version": VERIFIED_OPENMETADATA_VERSION,
-        "live_support": (
-            "none: this export has never been loaded into a running OpenMetadata "
-            "instance by this project, and no compatibility point is claimed"
-        ),
+        # Said per mode rather than once, because only one mode was run. An
+        # export states the evidence *it* carries: the canary loaded an observed
+        # export, so a truth export must not inherit its green.
+        "live_support": _live_support(plan.mode),
         "mode": plan.mode.value,
         "privileged": plan.mode is ExportMode.TRUTH,
         "bundle": {

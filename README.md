@@ -156,9 +156,10 @@ dataswamp verify-om-ingestion --export-dir export/openmetadata \
 The verification reports four claims separately — completeness, fidelity,
 containment and, for an observed export, non-leakage of benchmark ground truth —
 and states its containment coverage per entity family rather than claiming it
-uniformly. **No plan has ever been loaded into a real OpenMetadata instance**:
-the whole live path is proved against a strict offline fake, and
-`VERIFIED_OPENMETADATA_VERSION` is `None`. See
+uniformly. An **observed-mode** export has been loaded into a real, pinned
+OpenMetadata `1.13.3` by a green canary — zero discrepancies, zero leak findings —
+so `VERIFIED_OPENMETADATA_VERSION` is `1.13.3`: a tested point, never a range, and
+not a claim about truth mode. See
 [docs/openmetadata.md](docs/openmetadata.md).
 
 Push that export into a running DataHub and prove the catalogue holds exactly
@@ -314,12 +315,11 @@ out-of-scope false positive rather than folded into the matrix.
 * DataHub live ingestion and round-trip validation ship, but the REST endpoints
   they use have not been verified against a pinned real DataHub release; live
   support is experimental and every round-trip report records that.
-* OpenMetadata ingestion and round-trip validation ship, but **no real
-  OpenMetadata release has ever accepted this export**. The request shapes were
-  read from OpenMetadata's own resource classes and the live path is proved end to
-  end against a strict offline fake — a contract simulator, not a server. There is
-  no canary, and `VERIFIED_OPENMETADATA_VERSION` is `None`. Schema validity is not
-  load success, and a green fake is not a green server.
+* OpenMetadata ingestion and round-trip validation ship, and a pinned real
+  `1.13.3` has accepted an **observed-mode** export with zero discrepancies
+  (`VERIFIED_OPENMETADATA_VERSION = "1.13.3"`). That is one tested point, not a
+  range: no other release is claimed, and **truth mode has not been run against a
+  real server**.
 * Run comparison reports what changed between two scored runs; it applies no
   threshold and does not gate CI.
 

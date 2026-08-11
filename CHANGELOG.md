@@ -15,6 +15,37 @@ entries below.
 
 ## [Unreleased]
 
+### Added
+
+- **First verified OpenMetadata compatibility point: `1.13.3`.**
+  `VERIFIED_OPENMETADATA_VERSION` moves `None` → `"1.13.3"`, earned by canary run
+  `31528890425` against a pinned, throwaway server
+  (`server@sha256:997d666b01f674fc4d587f034759c826082ea7666cd7bc0e6db8fdbb707df010`,
+  self-reporting revision `255f6694913b84797064a42859cda3f2a3425dc6`): 830/830
+  entities retrieved and matched, completeness, fidelity, containment and
+  non-leakage all green, **0** discrepancies, **0** leak findings, 19 live tests
+  including the negative controls that prove a clean result is not a comparison of
+  nothing against nothing. Normalization contract v2.
+
+  **A tested point, never a range.** No other release is claimed, including other
+  `1.13.x` patches; `OPENMETADATA_MODEL_TARGET_RANGE` remains a declared target for
+  the payload shape and is not evidence.
+
+  **Scope: observed mode.** What ran end to end was `bundle → export-openmetadata
+  --mode observed → ingest-openmetadata → real OpenMetadata 1.13.3 → readback →
+  round-trip verification → negative controls`. **Truth mode has not been run
+  against a real server** and continues to rest on the deterministic offline
+  contract and the vendored schemas. The canary does prove that an *observed*
+  ingestion leaves no `dataswampTruth*` property and no privileged tag in a real
+  catalogue — that is non-leakage, not truth-mode verification. The export
+  manifest states which of the two an export carries, per mode, so a stored truth
+  export cannot quote an observed export's evidence.
+
+  No report schema field was added for this: `OM_ROUNDTRIP_SCHEMA_VERSION` stays
+  `1`, `OM_ADAPTER_VERSION` stays `1.1.0`, and no deterministic plan fixture,
+  golden digest or DataHub artefact moves. Emitted export *manifests* do change,
+  because they record the constant.
+
 ### Changed
 
 - **OpenMetadata normalization is at version 2, on real-server evidence.**

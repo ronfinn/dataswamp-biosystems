@@ -108,9 +108,9 @@ emitted is a useful alarm, and it only stays useful while the subset is small.
 **Upstream model changes are found by us, not announced to us.** A client library
 would break loudly on `pip install`. Here, a changed `required` list is found when
 someone deliberately refreshes the vendored schemas, or when a live canary goes
-red. The mitigations are ADR 0006's policy and, per catalogue, a canary — which
-for OpenMetadata does not exist yet, and which is why
-`VERIFIED_OPENMETADATA_VERSION` is `None`.
+red. The mitigations are ADR 0006's policy and, per catalogue, a canary — which for
+OpenMetadata now exists and has earned `VERIFIED_OPENMETADATA_VERSION = "1.13.3"`
+for the observed-mode path.
 
 **Some transport work is reimplemented per catalogue.** DataHub's live client is
 ~470 lines of standard-library REST. An OpenMetadata one would be comparable.
