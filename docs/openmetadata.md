@@ -528,13 +528,14 @@ Two more versions belong to the live path, and to nothing else:
 
 | | What it is | Value |
 | --- | --- | --- |
-| `OM_NORMALIZATION_VERSION` | The forgiveness rules in force when a round-trip report was produced | `1` |
+| `OM_NORMALIZATION_VERSION` | The forgiveness rules in force when a round-trip report was produced | `2` |
 | `OM_ROUNDTRIP_SCHEMA_VERSION` | The shape of `roundtrip-report.json` | `1` |
 
-Both are **entirely independent of DataHub's**. DataHub's `NORMALIZATION_VERSION`
-is `2` and reached that value through a real canary run against a pinned release;
-OpenMetadata's is `1` and has no such evidence behind it. They share no rules, no
-counter and no justification, and neither moves when the other does.
+Both are **entirely independent of DataHub's**. Both normalization counters
+happen to read `2`, and that is a coincidence of arithmetic, not a relationship:
+each moved once, at a different time, on evidence from a different server about a
+different model. They share no rules, no counter and no justification, and
+neither moves when the other does.
 
 ---
 
@@ -672,6 +673,34 @@ A red run is classified **before** any semantic change, exactly as for DataHub:
 The question that settles A versus B is always the same: **did DataSwamp send a
 value at this exact path?** If it did and the server changed it, that is not a
 normalization candidate under any circumstances.
+
+That rule stands unqualified, and the description-escaping behaviour is not an
+exception to it — it is not normalization at all. Comparison runs in two stages,
+and keeping them distinct is what lets the guardrail stay absolute:
+
+* **Stage 1, representation reconciliation.** A value DataSwamp sent may be
+  related to a differently-encoded readback of *the same value*, but only where
+  the adapter can prove an exact, catalogue-specific, invertible transformation.
+  Nothing is ignored or skipped; the value is still compared in full. This is
+  where reference projection, unordered relationship lists and `description`
+  escaping live.
+* **Stage 2, normalization.** Only server-owned, server-generated or
+  server-defaulted state DataSwamp did *not* semantically send is eligible for
+  forgiveness, under the A/B policy above.
+
+    A DataSwamp-sent semantic value is never a normalization-forgiveness
+    candidate. Exact proven representation reconciliation is performed
+    separately, before semantic comparison.
+
+`OM_NORMALIZATION_VERSION` counts **stage 2 only**. A stage-1 rule forgives
+nothing and is never a reason to move it.
+
+The first live run against 1.13.3 was classified before anything moved: 830
+discrepancies **B** (materialized defaults — stage 2, and the sole reason the
+version is now `2`), and 83 the escaping behaviour above, which needed a stage-1
+rule and no forgiveness. The earlier 17-second failure was **A** — a missing
+export step in the workflow, found before any server contact and so carrying no
+information about OpenMetadata at all.
 
 ### Evidence
 
@@ -830,7 +859,7 @@ scan was clean" are different statements and the report distinguishes them.
 
 ---
 
-## Normalization v1
+## Normalization v2
 
 The highest-risk part of the live path, and the risk is not a bug — it is
 *erosion*. When a round-trip fails, the cheapest fix is to add the offending
@@ -845,21 +874,91 @@ found there is the platform's. That test is mechanical and runs against the
 vendored schemas in `tests/adapters/openmetadata/test_normalize.py`. **A fake
 server returning a field is not evidence that a real OpenMetadata generates it.**
 
-Version 1 forgives:
+Version 2 forgives, as platform-generated:
 
 | Path | Why |
 | --- | --- |
 | `id`, `href`, `version`, `updatedAt`, `updatedBy`, `impersonatedBy` | Server-assigned identity, URI, version counter, clock and auth principal |
 | `changeDescription`, `incrementalChangeDescription` | Server-computed diffs against what it already stored |
 | `deleted` | The server's soft-delete lifecycle flag |
+| `entityStatus` | The server's ingestion/approval lifecycle state, written on create |
+| `followers` | The follow relationship, maintained by the server's follow endpoints |
 | `children` (Container) | The server-materialised inverse of `parent`; the export declares containment one way only |
 | `serviceType` (Container) | Copied from the StorageService by the server; DataSwamp states it once, on the service, where it *is* compared |
+| `lifecycleStage` (DataProduct) | The server's product lifecycle stage; DataSwamp's programmes carry none |
+| `childrenCount`, `userCount` (Team) | Counts the server derives from relationships it already stores |
+| `deprecated` (Tag), `disabled` (Tag, Classification) | OpenMetadata's own tag lifecycle flags |
 
-Deliberately **not** forgiven: `retentionPeriod`, `sampleData`, `certification`,
-`entityStatus`. They are also absent from the create schemas, but OpenMetadata
-does not *generate* them — a user or another tool sets them through PATCH. A
-value appearing there is somebody writing to DataSwamp's entities, which is
-exactly what containment exists to notice.
+Deliberately **not** forgiven: `retentionPeriod`, `sampleData`, `certification`.
+They are also absent from the create schemas, but OpenMetadata does not
+*generate* them — a user or another tool sets them through PATCH. A value
+appearing there is somebody writing to DataSwamp's entities, which is exactly
+what containment exists to notice.
+
+#### `entityStatus`: live evidence superseding an unverified assumption
+
+`entityStatus` sat on that excluded list in v1 and no longer does. The old
+statement is corrected rather than preserved, because it was wrong:
+
+1. **The v1 conclusion was an offline assumption.** It read the create schemas,
+   saw the field absent, and reasoned from the source that only a PATCH could set
+   it. No server had been observed.
+2. **The live 1.13.3 canary showed otherwise** — the field materialized on 799
+   entities nobody patched, `Unprocessed` throughout except on GlossaryTerms,
+   which the server's own approval workflow settles as `Approved`.
+3. **Pinned schema evidence was then added**, vendoring the entity schemas that
+   declare it so the exclusion test is mechanical for those families too.
+4. **It is now handled under v2** with the same narrow, proven condition as every
+   other stage-2 rule: forgiven only where the plan carried no value at that path.
+
+The lesson is *live evidence superseded an unverified assumption* — **not** that a
+red check is itself a reason to forgive anything. A red canary is classified
+first, and only verdict **B** may widen normalization.
+
+### Materialized defaults (new in v2)
+
+The same canary showed OpenMetadata answering an *omitted optional* field with an
+empty relationship set or the default its own schema declares — 830 of its 913
+discrepancies. `owners: []` on an entity DataSwamp gave no owner asserts nothing
+about ownership; it is the storage layer's representation of "nothing here".
+
+Forgiveness is doubly conditional and exact: the plan must have **omitted** the
+field, *and* the retrieved value must equal the declared default exactly.
+`owners: [someone]` on that same entity is still a containment discrepancy, which
+is the case the rule exists to keep catchable.
+
+| Kind | Paths | Value forgiven |
+| --- | --- | --- |
+| Empty relationship sets | `assets`, `conceptMappings`, `dataProducts`, `domains`, `experts`, `owners`, `recognizers`, `references`, `reviewers`, `synonyms`, `tags`, `users` | `[]` only |
+| Declared scalar defaults | `provider`, `mutuallyExclusive`, `isJoinable`, `autoClassificationEnabled`, `autoClassificationPriority`, `visibility` | The schema's literal default only |
+
+Each path is scoped to the entity types whose `Create` schema actually accepts
+it. That is not tidiness: `dataProducts` is creatable on a Container but
+entity-only on a GlossaryTerm, so an unscoped rule would forgive, on the term, a
+field the term's request could never have carried — reaching the stricter
+platform-generated standard through the wrong door. The mechanical test asserts
+the two lists stay disjoint.
+
+### Server-side HTML escaping — stage 1, added alongside v2
+
+OpenMetadata escapes markup-significant characters in `description` on write, so
+`study 'x'` returns as `study &#39;x&#39;` — the other 83 discrepancies. Comparing
+literally would report every described entity in the estate as mutated.
+
+**This forgives nothing and did not move `OM_NORMALIZATION_VERSION`.** The
+description is still compared, in full, against what DataSwamp sent; only the two
+encodings of it are related. Four conditions must hold, each closing one way the
+reconciliation could otherwise absorb a real change:
+
+| Condition | What it prevents |
+| --- | --- |
+| The field is `description` and both sides are strings | Touching a reference, an enum or an identity |
+| The sent text carries **no HTML entity of its own** | Double-encoding ambiguity; entity-like literal text collapsing onto another sent value |
+| Exactly one decoding round relates the two strings | "Decode until it matches" |
+| Decoding the readback reproduces the sent text character for character | Word changes, punctuation loss, truncation |
+
+A truncation, a rewrite, a dropped sentence, a double-encoded readback or an
+escaped `displayName` all still fail fidelity.
 
 Three further rules:
 

@@ -40,10 +40,17 @@ api/services/createStorageService.json
 api/teams/createTeam.json
 ```
 
-Plus the shared types and enum-bearing entity schemas those `$ref` into:
+Plus the shared types and enum-bearing entity schemas those `$ref` into, and the
+entity schemas the normalization contract's evidence test reads — a forgiveness
+rule is only checkable where both halves of the create/entity pair are present,
+so the pair is vendored rather than the rule asserted:
 
 ```
+entity/classification/classification.json  disabled, entityStatus (normalization evidence)
+entity/classification/tag.json      deprecated, disabled, entityStatus (normalization evidence)
 entity/data/container.json          fileFormat enum
+entity/data/glossary.json           entityStatus (normalization evidence)
+entity/data/glossaryTerm.json       entityStatus (normalization evidence)
 entity/domains/dataProduct.json     dataProductType, visibility, portfolioPriority
 entity/domains/domain.json          domainType enum
 entity/services/storageService.json storageServiceType enum

@@ -112,14 +112,19 @@ def test_the_version_constants_stay_independent() -> None:
     """Five counters, five different questions. Borrowing evidence between them
     is how "the schemas were refreshed" quietly becomes "a server was tested"."""
     assert OM_ADAPTER_VERSION == "1.1.0"
-    assert OM_NORMALIZATION_VERSION == 1
+    assert OM_NORMALIZATION_VERSION == 2
     assert OM_ROUNDTRIP_SCHEMA_VERSION == 1
     assert OPENMETADATA_SCHEMA_TARGET == "1.13.3-release"
-    # Independent of DataHub's, which is at 2. They share no rules, no counter
-    # and no evidence, and a live OpenMetadata run says nothing about DataHub.
-    from dataswamp_biosystems.adapters.datahub.normalize import NORMALIZATION_VERSION
-
-    assert OM_NORMALIZATION_VERSION != NORMALIZATION_VERSION
+    # Independent of DataHub's, which also happens to be at 2 — arrived at
+    # separately, on separate evidence. Independence is structural, not a matter
+    # of the numbers differing: this counter moved because a live OpenMetadata
+    # returned materialized defaults and escaped descriptions, which says nothing
+    # about DataHub and must never be read as saying anything about it.
+    source = (
+        Path(__file__).resolve().parents[3]
+        / "src/dataswamp_biosystems/adapters/openmetadata/normalize.py"
+    ).read_text(encoding="utf-8")
+    assert "from dataswamp_biosystems.adapters.datahub" not in source
 
 
 # ------------------------------------------------------------ trigger policy

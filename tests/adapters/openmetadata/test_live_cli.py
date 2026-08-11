@@ -239,7 +239,7 @@ def test_the_report_is_deterministic_and_records_its_own_limits(
 
     report = json.loads((first / ROUNDTRIP_REPORT_NAME).read_text())
     assert report["roundtrip_schema_version"] == 1
-    assert report["normalization_version"] == 1
+    assert report["normalization_version"] == 2
     assert report["catalogue"]["verified_openmetadata_version"] is None
     assert "unverified" in report["catalogue"]["live_support"]
     assert set(report["claims"]) == {
@@ -249,7 +249,7 @@ def test_the_report_is_deterministic_and_records_its_own_limits(
         "non-leakage",
     }
     assert all(claim["status"] == "pass" for claim in report["claims"].values())
-    assert report["normalization"]["normalization_version"] == 1
+    assert report["normalization"]["normalization_version"] == 2
     assert report["unsupported_surfaces"]
     # No wall clock, no host, no path, no user.
     text = (first / ROUNDTRIP_REPORT_NAME).read_text()

@@ -15,7 +15,64 @@ entries below.
 
 ## [Unreleased]
 
+### Changed
+
+- **OpenMetadata normalization is at version 2, on real-server evidence.**
+  `OM_NORMALIZATION_VERSION` moves `1` → `2`, which changes the
+  `normalization_version` recorded in every `roundtrip-report.json`. The first
+  live 1.13.3 canary produced 913 discrepancies, classified before anything was
+  changed. **The version moved for the 830 server-materialized ones alone**; the
+  counter tracks forgiveness, and the description behaviour below forgives
+  nothing.
+
+  *Materialized defaults* (830 of them, verdict **B**). OpenMetadata answers an omitted optional
+  field with an empty relationship set or the default its own schema declares —
+  `owners: []`, `provider: user`, `isJoinable: true`, `autoClassificationPriority:
+  50`. Forgiveness is doubly conditional: the plan must have omitted the field
+  *and* the retrieved value must equal the declared default exactly, so
+  `owners: [someone]` on an entity DataSwamp gave no owner is still a containment
+  discrepancy. Each path is scoped to the entity types whose `Create` schema
+  actually accepts it, and a mechanical test asserts this list and the
+  platform-generated list stay disjoint.
+
+  Seven fields also joined the platform-generated list under the existing
+  create-schema exclusion standard: `entityStatus`, `followers`, `lifecycleStage`,
+  `childrenCount`, `userCount`, `deprecated` and `disabled`. `entityStatus` had
+  been *deliberately excluded* in v1 on an offline assumption — that only a PATCH
+  sets it. The canary showed the server writing it on create, on 799 entities
+  nobody patched, and pinned schema evidence was then vendored behind it: live
+  evidence superseded an unverified assumption, which is not the same thing as a
+  red check justifying forgiveness. `retentionPeriod`, `sampleData` and
+  `certification` remain excluded.
+
+  Four upstream entity schemas (`tag`, `classification`, `glossary`,
+  `glossaryTerm`) are now vendored at the same pinned commit, because a
+  forgiveness rule is only mechanically checkable where both halves of the
+  create/entity pair are present. No compatibility point is claimed:
+  `VERIFIED_OPENMETADATA_VERSION` stays `None` until a canary runs completely
+  green.
+
+- **Round-trip comparison is documented as two explicit stages.** The guardrail
+  is unchanged and unqualified — *a DataSwamp-sent semantic value is never a
+  normalization-forgiveness candidate* — and the code, the emitted contract and
+  `docs/openmetadata.md` now name the two stages it separates. Stage 1 relates two
+  encodings of the same sent value (reference projection, unordered relationship
+  lists) where the transformation is exact and invertible; stage 2 is forgiveness
+  of server-owned state, and `OM_NORMALIZATION_VERSION` counts stage 2 alone.
+
 ### Added
+
+- **Stage-1 reconciliation of OpenMetadata's server-side HTML escaping.** The
+  remaining 83 discrepancies from the first live canary: OpenMetadata escapes
+  markup-significant characters in `description` on write, so `study 'x'` returns
+  as `study &#39;x&#39;`. This **forgives nothing and did not move
+  `OM_NORMALIZATION_VERSION`** — the description is still compared in full, and
+  only its two encodings are related. Admitted only where the inversion is
+  provably unambiguous: the sent text must carry no HTML entity of its own, so
+  exactly one decoding round can relate the two strings, and decoding the readback
+  must then reproduce the sent text character for character. A truncation, a
+  rewrite, a double-encoded readback or an escaped `displayName` all still fail
+  fidelity.
 
 - **Optional live OpenMetadata canary.**
   `.github/workflows/live-openmetadata.yml` stands up a real, pinned, throwaway

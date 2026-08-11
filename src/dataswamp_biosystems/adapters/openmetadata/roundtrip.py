@@ -61,8 +61,10 @@ from dataswamp_biosystems.adapters.openmetadata.normalize import (
     TAG_LABEL_DERIVED_FIELDS,
     UNORDERED_FIELDS,
     forgive_additions,
+    is_materialized_default,
     is_platform_generated,
     normalize_field,
+    reconcile_html_escaping,
 )
 
 # Bumped when the emitted round-trip report's shape changes. Entirely separate
@@ -587,6 +589,7 @@ def compare_entity(sent: SentEntity, retrieved: dict[str, Any]) -> list[Discrepa
             differences.append(FieldDifference(name, _render(sent_value), ABSENT))
             continue
         retrieved_value = normalize_field(name, retrieved[name])
+        retrieved_value = reconcile_html_escaping(name, sent_value, retrieved_value)
         if name == "tags":
             retrieved_value = _normalize_tag_labels(sent.fields.get(name), retrieved_value)
         differences.extend(
@@ -605,10 +608,16 @@ def compare_entity(sent: SentEntity, retrieved: dict[str, Any]) -> list[Discrepa
             )
         )
 
+    # A field the plan never sent is an extra unless the contract recognises it:
+    # either the server generates it outright, or it is the exact default the
+    # server materializes for an omitted optional. Both conditions are checked
+    # against what actually came back, so a populated value is still reported.
     extra = sorted(
         name
         for name in retrieved
-        if name not in sent.fields and not is_platform_generated(sent.entity_type, name)
+        if name not in sent.fields
+        and not is_platform_generated(sent.entity_type, name)
+        and not is_materialized_default(sent.entity_type, name, retrieved[name])
     )
     if extra:
         discrepancies.append(
@@ -619,7 +628,8 @@ def compare_entity(sent: SentEntity, retrieved: dict[str, Any]) -> list[Discrepa
                 fqn=sent.fqn,
                 detail=(
                     "the catalogue holds field(s) the export never sent and the "
-                    "normalization contract does not recognise as platform-generated"
+                    "normalization contract recognises as neither platform-generated nor "
+                    "a materialized default"
                 ),
                 differences=tuple(
                     FieldDifference(name, ABSENT, _render(retrieved[name])) for name in extra

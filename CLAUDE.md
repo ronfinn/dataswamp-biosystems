@@ -457,16 +457,37 @@ referential integrity, not just happy-path execution.
   outside the module that owns it. `mapping.py` keeps its `ENDPOINTS` table as
   frozen Issue A export *data*; that exemption is deliberate and narrow.
 - **Never widen OpenMetadata normalization on the strength of the fake.**
-  `OM_NORMALIZATION_VERSION` is 1 and independent of DataHub's 2 — they share no
-  rules, no counter and no evidence. A field is forgiven only where OpenMetadata's
-  own `Create<Entity>` schema sets `additionalProperties: false` and omits it
-  while the entity schema declares it, which proves DataSwamp cannot have sent it.
-  "The fake returns it" is not evidence that a real server generates it, and
-  neither is "a real server might". Forgiveness is additive-only — a value
+  `OM_NORMALIZATION_VERSION` is 2 and independent of DataHub's 2 — the equal
+  numbers are a coincidence; they share no rules, no counter and no evidence. A
+  field is forgiven only where OpenMetadata's own `Create<Entity>` schema sets
+  `additionalProperties: false` and omits it while the entity schema declares it
+  (proving DataSwamp cannot have sent it), or — since v2, on real-run evidence —
+  where the request omitted an optional field and the server answered with an
+  empty relationship set or its schema's literal declared default, matched
+  *exactly*. "The fake returns it" is not evidence that a real server generates
+  it, and neither is "a real server might". Forgiveness is additive-only — a value
   DataSwamp sent is always compared — and every rule needs a justification, a
   focused forgiveness test and a paired test proving an adjacent field is still
-  caught. `retentionPeriod`, `sampleData`, `certification` and `entityStatus` stay
-  off the list on purpose: OpenMetadata does not generate them.
+  caught. `retentionPeriod`, `sampleData` and `certification` stay off the list on
+  purpose: OpenMetadata does not generate them. `entityStatus` was excluded on an
+  offline assumption until the first live canary showed the server writing it on
+  create — live evidence may supersede an unverified assumption; a red check is
+  never itself a reason to forgive anything.
+- **Never conflate representation reconciliation with normalization.** Comparison
+  is two stages and the guardrail between them is absolute: *a DataSwamp-sent
+  semantic value is never a normalization-forgiveness candidate; exact proven
+  representation reconciliation is performed separately, before semantic
+  comparison.* Stage 1 relates two encodings of the same sent value — reference
+  projection, unordered relationship lists, `description` HTML escaping — only
+  where the transformation is exact, catalogue-specific and invertible, and it
+  forgives nothing: the value is still compared in full. It must never absorb a
+  word change, a punctuation loss, a double-encoding ambiguity or one sent value
+  collapsing onto another, so `reconcile_html_escaping` refuses any case where the
+  sent text carries an HTML entity of its own. Stage 2 is forgiveness, and
+  `OM_NORMALIZATION_VERSION` counts stage 2 alone — never cite a stage-1 rule as a
+  reason to move it. Do not describe stage 1 as an "exception" to the guardrail,
+  and do not create a module for it: `normalize.py` owns both stages deliberately,
+  under explicit banners.
 - **Never let the OpenMetadata fake server model `client.py`.**
   `tests/adapters/openmetadata/fake_om.py` must import nothing from the client and
   must derive its routes and validation from upstream's resource classes and the
