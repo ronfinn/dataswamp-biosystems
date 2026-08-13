@@ -233,8 +233,10 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     findings, remediations, controls, rule scope or mutation log — which is the
     structural guarantee against truth leakage; `truth` mode is privileged and
     marked as such in tags, custom properties and the export manifest. Emits
-    schemas directly rather than depending on `acryl-datahub`. See
-    `docs/datahub.md`.
+    schemas directly rather than depending on `acryl-datahub`. `coverage.py`
+    holds the mapping-coverage contract (24 semantic families, their fidelity,
+    operational state and reasons) and `mapping.py` measures it, shipping
+    `mapping-coverage.json` with every export. See `docs/datahub.md`.
   - `adapters/openmetadata/` — the deterministic, **offline-only** OpenMetadata
     adapter: hierarchical FQN identity (`fqn.py`), the native-model mapping and
     ordered load plan (`mapping.py`), the mapping-coverage contract
@@ -455,6 +457,25 @@ referential integrity, not just happy-path execution.
   regenerate deliberately with `uv run --frozen python
   scripts/update_openmetadata_fixtures.py --schemas|--fixtures --confirm
   --reason ...`.
+- **Never let a DataHub coverage row lose its reason, or a family go
+  unclassified.** `mapping-coverage.json` is a contract, not documentation:
+  `build_coverage` refuses a report that misses a declared family, counts an
+  undeclared one, fails to reconcile `source == emitted + dropped`, or claims
+  emitted records for an `unsupported` family, and it repairs nothing. The
+  semantic classification must never be replaced by the operational state — they
+  answer different questions, and DataHub's zero `deferred_live_write` rows are a
+  finding, not a gap. Never soften `lossy` to `reasonable` to make the table look
+  better: `dataset_lineage` (edge type discarded), `file_containment` (hierarchy
+  flattened into lineage), `data_contract` and `data_product_components`
+  (silently filtered) are the rows the report exists to make visible. Coverage
+  **describes** the adapter — it never improves, normalizes or repairs it, and
+  widening the source shard dictionary is measurement only: `build_mcps` must go
+  on ignoring the scientific shards, and the committed MCP fixtures must not
+  move. The report carries counts only and never an entity identifier, because
+  per-entity coverage would leak which entities were mutated. The two adapters'
+  registries declare the same 24 families and deliberately different
+  classifications, proven by a test that imports both — neither adapter may
+  import the other.
 - **Never create `adapters/common/` yet.** The two adapters duplicate an
   id-escaping codec and an atomic writer on purpose; with two examples it is not
   yet clear which similarities are structural. They must not import each other,

@@ -15,6 +15,11 @@ Output, all byte-identical for identical input:
     reads directly.
 ``export-manifest.json``
     Mode, privilege, counts, the bundle it came from, and a digest per file.
+``mapping-coverage.json``
+    How each of the 24 DataSwamp semantic families maps into DataHub, how
+    faithfully, where it surfaces and what is deliberately dropped. It is an
+    adapter contract artefact, digest-verified with the rest of the export and
+    never transmitted to a catalogue.
 ``datahub-recipe.yml``
     A ready-to-run ingestion recipe pointing at ``mcps.json``. It references
     credentials only through environment variables and contains none.
@@ -35,6 +40,7 @@ from dataswamp_biosystems.adapters.datahub.mapping import (
     DATAHUB_MODEL_VERSION,
     ExportMode,
     SourceGraph,
+    build_mapping_coverage,
     build_mcps,
 )
 from dataswamp_biosystems.adapters.datahub.urns import FABRIC, NAMESPACE, PLATFORM_ID
@@ -58,11 +64,15 @@ MCPS_JSONL_NAME = "mcps.jsonl"
 MCPS_JSON_NAME = "mcps.json"
 EXPORT_MANIFEST_NAME = "export-manifest.json"
 RECIPE_NAME = "datahub-recipe.yml"
+COVERAGE_NAME = "mapping-coverage.json"
 
 # The observed graph's shard names are the truth-graph field names, so one
 # mapping serves both modes.
 _TRUTH_SHARD_SOURCES: dict[str, str] = {
     "files": "files.jsonl",
+    "subjects": "subjects.jsonl",
+    "biospecimens": "biospecimens.jsonl",
+    "assays": "assays.jsonl",
     "contracts": "contracts.jsonl",
     "quality_checks": "quality.jsonl",
     "lineage": "lineage.jsonl",
@@ -77,6 +87,11 @@ def _truth_source(reader: BundleReader, *, labelled: bool) -> SourceGraph:
         shards[key].append(record)
     for shard, source_file in _TRUTH_SHARD_SOURCES.items():
         shards[shard] = list(reader.iter_truth_records(source_file))
+    # Both run kinds live in one shard, split on the record's own discriminator
+    # so the observed graph's two run shards have truth-mode counterparts.
+    runs = list(reader.iter_truth_records("runs.jsonl"))
+    shards["instrument_runs"] = [row for row in runs if row.get("run_kind") == "instrument"]
+    shards["pipeline_runs"] = [row for row in runs if row.get("run_kind") == "pipeline"]
 
     labels: dict[str, list[str]] = {}
     if labelled and reader.has_layer(Layer.OBSERVED):
@@ -103,7 +118,22 @@ def _observed_source(reader: BundleReader) -> SourceGraph:
     """
     graph = reader.observed_graph()
     shards: dict[str, list[dict[str, Any]]] = {}
-    for shard in ("datasets", "data_products", "files", "contracts", "quality_checks", "lineage"):
+    for shard in (
+        "datasets",
+        "data_products",
+        "files",
+        "contracts",
+        "quality_checks",
+        "lineage",
+        # Carried for measurement only. The mapping ignores these five by name;
+        # coverage counts them so "deliberately not mapped" cannot be confused
+        # with "there was nothing there". They come from the same file.
+        "subjects",
+        "biospecimens",
+        "assays",
+        "instrument_runs",
+        "pipeline_runs",
+    ):
         records = graph.get(shard, [])
         shards[shard] = [row for row in records if isinstance(row, dict)]
     return SourceGraph(mode=ExportMode.OBSERVED, shards=shards)
@@ -216,10 +246,12 @@ def export_datahub(
         jsonl = "".join(f"{serialize.canonical_json(mcp)}\n" for mcp in mcps).encode("utf-8")
         array = _json_array_bytes(mcps)
         recipe = _render_recipe(mode).encode("utf-8")
+        coverage = serialize.manifest_bytes(build_mapping_coverage(source))
         digests = {
             MCPS_JSONL_NAME: serialize.digest(jsonl),
             MCPS_JSON_NAME: serialize.digest(array),
             RECIPE_NAME: serialize.digest(recipe),
+            COVERAGE_NAME: serialize.digest(coverage),
         }
         manifest = _export_manifest(reader, mode, mcps, digests)
 
@@ -236,6 +268,7 @@ def export_datahub(
         MCPS_JSONL_NAME: jsonl,
         MCPS_JSON_NAME: array,
         RECIPE_NAME: recipe,
+        COVERAGE_NAME: coverage,
         EXPORT_MANIFEST_NAME: serialize.manifest_bytes(manifest),
         PROVENANCE_NAME: provenance,
     }
@@ -272,6 +305,7 @@ __all__ = [
     "MCPS_JSON_NAME",
     "EXPORT_MANIFEST_NAME",
     "RECIPE_NAME",
+    "COVERAGE_NAME",
     "build_source",
     "export_datahub",
 ]

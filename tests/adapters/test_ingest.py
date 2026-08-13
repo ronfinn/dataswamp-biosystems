@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from dataswamp_biosystems.adapters.datahub import (
+    COVERAGE_NAME,
     EXPORT_MANIFEST_NAME,
     MCPS_JSONL_NAME,
     ExportMode,
@@ -71,6 +72,46 @@ def test_a_tampered_recipe_also_refuses_to_load(copied_export: Path) -> None:
     recipe.write_text(recipe.read_text(encoding="utf-8") + "# edited\n", encoding="utf-8")
     with pytest.raises(DataHubConfigError, match="does not match its manifest digest"):
         load_export(copied_export)
+
+
+def test_a_missing_coverage_report_refuses_to_load(copied_export: Path) -> None:
+    """mapping-coverage.json is a required companion of the export, not a note."""
+    (copied_export / COVERAGE_NAME).unlink()
+    with pytest.raises(DataHubConfigError, match=f"{COVERAGE_NAME} is declared"):
+        load_export(copied_export)
+
+
+def test_a_mutated_coverage_report_refuses_to_load(
+    copied_export: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And it is refused before any network activity, like every other file."""
+    import socket
+    import urllib.request
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("verification must not reach the network")
+
+    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    monkeypatch.setattr(socket, "create_connection", forbidden)
+    monkeypatch.setattr(socket.socket, "connect", forbidden)
+
+    path = copied_export / COVERAGE_NAME
+    coverage = json.loads(path.read_text(encoding="utf-8"))
+    coverage["concepts"][0]["deliberately_dropped_count"] = 999
+    path.write_text(json.dumps(coverage, sort_keys=True), encoding="utf-8")
+    with pytest.raises(DataHubConfigError, match="does not match its manifest digest"):
+        load_export(copied_export)
+
+
+def test_a_sound_export_transmits_no_coverage_report(observed_export_dir: Path) -> None:
+    """Coverage is an adapter contract artefact; nothing in it goes to GMS."""
+    export = load_export(observed_export_dir)
+    with FakeGMSServer() as server:
+        execute_ingestion(plan_ingestion(export, batch_size=25), server.client())
+        received = json.dumps(server.state.received)
+    assert "coverage_schema_version" not in received
+    assert "mapping-coverage" not in received
+    assert "deliberately_dropped_count" not in received
 
 
 def test_a_missing_declared_file_refuses_to_load(copied_export: Path) -> None:

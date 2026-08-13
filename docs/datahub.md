@@ -172,9 +172,64 @@ Observed-mode records are rendered faithfully, nulls and all: a missing owner or
 an empty description is exported as a missing owner or an empty description,
 because showing a catalogue what it would really have seen is the entire point.
 
+The table above is a reader's summary. The **authoritative, machine-readable
+statement of how faithfully each DataSwamp semantic family survives is
+`mapping-coverage.json`**, described below; when the two disagree, the emitted
+file is right and this table is stale.
+
+## Mapping coverage
+
+Every export carries `mapping-coverage.json`: a first-class artefact declaring
+all **24** DataSwamp semantic families — including the ones this adapter emits
+nothing for — with, for each, a target, a semantic classification, an
+operational state, a mandatory reason for anything non-exact, and measured
+source, emitted and deliberately-dropped counts. It is regenerated with the
+export and describes the adapter *as it currently behaves*, never as it ought to.
+
+**Semantic classification** answers *how faithful is this mapping?* —
+`exact` (no meaningful compromise), `reasonable` (transformed into a
+catalogue-native model; the source concept stays recoverable), `lossy` (material
+information does not survive into native DataHub fields), `unsupported` (no
+honest target representation exists **in this adapter**). The current contract is
+**4 exact, 9 reasonable, 4 lossy, 7 unsupported**.
+
+**Operational state** answers *where does it show up?* —
+`materialized_in_entity_export`, `deferred_live_write`,
+`deliberately_not_mapped`. The two axes are independent, and fidelity is never a
+function of operational timing. DataHub declares `deferred_live_write` but uses
+it for nothing, and that zero is itself a finding: the file-source MCP model has
+no server-assigned-UUID problem, so lineage and data-product assets are
+materialized inline where the OpenMetadata adapter must defer.
+
+`unsupported` is **not a defect and not a DataHub limitation** — it records that
+this adapter has no honest home for a family, so an omission is counted rather
+than silently absent. Reporting `0 / 0 / 0` for subjects or biospecimens would
+claim nothing existed; the contract instead reports the real source count with
+zero emitted, which is why the exporter reads those shards for measurement while
+the mapping continues to ignore them.
+
+Counts use each family's natural semantic grain: entity occurrences for entity
+families, individual reference occurrences for ownership, stewardship and
+data-product components, edge occurrences for lineage, and one containment
+relationship per physical file. `source == emitted + dropped` holds for every
+row, and `build_coverage` refuses a report that misses a family, counts an
+undeclared one, fails to reconcile, or claims emitted records for an
+`unsupported` family. Nothing is silently repaired.
+
+The report carries **counts only, never an entity identifier** — per-entity
+coverage would let a reader infer which entities were mutated by differencing two
+exports.
+
+The OpenMetadata adapter declares the same 24 families with its own, deliberately
+different classifications; a test proves the two vocabularies match without
+either adapter importing the other. Future cross-catalogue tooling *may* consume
+these contracts. No such comparator exists.
+
 ## What has no representation
 
-Documented rather than distorted:
+Documented rather than distorted. The semantic families below are declared
+`unsupported` and counted in `mapping-coverage.json`; the answer-key artefacts
+are not DataSwamp semantic families at all and appear in no contract:
 
 - **Subjects, biospecimens, assays, instrument runs and pipeline runs** have no
   catalogue analogue in DataHub's model. Runs could be forced into `dataJob`, but
@@ -200,9 +255,16 @@ export/datahub/
 ├── mcps.jsonl            # one proposal per line, canonical JSON — the machine-readable form
 ├── mcps.json             # the same proposals as an array — what DataHub's file source reads
 ├── export-manifest.json  # mode, privilege, counts by entity type and aspect, source bundle, per-file digests
+├── mapping-coverage.json # how each of the 24 semantic families maps, how faithfully, and what is dropped
 ├── datahub-recipe.yml    # a ready-to-run ingestion recipe
 └── provenance.json       # the same environment provenance every generated directory carries
 ```
+
+Because `ingest-datahub` digest-verifies **every** file the manifest declares
+before a byte leaves the process, `mapping-coverage.json` is a required,
+tamper-checked companion of the export: an export with it deleted or edited is
+invalid. Nothing in it is transmitted to a catalogue — it is an adapter contract
+artefact, not a Metadata Change Proposal.
 
 Both payload forms are byte-identical for identical input and carry exactly the
 same proposals (asserted by a test). Each proposal has the shape:

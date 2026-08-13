@@ -9,6 +9,11 @@ import — a comment does not.
 from __future__ import annotations
 
 import ast
+import json
+import os
+import stat
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -374,3 +379,85 @@ def test_no_http_or_catalogue_client_is_a_dependency() -> None:
     declared = pyproject.split("[tool.")[0].lower()
     for package in ("acryl-datahub", "requests", "httpx", "aiohttp", "urllib3"):
         assert package not in declared, f"{package} became a dependency"
+
+
+# ---------------------------------------------------------------------------
+# The mapping-coverage contract's boundaries.
+# ---------------------------------------------------------------------------
+# Coverage measures the mapping; measuring must not require privilege, and the
+# two adapters' registries must stay independent of each other.
+
+# Every answer-key artefact an observed export must never open, coverage
+# included: source counts are read from the observed graph or not at all.
+COVERAGE_PRIVILEGED_ARTEFACTS = (
+    "expected-findings.jsonl",
+    "expected-remediations.jsonl",
+    "injected-defects.jsonl",
+    "mutation-log.jsonl",
+    "controls.jsonl",
+    "rule-scope.jsonl",
+    "scenarios.jsonl",
+    "scenario-transformations.jsonl",
+)
+
+
+@contextmanager
+def _unreadable(paths: list[Path]) -> Iterator[None]:
+    """Strip read permission for the duration of the block, then restore it."""
+    original = {path: path.stat().st_mode for path in paths}
+    try:
+        for path in paths:
+            path.chmod(0o000)
+        yield
+    finally:
+        for path, mode in original.items():
+            path.chmod(stat.S_IMODE(mode))
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+def test_observed_coverage_succeeds_with_every_privileged_artefact_unreadable(
+    mutable_bundle: Path, tmp_path: Path
+) -> None:
+    """A claim about file handles, not about intent."""
+    from dataswamp_biosystems.adapters.datahub import COVERAGE_NAME, ExportMode, export_datahub
+
+    blocked = [
+        path
+        for name in COVERAGE_PRIVILEGED_ARTEFACTS
+        if (path := mutable_bundle / "observed" / name).is_file()
+    ]
+    assert blocked, "the bundle should contain answer-key artefacts to block"
+
+    target = tmp_path / "export"
+    with _unreadable(blocked):
+        # Verification checksums every file in the bundle, so it is skipped here:
+        # the question is what the *mapping* opens, not what the verifier does.
+        manifest = export_datahub(mutable_bundle, target, mode=ExportMode.OBSERVED, verify=False)
+    assert COVERAGE_NAME in manifest["files"]
+    coverage = json.loads((target / COVERAGE_NAME).read_text(encoding="utf-8"))
+    assert coverage["totals"]["concepts"] == 24
+    assert coverage["totals"]["emitted_records"] > 0
+
+
+def test_the_coverage_measurement_names_no_privileged_surface() -> None:
+    """The boundary as code, so a future edit has to defeat a test to cross it."""
+    tree = ast.parse((SRC / "adapters" / "datahub" / "mapping.py").read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "build_coverage_counts"
+    )
+    rendered = ast.unparse(function)
+    for surface in PRIVILEGED_SURFACES:
+        assert surface not in rendered, f"coverage measurement reaches for {surface}"
+
+
+def test_neither_coverage_registry_imports_the_other_adapter() -> None:
+    """The shared 24-family vocabulary is proven by a test, never by a shared import."""
+    pairs = (
+        (SRC / "adapters" / "datahub" / "coverage.py", "openmetadata"),
+        (SRC / "adapters" / "openmetadata" / "coverage.py", "datahub"),
+    )
+    for path, forbidden in pairs:
+        for name in _imported_names(path):
+            assert forbidden not in name, f"{path.name} imports {name}"
