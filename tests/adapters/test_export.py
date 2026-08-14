@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from dataswamp_biosystems.adapters.datahub import (
+    COVERAGE_NAME,
     EXPORT_MANIFEST_NAME,
     MCPS_JSON_NAME,
     MCPS_JSONL_NAME,
@@ -52,6 +53,7 @@ def test_export_writes_the_documented_files(observed_export: Path) -> None:
         MCPS_JSON_NAME,
         EXPORT_MANIFEST_NAME,
         RECIPE_NAME,
+        COVERAGE_NAME,
         PROVENANCE_NAME,
     ):
         assert (observed_export / name).is_file(), name
@@ -77,6 +79,44 @@ def test_export_manifest_describes_the_payload(
     )
     for name, digest in manifest["files"].items():
         assert serialize.digest((observed_export / name).read_bytes()) == digest
+
+
+def test_both_modes_carry_a_declared_mapping_coverage_report(
+    observed_export: Path, truth_export: Path
+) -> None:
+    for export in (observed_export, truth_export):
+        manifest = json.loads((export / EXPORT_MANIFEST_NAME).read_text(encoding="utf-8"))
+        assert COVERAGE_NAME in manifest["files"]
+        payload = (export / COVERAGE_NAME).read_bytes()
+        assert serialize.digest(payload) == manifest["files"][COVERAGE_NAME]
+        coverage = json.loads(payload.decode("utf-8"))
+        assert coverage["coverage_schema_version"] == 1
+        assert coverage["totals"]["concepts"] == 24
+        assert coverage["totals"]["by_classification"] == {
+            "exact": 4,
+            "reasonable": 9,
+            "lossy": 4,
+            "unsupported": 7,
+        }
+        for row in coverage["concepts"]:
+            assert (
+                row["source_record_count"]
+                == row["emitted_record_count"] + row["deliberately_dropped_count"]
+            ), row["source_concept"]
+
+
+def test_the_coverage_report_names_no_entity(observed_export: Path, full_bundle_dir: Path) -> None:
+    """Aggregate counts are a privilege property, not merely a design preference.
+
+    Per-entity coverage would let a reader infer which entities were mutated by
+    differencing two exports.
+    """
+    rendered = (observed_export / COVERAGE_NAME).read_text(encoding="utf-8")
+    with BundleReader.open(full_bundle_dir) as reader:
+        ids = {str(record.get("id")) for record in reader.iter_assets()}
+    assert ids
+    for identifier in ids:
+        assert identifier not in rendered
 
 
 def test_the_real_export_validates(observed_export: Path, truth_export: Path) -> None:

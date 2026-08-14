@@ -58,6 +58,7 @@ not import Python.
 | Bundle manifest + checksums | `bundle_schema_version` |
 | DataHub Metadata Change Proposals | `DATAHUB_MODEL_VERSION` |
 | DataHub round-trip reports | `roundtrip_schema_version` (currently `1`) |
+| DataHub mapping coverage | `coverage_schema_version` (currently `1`) |
 | OpenMetadata load plan | `OPENMETADATA_SCHEMA_TARGET` (payload) + `OM_ADAPTER_VERSION` (plan) |
 | OpenMetadata mapping coverage | `coverage_schema_version` (currently `1`) |
 
@@ -100,7 +101,16 @@ from dataswamp_biosystems.baselines import (
 )
 
 # Emitting DataHub metadata from a verified bundle.
-from dataswamp_biosystems.adapters.datahub import ExportMode, export_datahub
+from dataswamp_biosystems.adapters.datahub import ExportMode, export_datahub, COVERAGE_NAME
+
+# The DataHub mapping-coverage contract: 24 semantic families, their fidelity,
+# their operational state and their measured counts. Emitted with every export
+# as `mapping-coverage.json`.
+from dataswamp_biosystems.adapters.datahub import (
+    COVERAGE_SCHEMA_VERSION, Fidelity, State, Concept, ConceptCounts,
+    CONCEPTS, CONCEPT_NAMES, build_coverage, build_coverage_counts,
+    build_mapping_coverage,
+)
 
 # Ingesting an emitted export into a live catalogue, and verifying the result.
 from dataswamp_biosystems.adapters.datahub import (

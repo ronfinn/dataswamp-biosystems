@@ -17,10 +17,13 @@ in what they choose to emit:
     Built from the ``truth/`` shards, optionally annotated with the ground-truth
     labels. Every entity is tagged privileged and the export manifest says so.
 
-What DataHub cannot represent is documented rather than distorted — see
-``docs/datahub.md``. Notably: subjects, biospecimens, assays and runs have no
-catalogue analogue and are not emitted; the truth graph carries no field-level
-schema, so no ``schemaMetadata`` is invented for it.
+What DataHub cannot represent is declared and counted rather than distorted:
+every one of the 24 DataSwamp semantic families is classified in :mod:`.coverage`
+and measured by :func:`build_coverage_counts`, and the result ships with each
+export as ``mapping-coverage.json``. Notably: subjects, biospecimens, assays and
+runs have no catalogue analogue and are not emitted — their records are counted,
+never mapped; the truth graph carries no field-level schema, so no
+``schemaMetadata`` is invented for it.
 """
 
 from __future__ import annotations
@@ -32,9 +35,10 @@ from enum import StrEnum
 from typing import Any
 
 from dataswamp_biosystems.adapters.datahub import urns
+from dataswamp_biosystems.adapters.datahub.coverage import ConceptCounts, build_coverage
 
 # Bumped when the emitted payload changes for unchanged input.
-ADAPTER_VERSION = "1.0.0"
+ADAPTER_VERSION = "1.1.0"
 
 # The DataHub metadata model this adapter targets. Aspect names and payload
 # shapes below are the file-source ("MetadataChangeProposal") representation of
@@ -636,6 +640,252 @@ def build_mcps(source: SourceGraph) -> list[dict[str, Any]]:
     return mcps
 
 
+def _is_reference(value: Any) -> bool:
+    """Whether a reference position holds an occurrence at all.
+
+    A null or empty value is the *absence* of a reference, not a broken one. A
+    present but wrong-typed value is an occurrence the mapper will refuse, which
+    is exactly the kind of thing the dropped count exists to make visible.
+    """
+    return value is not None and value != ""
+
+
+def build_coverage_counts(source: SourceGraph) -> dict[str, ConceptCounts]:
+    """Measure the mapping of ``source`` at each family's natural semantic grain.
+
+    Measurement lives here, beside the mapping it measures, rather than in
+    :mod:`.coverage`: a coverage module that re-read the source graph would be a
+    second, driftable reading of the mapping, which is the failure this contract
+    exists to prevent. Nothing here emits, classifies or transforms a record —
+    :func:`build_mcps` is untouched by it, and the shards only coverage can see
+    stay invisible to the mapping.
+    """
+    datasets = source.records("datasets")
+    products = source.records("data_products")
+    assets = [*datasets, *products]
+    files = source.records("files")
+    contract_records = source.records("contracts")
+    quality_checks = source.records("quality_checks")
+    lineage = source.records("lineage")
+
+    # The mapper's own filters, recomputed identically so the counts describe
+    # what it does rather than what it ought to do.
+    dataset_ids = {str(record.get("id")) for record in datasets}
+    emitted_datasets = [record for record in datasets if str(record.get("id", ""))]
+    emitted_products = [record for record in products if str(record.get("id", ""))]
+    emitted_dataset_ids = [str(record.get("id", "")) for record in emitted_datasets]
+    emitted_asset_ids = {
+        *emitted_dataset_ids,
+        *(str(record.get("id", "")) for record in emitted_products),
+    }
+    emitted_assets = [*emitted_datasets, *emitted_products]
+
+    # -- vocabulary, organisation and structural entities ---------------------
+    vocab_terms: set[tuple[str, str]] = set()
+    for record in assets:
+        for field_name, vocabulary in VOCABULARY_FIELDS.items():
+            value = record.get(field_name)
+            if isinstance(value, str) and value:
+                vocab_terms.add((vocabulary, value))
+        for field_name, vocabulary in VOCABULARY_LIST_FIELDS.items():
+            values = record.get(field_name)
+            if isinstance(values, list):
+                vocab_terms.update(
+                    (vocabulary, item) for item in values if isinstance(item, str) and item
+                )
+    vocabularies = {name for name, _ in vocab_terms}
+
+    programmes = {
+        str(record["programme_id"])
+        for record in assets
+        if isinstance(record.get("programme_id"), str) and record["programme_id"]
+    }
+    studies = {
+        str(record["study_id"])
+        for record in assets
+        if isinstance(record.get("study_id"), str) and record["study_id"]
+    }
+    teams: set[str] = set()
+    for record in assets:
+        owner = record.get("owner_ref")
+        if isinstance(owner, str) and owner:
+            teams.add(owner)
+        stewards = record.get("steward_refs")
+        if isinstance(stewards, list):
+            teams.update(s for s in stewards if isinstance(s, str) and s)
+    tags: set[str] = {TAG_SYNTHETIC}
+    for record in assets:
+        tags.update(_tags_for(record))
+    if source.mode is ExportMode.TRUTH:
+        tags.add(TAG_PRIVILEGED)
+
+    # -- ownership and stewardship, counted per reference ---------------------
+    owner_source = sum(1 for record in assets if _is_reference(record.get("owner_ref")))
+    owner_emitted = sum(
+        1
+        for record in emitted_assets
+        if isinstance(record.get("owner_ref"), str) and record.get("owner_ref")
+    )
+    steward_source = 0
+    for record in assets:
+        stewards = record.get("steward_refs")
+        if isinstance(stewards, list):
+            steward_source += sum(1 for steward in stewards if _is_reference(steward))
+    steward_emitted = 0
+    for record in emitted_assets:
+        stewards = record.get("steward_refs")
+        if isinstance(stewards, list):
+            # The mapper sorts stewards through a set comprehension, so repeated
+            # references within one asset collapse into a single owner entry.
+            # That collapse is counted as dropped rather than papered over.
+            steward_emitted += len({s for s in stewards if isinstance(s, str) and s})
+
+    # -- data-product components, counted per reference -----------------------
+    product_components: dict[str, list[str]] = {}
+    for record in products:
+        components = record.get("component_dataset_ids")
+        if isinstance(components, list):
+            product_components[str(record.get("id"))] = [
+                str(item) for item in components if isinstance(item, str)
+            ]
+    component_source = sum(
+        len(record["component_dataset_ids"])
+        for record in products
+        if isinstance(record.get("component_dataset_ids"), list)
+    )
+    component_emitted = sum(
+        1
+        for record in emitted_products
+        for component in product_components.get(str(record.get("id", "")), [])
+        if component in dataset_ids
+    )
+
+    # -- contracts -------------------------------------------------------------
+    contracts = {
+        str(row.get("asset_id", "")): row
+        for row in contract_records
+        if isinstance(row.get("asset_id"), str)
+    }
+    contracts_emitted = sum(1 for asset_id in contracts if asset_id in emitted_asset_ids)
+
+    # -- lineage, partitioned totally -----------------------------------------
+    derived: dict[str, set[str]] = {}
+    dataset_edges = 0
+    for edge in lineage:
+        upstream = _text(edge.get("upstream_id"))
+        downstream = _text(edge.get("downstream_id"))
+        if upstream not in dataset_ids or downstream not in dataset_ids:
+            continue
+        dataset_edges += 1
+        if upstream != downstream:
+            derived.setdefault(downstream, set()).add(urns.dataset_urn(upstream))
+    lineage_emitted = sum(len(derived.get(asset_id, ())) for asset_id in emitted_dataset_ids)
+    non_dataset_edges = len(lineage) - dataset_edges
+
+    # -- quality ---------------------------------------------------------------
+    checks_emitted = sum(
+        1
+        for record in quality_checks
+        if str(record.get("id", "")) and _text(record.get("asset_id")) in dataset_ids
+    )
+
+    # -- families the mapping declines to represent ---------------------------
+    unmapped: dict[str, int] = {
+        name: len(source.records(shard))
+        for name, shard in (
+            ("subject", "subjects"),
+            ("biospecimen", "biospecimens"),
+            ("assay", "assays"),
+            ("instrument_run", "instrument_runs"),
+            ("pipeline_run", "pipeline_runs"),
+        )
+    }
+
+    counts: dict[str, ConceptCounts] = {
+        # One benchmark-level company occurrence, represented by no entity. The
+        # 'dataswamp' platform token namespaces URNs; it is not a company.
+        "company": ConceptCounts(source=1, emitted=0, dropped=1),
+        "programme": ConceptCounts(source=len(programmes), emitted=len(programmes)),
+        "study": ConceptCounts(source=len(studies), emitted=len(studies)),
+        "dataset": ConceptCounts(
+            source=len(datasets),
+            emitted=len(emitted_datasets),
+            dropped=len(datasets) - len(emitted_datasets),
+        ),
+        "physical_file": ConceptCounts(
+            source=len(files),
+            emitted=sum(1 for record in files if str(record.get("id", ""))),
+            dropped=sum(1 for record in files if not str(record.get("id", ""))),
+        ),
+        "data_product": ConceptCounts(
+            source=len(products),
+            emitted=len(emitted_products),
+            dropped=len(products) - len(emitted_products),
+        ),
+        "data_product_components": ConceptCounts(
+            source=component_source,
+            emitted=component_emitted,
+            dropped=component_source - component_emitted,
+        ),
+        "team": ConceptCounts(source=len(teams), emitted=len(teams)),
+        "ownership": ConceptCounts(
+            source=owner_source,
+            emitted=owner_emitted,
+            dropped=owner_source - owner_emitted,
+        ),
+        "stewardship": ConceptCounts(
+            source=steward_source,
+            emitted=steward_emitted,
+            dropped=steward_source - steward_emitted,
+        ),
+        "controlled_vocabulary": ConceptCounts(source=len(vocabularies), emitted=len(vocabularies)),
+        "vocabulary_term": ConceptCounts(source=len(vocab_terms), emitted=len(vocab_terms)),
+        "facet_tag": ConceptCounts(source=len(tags), emitted=len(tags)),
+        "data_contract": ConceptCounts(
+            source=len(contract_records),
+            emitted=contracts_emitted,
+            dropped=len(contract_records) - contracts_emitted,
+        ),
+        "dataset_lineage": ConceptCounts(
+            source=dataset_edges,
+            emitted=lineage_emitted,
+            dropped=dataset_edges - lineage_emitted,
+        ),
+        # Every file carries both the COPY edge and dataswamp_dataset_id, so the
+        # relationship is always represented; the loss is of meaning, not count.
+        "file_containment": ConceptCounts(
+            source=len(files),
+            emitted=sum(1 for record in files if str(record.get("id", ""))),
+            dropped=sum(1 for record in files if not str(record.get("id", ""))),
+        ),
+        "quality_check": ConceptCounts(
+            source=len(quality_checks),
+            emitted=checks_emitted,
+            dropped=len(quality_checks) - checks_emitted,
+        ),
+        "quality_check_result": ConceptCounts(
+            source=len(quality_checks),
+            emitted=checks_emitted,
+            dropped=len(quality_checks) - checks_emitted,
+        ),
+        "non_dataset_lineage": ConceptCounts(
+            source=non_dataset_edges, emitted=0, dropped=non_dataset_edges
+        ),
+    }
+    counts.update(
+        {
+            name: ConceptCounts(source=total, emitted=0, dropped=total)
+            for name, total in unmapped.items()
+        }
+    )
+    return counts
+
+
+def build_mapping_coverage(source: SourceGraph) -> dict[str, Any]:
+    """Return the deterministic mapping-coverage report for ``source``."""
+    return build_coverage(build_coverage_counts(source))
+
+
 __all__ = [
     "ADAPTER_VERSION",
     "DATAHUB_MODEL_VERSION",
@@ -650,4 +900,6 @@ __all__ = [
     "ExportMode",
     "SourceGraph",
     "build_mcps",
+    "build_coverage_counts",
+    "build_mapping_coverage",
 ]

@@ -44,12 +44,23 @@ from dataswamp_biosystems.adapters.datahub.client import (
     build_batches,
     redact_url,
 )
+from dataswamp_biosystems.adapters.datahub.coverage import (
+    CONCEPT_NAMES,
+    CONCEPTS,
+    COVERAGE_SCHEMA_VERSION,
+    Concept,
+    ConceptCounts,
+    Fidelity,
+    State,
+    build_coverage,
+)
 from dataswamp_biosystems.adapters.datahub.errors import (
     DataHubAdapterError,
     DataHubConfigError,
     DataHubTransportError,
 )
 from dataswamp_biosystems.adapters.datahub.export import (
+    COVERAGE_NAME,
     EXPORT_MANIFEST_NAME,
     MCPS_JSON_NAME,
     MCPS_JSONL_NAME,
@@ -72,6 +83,8 @@ from dataswamp_biosystems.adapters.datahub.mapping import (
     TRUTH_ONLY_PROPERTY_PREFIX,
     ExportMode,
     SourceGraph,
+    build_coverage_counts,
+    build_mapping_coverage,
     build_mcps,
 )
 from dataswamp_biosystems.adapters.datahub.normalize import (
@@ -115,6 +128,16 @@ __all__ = [
     "SourceGraph",
     "build_mcps",
     "build_source",
+    "COVERAGE_SCHEMA_VERSION",
+    "Fidelity",
+    "State",
+    "Concept",
+    "ConceptCounts",
+    "CONCEPTS",
+    "CONCEPT_NAMES",
+    "build_coverage",
+    "build_coverage_counts",
+    "build_mapping_coverage",
     "export_datahub",
     "validate_export",
     "URN_PATTERNS",
@@ -127,6 +150,7 @@ __all__ = [
     "MCPS_JSON_NAME",
     "EXPORT_MANIFEST_NAME",
     "RECIPE_NAME",
+    "COVERAGE_NAME",
     # The live path: ingest an emitted export, then read it back and compare.
     "GMS_URL_ENV",
     "GMS_TOKEN_ENV",
