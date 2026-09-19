@@ -238,12 +238,16 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     holds the mapping-coverage contract (24 semantic families, their fidelity,
     operational state and reasons) and `mapping.py` measures it, shipping
     `mapping-coverage.json` with every export. See `docs/datahub.md`.
-  - `adapters/openmetadata/` — the deterministic, **offline-only** OpenMetadata
-    adapter: hierarchical FQN identity (`fqn.py`), the native-model mapping and
+  - `adapters/openmetadata/` — the deterministic OpenMetadata adapter:
+    hierarchical FQN identity (`fqn.py`), the native-model mapping and
     ordered load plan (`mapping.py`), the mapping-coverage contract
     (`coverage.py`), the file emitter (`export.py`) and the offline plan
-    validator (`validate.py`). It consumes a verified bundle through
-    `BundleReader` and nothing else, and `observed` mode reads
+    validator (`validate.py`), plus the live path strictly downstream of the
+    emitted export (`client.py`, the only module that opens a socket;
+    `ingest.py`, `readback.py`, `normalize.py`, `roundtrip.py`, `report.py`),
+    verified against a real server in observed mode only. The export consumes
+    a verified bundle through `BundleReader` and nothing else, and `observed`
+    mode reads
     `observed-graph.json` *alone*, exactly as the DataHub adapter does; `truth`
     mode is privileged and marked three independent ways (tag, reserved
     `dataswampTruth*` properties, manifest flag). It is **not** a copy of the
