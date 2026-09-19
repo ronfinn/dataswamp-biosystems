@@ -312,9 +312,12 @@ out-of-scope false positive rather than folded into the matrix.
   constructed universe — not a model of real-world ambiguity.
 * The published baselines are deliberately simple and metadata-only; none opens a
   materialized scientific file, and no LLM-backed agent ships.
-* DataHub live ingestion and round-trip validation ship, but the REST endpoints
-  they use have not been verified against a pinned real DataHub release; live
-  support is experimental and every round-trip report records that.
+* DataHub live ingestion and round-trip validation ship, and the REST endpoints
+  they use have been verified against one pinned real release, DataHub `v1.7.0`
+  (`VERIFIED_DATAHUB_VERSION = "v1.7.0"`), by a green `live-datahub` canary. That
+  is one tested point, not a range: no other release is claimed, live support is
+  still labelled experimental, and every round-trip report records that in its
+  `live_support` field.
 * OpenMetadata ingestion and round-trip validation ship, and a pinned real
   `1.13.3` has accepted an **observed-mode** export with zero discrepancies
   (`VERIFIED_OPENMETADATA_VERSION = "1.13.3"`). That is one tested point, not a
@@ -336,11 +339,15 @@ information, or production schemas copied from any real organisation. Any
 resemblance to a real organisation, person, programme or study is unintended.
 
 Generation is offline: no command in the documented workflow requires a network,
-a credential or a server. The two live DataHub commands are the sole exception,
-and they are opt-in: they read `DATAHUB_GMS_URL` and `DATAHUB_GMS_TOKEN` from the
-environment only — never from the command line — and never write a token into a
-report, a log or an exception. The generated DataHub recipe likewise references
-credentials through environment variables rather than embedding them. Provenance records the
+a credential or a server. The live catalogue commands are the only exceptions,
+and they are opt-in: `ingest-datahub` and `verify-ingestion` read
+`DATAHUB_GMS_URL` and `DATAHUB_GMS_TOKEN`, and `ingest-openmetadata` and
+`verify-om-ingestion` read `OPENMETADATA_HOST_PORT` and
+`OPENMETADATA_JWT_TOKEN`, from the environment only — never from the command
+line — and none of them writes a token into a report, a log or an exception.
+`--dry-run` on either ingest command opens no socket. The generated DataHub
+recipe likewise references credentials through environment variables rather
+than embedding them. Provenance records the
 dependency and platform identity needed to interpret a reproducibility claim,
 and deliberately records no hostname, username, path or wall-clock time.
 

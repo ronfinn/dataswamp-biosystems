@@ -77,9 +77,10 @@ closure — with a first-class `mapping-coverage.json`, plus a **live path**
 strictly downstream of that emitted export: `dataswamp ingest-openmetadata`
 replays it in its emitted order without remapping it and `dataswamp
 verify-om-ingestion` reads it back by FQN and reports completeness, fidelity,
-containment and observed-mode non-leakage as four separate claims, all provable
-offline against a strict fake; there is still **no** verified compatibility
-point and no real-server canary), and
+containment and observed-mode non-leakage as four separate claims, provable
+offline against a strict fake and verified against a pinned real OpenMetadata
+`1.13.3` by the optional, non-blocking `live-openmetadata` canary — in
+**observed mode only**; truth mode has not been run against a real server), and
 the **release surface** (a `dataswamp demo` command running the whole workflow
 into one directory, committed example submissions under `examples/predictions/`,
 and the canonical `config/` tree plus those examples shipped *inside* the
@@ -237,12 +238,16 @@ Run a single test with `uv run pytest tests/test_cli.py::test_version_command_ex
     holds the mapping-coverage contract (24 semantic families, their fidelity,
     operational state and reasons) and `mapping.py` measures it, shipping
     `mapping-coverage.json` with every export. See `docs/datahub.md`.
-  - `adapters/openmetadata/` — the deterministic, **offline-only** OpenMetadata
-    adapter: hierarchical FQN identity (`fqn.py`), the native-model mapping and
+  - `adapters/openmetadata/` — the deterministic OpenMetadata adapter:
+    hierarchical FQN identity (`fqn.py`), the native-model mapping and
     ordered load plan (`mapping.py`), the mapping-coverage contract
     (`coverage.py`), the file emitter (`export.py`) and the offline plan
-    validator (`validate.py`). It consumes a verified bundle through
-    `BundleReader` and nothing else, and `observed` mode reads
+    validator (`validate.py`), plus the live path strictly downstream of the
+    emitted export (`client.py`, the only module that opens a socket;
+    `ingest.py`, `readback.py`, `normalize.py`, `roundtrip.py`, `report.py`),
+    verified against a real server in observed mode only. The export consumes
+    a verified bundle through `BundleReader` and nothing else, and `observed`
+    mode reads
     `observed-graph.json` *alone*, exactly as the DataHub adapter does; `truth`
     mode is privileged and marked three independent ways (tag, reserved
     `dataswampTruth*` properties, manifest flag). It is **not** a copy of the

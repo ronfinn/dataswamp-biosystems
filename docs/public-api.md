@@ -172,9 +172,10 @@ Usable and documented, but the shapes are still settling:
   normalization and containment tables. The report shape is versioned by
   `roundtrip_schema_version`, and the forgiveness rules by
   `NORMALIZATION_VERSION`. Live GMS support is **experimental,
-  contract-level**: the REST endpoints have not yet been exercised against a
-  pinned real DataHub release, and every emitted report says so in its
-  `live_support` field. See [docs/datahub.md](datahub.md) and
+  contract-level**: the REST endpoints have been exercised against exactly one
+  pinned real release, DataHub `v1.7.0` (`VERIFIED_DATAHUB_VERSION`), and every
+  emitted report says so in its `live_support` field. That is a tested point,
+  never a range. See [docs/datahub.md](datahub.md) and
   [ADR 0005](adr/0005-direct-rest-datahub-client.md).
 * **The OpenMetadata adapter** — `export_openmetadata`, `build_plan`,
   `build_source`, `validate_plan`, `SourceGraph`, `ExportPlan`, `PlanRecord`,
@@ -230,16 +231,18 @@ Stated plainly, so nobody builds on a promise that was never made:
   field named. Scores are only comparable within one
   generator version, config fingerprint, profile and seed. The provenance and
   bundle manifest record all four so a comparison can be checked.
-* **A verified live OpenMetadata compatibility point.** Stronger than the DataHub
-  caveat below. `ingest-openmetadata` and `verify-om-ingestion` exist and work,
-  and an **observed-mode** plan has now been loaded into a real, pinned
-  OpenMetadata `1.13.3` by a green canary, so `VERIFIED_OPENMETADATA_VERSION` is
-  `1.13.3`. That is a tested point, not a range, and **truth mode has not been run
-  against a real server**. The declared `>=1.9,<2` model range remains a target for
-  the emitted payload shape, not tested evidence: schema validity is not load
-  success, and a green fake is not a green server.
-* **A verified live DataHub compatibility point.** `ingest-datahub` and
-  `verify-ingestion` do talk to a server, and round-trip validation is
-  implemented and offline-testable — but the REST endpoints they use have not
-  been exercised against a pinned real DataHub release in this repository. Treat
-  live support as experimental until a report says otherwise.
+* **Live OpenMetadata compatibility beyond the tested point.**
+  `ingest-openmetadata` and `verify-om-ingestion` exist and work, and an
+  **observed-mode** plan has been loaded into a real, pinned OpenMetadata
+  `1.13.3` by a green canary, so `VERIFIED_OPENMETADATA_VERSION` is `1.13.3`.
+  That is a tested point, not a range: no other release is claimed, and
+  **truth mode has not been run against a real server**. The declared `>=1.9,<2`
+  model range remains a target for the emitted payload shape, not tested
+  evidence: schema validity is not load success, and a green fake is not a green
+  server.
+* **Live DataHub compatibility beyond the tested point.** `ingest-datahub` and
+  `verify-ingestion` have been verified against exactly one pinned real release,
+  DataHub `v1.7.0`, by a green `live-datahub` canary. No other release is
+  supported, and the declared `DATAHUB_MODEL_VERSION` range (`>=0.13,<2`)
+  describes the emitted payload shape, not the REST endpoints. Live support
+  remains experimental, as every round-trip report's `live_support` field states.
