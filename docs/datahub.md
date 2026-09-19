@@ -168,6 +168,35 @@ the schema, and a wall clock there would destroy determinism. The one timestamp
 that *is* meaningful, an assertion's run time, is derived from the quality
 check's own `evaluated_at`.
 
+### Quality-check assertion scope
+
+Each quality check becomes a `DATASET` assertion with
+`datasetAssertion.scope = "UNKNOWN"`, `_NATIVE_` operator and aggregation, the
+check type as `nativeType`, and **no `fields`**. A DataSwamp check names its
+dataset and nothing narrower, so `UNKNOWN` is the only honest value in DataHub's
+`DatasetAssertionScope` enum (`DATASET_COLUMN`, `DATASET_ROWS`,
+`DATASET_STORAGE_SIZE`, `DATASET_SCHEMA`, `UNKNOWN` — identical at the verified
+`v1.7.0` and at `v0.13.0`). None of the other values means "the whole dataset":
+each names a specific part of it, and reading one into a check type
+(`schema-conformance` as `DATASET_SCHEMA`, say) would be interpretation the source
+does not make.
+
+Adapter versions before `1.2.0` emitted `DATASET_COLUMN` ([#44]). That payload
+was schema-valid — `fields` is optional — but DataHub documents `fields` as
+expected with that scope, so it asserted a column target DataSwamp never
+declared. `validate_export()` now refuses both a scope outside the enum and a
+`DATASET_COLUMN` assertion without `fields`. That is DataSwamp's contract, not
+an upstream schema rule.
+
+`UNKNOWN` has not yet been through the live canary: the green `v1.7.0` run
+exercised `DATASET_COLUMN`, and schema validity is not load success. The change
+needs its own green `live-datahub` run before `UNKNOWN` is claimed to round-trip
+on a real server. `DatasetAssertionInfo` is itself deprecated at `v1.7.0` in
+favour of `AssertionType.CUSTOM`, which does not exist at `v0.13.0`; migrating
+would narrow `DATAHUB_MODEL_VERSION` and is a separate question.
+
+[#44]: https://github.com/ronfinn/dataswamp-biosystems/issues/44
+
 Observed-mode records are rendered faithfully, nulls and all: a missing owner or
 an empty description is exported as a missing owner or an empty description,
 because showing a catalogue what it would really have seen is the entire point.
@@ -329,6 +358,9 @@ offline:
 - every referenced URN — owner, tag, term, domain, container, parent node,
   lineage upstream, data-product asset, assertion subject — is itself emitted, so
   ingestion creates no dangling stubs;
+- every assertion's scope is a DataHub `DatasetAssertionScope` value, and a
+  `DATASET_COLUMN` assertion names its column in `fields` (DataSwamp's rule: the
+  schema itself accepts one without);
 - an `observed` payload contains no truth-only property and no privileged tag;
 - a `truth` payload's assets are all tagged privileged.
 

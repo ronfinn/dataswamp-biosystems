@@ -103,8 +103,10 @@ def test_no_datahub_constant_was_disturbed() -> None:
 
     ``ADAPTER_VERSION`` since moved `1.0.0` → `1.1.0` under its own issue, when
     the DataHub export gained ``mapping-coverage.json`` — an additive change to
-    that adapter's own export contract, not a change made here. The constants
-    this milestone actually cared about are the three below, and they are pinned.
+    that adapter's own export contract, not a change made here. It moved again,
+    `1.1.0` → `1.2.0`, under #44, when quality-check assertions stopped claiming
+    a column scope. The constants this milestone actually cared about are the
+    three below, and they are pinned.
     """
     from dataswamp_biosystems.adapters.datahub import (
         ADAPTER_VERSION,
@@ -113,7 +115,7 @@ def test_no_datahub_constant_was_disturbed() -> None:
         VERIFIED_DATAHUB_VERSION,
     )
 
-    assert ADAPTER_VERSION == "1.1.0"
+    assert ADAPTER_VERSION == "1.2.0"
     assert DATAHUB_MODEL_VERSION == ">=0.13,<2"
     assert VERIFIED_DATAHUB_VERSION == "v1.7.0"
     assert NORMALIZATION_VERSION >= 1

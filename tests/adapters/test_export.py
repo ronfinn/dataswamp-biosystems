@@ -19,6 +19,7 @@ from dataswamp_biosystems.adapters.datahub import (
     build_mcps,
     build_source,
     export_datahub,
+    urns,
     validate_export,
 )
 from dataswamp_biosystems.bundle import BundleConfigError, BundleReader
@@ -122,6 +123,29 @@ def test_the_coverage_report_names_no_entity(observed_export: Path, full_bundle_
 def test_the_real_export_validates(observed_export: Path, truth_export: Path) -> None:
     assert validate_export(_mcps(observed_export), ExportMode.OBSERVED) == []
     assert validate_export(_mcps(truth_export), ExportMode.TRUTH) == []
+
+
+@pytest.mark.parametrize("export", ["observed_export", "truth_export"])
+def test_every_real_assertion_is_unscoped_and_keeps_its_dataset(
+    export: str, request: pytest.FixtureRequest
+) -> None:
+    """Across the canonical estate: UNKNOWN scope, no invented fields, own dataset (#44)."""
+    mcps = _mcps(request.getfixturevalue(export))
+    infos = {
+        m["entityUrn"]: m["aspect"]["json"] for m in mcps if m["aspectName"] == "assertionInfo"
+    }
+    runs = {
+        m["entityUrn"]: m["aspect"]["json"] for m in mcps if m["aspectName"] == "assertionRunEvent"
+    }
+    assert infos
+    assert set(runs) == set(infos)
+    for urn, info in infos.items():
+        dataset_assertion = info["datasetAssertion"]
+        assert dataset_assertion["scope"] == "UNKNOWN"
+        assert "fields" not in dataset_assertion
+        dataset = urns.dataset_urn(info["customProperties"]["dataswamp_asset_id"])
+        assert dataset_assertion["dataset"] == dataset
+        assert runs[urn]["asserteeUrn"] == dataset
 
 
 def test_observed_export_reveals_no_ground_truth(observed_export: Path) -> None:

@@ -38,7 +38,7 @@ from dataswamp_biosystems.adapters.datahub import urns
 from dataswamp_biosystems.adapters.datahub.coverage import ConceptCounts, build_coverage
 
 # Bumped when the emitted payload changes for unchanged input.
-ADAPTER_VERSION = "1.1.0"
+ADAPTER_VERSION = "1.2.0"
 
 # The DataHub metadata model this adapter targets. Aspect names and payload
 # shapes below are the file-source ("MetadataChangeProposal") representation of
@@ -587,6 +587,11 @@ def build_mcps(source: SourceGraph) -> list[dict[str, Any]]:
             )
 
     # -- quality checks as dataset assertions ---------------------------------
+    # The scope is UNKNOWN because a DataSwamp check names a dataset and nothing
+    # narrower. DATASET_COLUMN would claim column targeting the source does not
+    # hold (DataHub expects `fields` alongside it), and reading DATASET_ROWS or
+    # DATASET_SCHEMA into a check type would be interpretation. No `fields` is
+    # emitted, for the same reason.
     for record in quality_checks:
         check_id = str(record.get("id", ""))
         asset_id = _text(record.get("asset_id"))
@@ -603,7 +608,7 @@ def build_mcps(source: SourceGraph) -> list[dict[str, Any]]:
                     "type": "DATASET",
                     "datasetAssertion": {
                         "dataset": dataset,
-                        "scope": "DATASET_COLUMN",
+                        "scope": "UNKNOWN",
                         "operator": "_NATIVE_",
                         "aggregation": "_NATIVE_",
                         "nativeType": _text(record.get("check_type")),

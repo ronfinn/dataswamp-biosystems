@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from dataswamp_biosystems.adapters.datahub import (
     urns,
     validate_export,
 )
+from dataswamp_biosystems.adapters.datahub.validate import DATASET_ASSERTION_SCOPES
 from dataswamp_biosystems.truth import serialize
 from tests.adapters.conftest import MINI_OBSERVED_FIXTURE, MINI_TRUTH_FIXTURE
 
@@ -186,6 +188,116 @@ def test_quality_checks_become_dataset_assertions(mini_observed: SourceGraph) ->
     run = aspects["assertionRunEvent"]
     assert run["result"]["type"] == "SUCCESS"
     assert run["timestampMillis"] == 1772323200000, "derived from evaluated_at, never a clock"
+
+
+# The one mini quality check's assertion, field for field. Only `scope` moved in
+# #44 (DATASET_COLUMN -> UNKNOWN); pinning the rest proves nothing else did.
+_ALPHA_DATASET = "urn:li:dataset:(urn:li:dataPlatform:dataswamp,dataswamp_biosystems.ds-alpha,PROD)"
+_EXPECTED_ASSERTION_INFO: dict[str, Any] = {
+    "type": "DATASET",
+    "datasetAssertion": {
+        "dataset": _ALPHA_DATASET,
+        "scope": "UNKNOWN",
+        "operator": "_NATIVE_",
+        "aggregation": "_NATIVE_",
+        "nativeType": "completeness",
+    },
+    "description": "all required columns present",
+    "customProperties": {
+        "dataswamp_id": "qc-ds-alpha-1",
+        "dataswamp_asset_id": "ds-alpha",
+        "dataswamp_check_type": "completeness",
+        "dataswamp_status": "pass",
+    },
+}
+_EXPECTED_RUN_EVENT: dict[str, Any] = {
+    "timestampMillis": 1772323200000,
+    "runId": "qc-ds-alpha-1",
+    "assertionUrn": urns.assertion_urn("qc-ds-alpha-1"),
+    "asserteeUrn": _ALPHA_DATASET,
+    "status": "COMPLETE",
+    "result": {"type": "SUCCESS", "nativeResults": {"evidence": "all required columns present"}},
+}
+
+
+@pytest.mark.parametrize("graph", ["mini_observed", "mini_truth"])
+def test_quality_check_assertion_payload_is_pinned(
+    graph: str, request: pytest.FixtureRequest
+) -> None:
+    """The scope is UNKNOWN and every other assertion field is exactly as before."""
+    source: SourceGraph = request.getfixturevalue(graph)
+    aspects = _by_urn(build_mcps(source), urns.assertion_urn("qc-ds-alpha-1"))
+    assert aspects["assertionInfo"] == _EXPECTED_ASSERTION_INFO
+    assert aspects["assertionRunEvent"] == _EXPECTED_RUN_EVENT
+
+
+def test_quality_check_assertions_claim_no_column(mini_observed: SourceGraph) -> None:
+    """A DataSwamp check names a dataset and nothing narrower (#44)."""
+    infos = [
+        mcp["aspect"]["json"]
+        for mcp in build_mcps(mini_observed)
+        if mcp["aspectName"] == "assertionInfo"
+    ]
+    assert infos
+    for info in infos:
+        dataset_assertion = info["datasetAssertion"]
+        assert dataset_assertion["scope"] == "UNKNOWN"
+        assert dataset_assertion["scope"] in DATASET_ASSERTION_SCOPES
+        assert "fields" not in dataset_assertion
+        assert dataset_assertion["dataset"] == urns.dataset_urn(
+            info["customProperties"]["dataswamp_asset_id"]
+        )
+
+
+def test_the_pinned_scope_enum_is_datahubs() -> None:
+    """Copied from DatasetAssertionScope at v1.7.0 (and v0.13.0); not invented."""
+    assert {
+        "DATASET_COLUMN",
+        "DATASET_ROWS",
+        "DATASET_STORAGE_SIZE",
+        "DATASET_SCHEMA",
+        "UNKNOWN",
+    } == DATASET_ASSERTION_SCOPES
+
+
+def _with_scope(
+    mcps: list[dict[str, Any]], scope: str, fields: list[str] | None = None
+) -> list[dict[str, Any]]:
+    mutated = copy.deepcopy(mcps)
+    for mcp in mutated:
+        if mcp["aspectName"] == "assertionInfo":
+            mcp["aspect"]["json"]["datasetAssertion"]["scope"] = scope
+            if fields is not None:
+                mcp["aspect"]["json"]["datasetAssertion"]["fields"] = fields
+    return mutated
+
+
+def test_a_column_scope_without_fields_is_refused(mini_observed: SourceGraph) -> None:
+    """Schema-valid upstream (``fields`` is optional), but a DataSwamp contract breach."""
+    problems = validate_export(
+        _with_scope(build_mcps(mini_observed), "DATASET_COLUMN"), ExportMode.OBSERVED
+    )
+    assert len(problems) == 1
+    assert problems[0].endswith("DATASET_COLUMN assertion names no column in 'fields'")
+
+
+def test_a_column_scope_naming_a_column_is_not_a_scope_problem(
+    mini_observed: SourceGraph,
+) -> None:
+    """Paired with the refusal: the rule is about the missing column, not the value."""
+    column = f"urn:li:schemaField:({_ALPHA_DATASET},sample_id)"
+    problems = validate_export(
+        _with_scope(build_mcps(mini_observed), "DATASET_COLUMN", [column]), ExportMode.OBSERVED
+    )
+    assert problems == []
+
+
+def test_a_scope_outside_the_enum_is_refused(mini_observed: SourceGraph) -> None:
+    problems = validate_export(
+        _with_scope(build_mcps(mini_observed), "DATASET"), ExportMode.OBSERVED
+    )
+    assert len(problems) == 1
+    assert problems[0].endswith("assertion scope 'DATASET' is not a DataHub DatasetAssertionScope")
 
 
 # -- privilege ----------------------------------------------------------------
