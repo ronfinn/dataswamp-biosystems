@@ -235,7 +235,7 @@ Stated plainly, so nobody builds on a promise that was never made:
   `ingest-openmetadata` and `verify-om-ingestion` exist and work, and an
   **observed-mode** plan has been loaded into a real, pinned OpenMetadata
   `1.13.3` by a green canary, so `VERIFIED_OPENMETADATA_VERSION` is `1.13.3`.
-  That is a tested point, not a range: no other release is supported, and
+  That is a tested point, not a range: no other release is claimed, and
   **truth mode has not been run against a real server**. The declared `>=1.9,<2`
   model range remains a target for the emitted payload shape, not tested
   evidence: schema validity is not load success, and a green fake is not a green
