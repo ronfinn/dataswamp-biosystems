@@ -291,10 +291,10 @@ CONCEPTS: tuple[Concept, ...] = (
             "DataHub's Assertion preserves the check, the dataset it applies to, its status and "
             "its evidence, but operator and aggregation are the _NATIVE_ escape hatch and the "
             "check type survives only as an opaque nativeType string, because DataSwamp's "
-            "checks are not expressed as comparisons. The emitted datasetAssertion.scope is the "
-            "fixed constant DATASET_COLUMN even though the check names no column; that is "
-            "recorded here as emitted behaviour, not endorsed. Only checks whose asset_id "
-            "resolves to an emitted dataset become assertions."
+            "checks are not expressed as comparisons. datasetAssertion.scope is UNKNOWN and no "
+            "fields are emitted, because a DataSwamp check names its dataset and declares no "
+            "column and no narrower scope (rows, schema or storage size) for DataHub to record. "
+            "Only checks whose asset_id resolves to an emitted dataset become assertions."
         ),
     ),
     Concept(

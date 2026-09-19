@@ -434,18 +434,23 @@ def test_dataset_lineage_is_lossy_because_the_edge_type_is_discarded() -> None:
     assert "edge_type" in by_name["dataset_lineage"].reason
 
 
-def test_the_quality_check_reason_records_the_fixed_scope_without_endorsing_it() -> None:
-    """The hardcoded DATASET_COLUMN scope is described, not repaired or excused."""
+def test_the_quality_check_reason_describes_the_unknown_scope() -> None:
+    """The reason states what is emitted — UNKNOWN, no fields — and why (#44)."""
     by_name = {concept.source_concept: concept for concept in CONCEPTS}
     reason = by_name["quality_check"].reason
-    assert "DATASET_COLUMN" in reason
+    assert "UNKNOWN" in reason
+    assert "no fields" in reason
+    assert "declares no column" in reason
+    assert "DATASET_COLUMN" not in reason
     assert by_name["quality_check"].fidelity is Fidelity.REASONABLE
+    assert by_name["quality_check"].state is State.MATERIALIZED
     emitted = [
         mcp["aspect"]["json"]
         for mcp in build_mcps(_source())
         if mcp["aspectName"] == "assertionInfo"
     ]
-    assert emitted[0]["datasetAssertion"]["scope"] == "DATASET_COLUMN"
+    assert emitted
+    assert {aspect["datasetAssertion"]["scope"] for aspect in emitted} == {"UNKNOWN"}
 
 
 def test_the_non_dataset_lineage_reason_names_the_synthesized_copy_relationship() -> None:

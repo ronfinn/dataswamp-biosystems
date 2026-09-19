@@ -57,6 +57,31 @@ REQUIRED_ASPECTS: dict[str, frozenset[str]] = {
 # Aspects a *catalogue asset* (not a file) must additionally carry.
 ASSET_REQUIRED_ASPECTS: frozenset[str] = frozenset({"ownership", "globalTags", "glossaryTerms"})
 
+# DataHub's DatasetAssertionScope enum, as declared at the verified v1.7.0 and
+# identically at v0.13.0, the bottom of DATAHUB_MODEL_VERSION.
+DATASET_ASSERTION_SCOPES: frozenset[str] = frozenset(
+    {"DATASET_COLUMN", "DATASET_ROWS", "DATASET_STORAGE_SIZE", "DATASET_SCHEMA", "UNKNOWN"}
+)
+
+
+def _assertion_scope_problems(where: str, payload: Any) -> list[str]:
+    """Return scope problems in one ``assertionInfo`` payload.
+
+    DataHub's schema accepts DATASET_COLUMN without ``fields`` — ``fields`` is
+    optional — while documenting that it is expected with that scope. The check
+    is therefore DataSwamp's own contract, not a schema rule: a column-scoped
+    assertion that names no column claims specificity the export does not hold.
+    """
+    dataset_assertion = payload.get("datasetAssertion") if isinstance(payload, dict) else None
+    if not isinstance(dataset_assertion, dict):
+        return []
+    scope = dataset_assertion.get("scope")
+    if scope not in DATASET_ASSERTION_SCOPES:
+        return [f"{where}: assertion scope {scope!r} is not a DataHub DatasetAssertionScope"]
+    if scope == "DATASET_COLUMN" and not dataset_assertion.get("fields"):
+        return [f"{where}: DATASET_COLUMN assertion names no column in 'fields'"]
+    return []
+
 
 def _referenced_urns(mcp: dict[str, Any]) -> list[str]:
     """Return every URN one proposal points at, excluding its own subject."""
@@ -136,6 +161,8 @@ def validate_export(mcps: Sequence[dict[str, Any]], mode: ExportMode) -> list[st
             referenced.setdefault(target, urn)
 
         payload = mcp["aspect"].get("json", {}) if isinstance(mcp["aspect"], dict) else {}
+        if aspect_name == "assertionInfo":
+            problems.extend(_assertion_scope_problems(where, payload))
         properties = payload.get("customProperties", {}) if isinstance(payload, dict) else {}
         if isinstance(properties, dict):
             leaked = sorted(key for key in properties if key.startswith(TRUTH_ONLY_PROPERTY_PREFIX))
@@ -186,6 +213,7 @@ __all__ = [
     "URN_PATTERNS",
     "REQUIRED_ASPECTS",
     "ASSET_REQUIRED_ASPECTS",
+    "DATASET_ASSERTION_SCOPES",
     "validate_export",
     "privileged_tag_missing",
 ]

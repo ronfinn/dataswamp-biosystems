@@ -117,6 +117,40 @@ entries below.
   lists) where the transformation is exact and invertible; stage 2 is forgiveness
   of server-owned state, and `OM_NORMALIZATION_VERSION` counts stage 2 alone.
 
+### Fixed
+
+- **DataHub quality-check assertions no longer claim a column scope** ([#44]).
+  Every quality check was emitted with `datasetAssertion.scope = "DATASET_COLUMN"`,
+  but no DataSwamp check names a column and the adapter emits no `fields`. DataHub's
+  own model says `fields` "is expected to be provided if the assertion scope is
+  DATASET_COLUMN", so the payload was schema-valid (`fields` is optional) yet
+  asserted a column target the source never declared — fabricated specificity,
+  first flagged in #42. The scope is now `UNKNOWN`, a value of
+  `DatasetAssertionScope` at the verified `v1.7.0` and identically at `v0.13.0`,
+  the bottom of `DATAHUB_MODEL_VERSION`. `DATASET_ROWS`, `DATASET_SCHEMA` and
+  `DATASET_STORAGE_SIZE` were not used: mapping a check type onto one would be an
+  interpretation DataSwamp's source does not make. Nothing else in `assertionInfo`
+  or `assertionRunEvent` changed, and no `fields` is invented.
+
+  **`ADAPTER_VERSION` moves `1.1.0` → `1.2.0`** because the emitted payload changes
+  for unchanged input; the two committed DataHub fixtures change in exactly one
+  line each, the scope value. `validate_export()` now refuses a scope outside the
+  pinned enum and a `DATASET_COLUMN` assertion that names no column — a DataSwamp
+  contract rule, not an upstream schema rule. The `quality_check` coverage reason
+  now describes the `UNKNOWN` scope and stays **reasonable**; no count moved.
+  `DATAHUB_MODEL_VERSION`, `VERIFIED_DATAHUB_VERSION`, `NORMALIZATION_VERSION`,
+  the round-trip and coverage schema versions, the golden digests and the package
+  version are unchanged.
+
+  **`UNKNOWN` is schema-valid but not yet live-verified.** The green `v1.7.0`
+  canary exercised `DATASET_COLUMN`; it is evidence for that payload, not this
+  one. The fix needs its own green `live-datahub` run before it is claimed to
+  round-trip on a real server. Migrating to `AssertionType.CUSTOM` — which
+  upstream recommends at `v1.7.0`, where `DatasetAssertionInfo` is deprecated,
+  but which does not exist at `v0.13.0` — is out of scope.
+
+[#44]: https://github.com/ronfinn/dataswamp-biosystems/issues/44
+
 ### Added
 
 - **Stage-1 reconciliation of OpenMetadata's server-side HTML escaping.** The

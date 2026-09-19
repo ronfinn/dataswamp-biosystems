@@ -243,6 +243,6 @@ Stated plainly, so nobody builds on a promise that was never made:
 * **Live DataHub compatibility beyond the tested point.** `ingest-datahub` and
   `verify-ingestion` have been verified against exactly one pinned real release,
   DataHub `v1.7.0`, by a green `live-datahub` canary. No other release is
-  supported, and the declared `DATAHUB_MODEL_VERSION` range (`>=0.13,<2`)
+  claimed, and the declared `DATAHUB_MODEL_VERSION` range (`>=0.13,<2`)
   describes the emitted payload shape, not the REST endpoints. Live support
   remains experimental, as every round-trip report's `live_support` field states.
