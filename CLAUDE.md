@@ -77,9 +77,10 @@ closure — with a first-class `mapping-coverage.json`, plus a **live path**
 strictly downstream of that emitted export: `dataswamp ingest-openmetadata`
 replays it in its emitted order without remapping it and `dataswamp
 verify-om-ingestion` reads it back by FQN and reports completeness, fidelity,
-containment and observed-mode non-leakage as four separate claims, all provable
-offline against a strict fake; there is still **no** verified compatibility
-point and no real-server canary), and
+containment and observed-mode non-leakage as four separate claims, provable
+offline against a strict fake and verified against a pinned real OpenMetadata
+`1.13.3` by the optional, non-blocking `live-openmetadata` canary — in
+**observed mode only**; truth mode has not been run against a real server), and
 the **release surface** (a `dataswamp demo` command running the whole workflow
 into one directory, committed example submissions under `examples/predictions/`,
 and the canonical `config/` tree plus those examples shipped *inside* the

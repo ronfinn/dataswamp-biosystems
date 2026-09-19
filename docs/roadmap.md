@@ -172,39 +172,53 @@ remain future work.
 [#33]: https://github.com/ronfinn/dataswamp-biosystems/issues/33
 [#35]: https://github.com/ronfinn/dataswamp-biosystems/issues/35
 [#39]: https://github.com/ronfinn/dataswamp-biosystems/issues/39
+[#41]: https://github.com/ronfinn/dataswamp-biosystems/issues/41
+[#42]: https://github.com/ronfinn/dataswamp-biosystems/pull/42
 
 ### v0.2 — Metadata and Lineage Integrations
 
-* DataHub live ingestion and round-trip validation — **the offline-testable core
-  has shipped** ([#27]): `dataswamp ingest-datahub` transmits an emitted DataHub
-  export to a running catalogue, and `dataswamp verify-ingestion` reads it back
-  and judges completeness, fidelity, containment and observed-mode non-leakage
-  as four separately-reported claims. It adds no dependency — the client is
+**v0.2 is in progress, not complete.** The package is still versioned `0.1.0`;
+everything below has landed on `main` since the v0.1.0 tag and is unreleased.
+
+#### Completed
+
+* **DataHub live ingestion and round-trip validation** ([#27]):
+  `dataswamp ingest-datahub` transmits an emitted DataHub export to a running
+  catalogue, and `dataswamp verify-ingestion` reads it back and judges
+  completeness, fidelity, containment and observed-mode non-leakage as four
+  separately-reported claims. It adds no dependency — the client is
   standard-library REST, with every endpoint confined to one module (see
   [ADR 0005](adr/0005-direct-rest-datahub-client.md)) — and the whole contract is
   provable offline against a local fake GMS.
-
-  Live GMS support is **verified against exactly one release, DataHub `v1.7.0`**
-  ([#28]) — a compatibility *point*, not a range. An optional weekly Quickstart
-  canary establishes and re-checks it, and every round-trip report names that
-  release rather than claiming a range. The canary earned its keep immediately:
-  it caught a rest.li/OpenAPI dialect mismatch that the whole offline suite had
-  missed, because the fake GMS accepted any request envelope the client chose.
-
-  A drift-canary and model-version policy ([#29]) governs what a red run means —
-  a four-branch triage (DataSwamp bug, server-derived metadata, upstream DataHub
-  change, infrastructure flake), each with a different permitted response, and a
-  rule that normalization is never widened merely to turn the canary green. See
+* **A verified DataHub compatibility point: `v1.7.0`** ([#28]). Live GMS support
+  is verified against exactly that release — a compatibility *point*, not a
+  range. An optional weekly Quickstart canary establishes and re-checks it, and
+  every round-trip report names that release rather than claiming a range. The
+  canary earned its keep immediately: it caught a rest.li/OpenAPI dialect
+  mismatch that the whole offline suite had missed, because the fake GMS accepted
+  any request envelope the client chose.
+* **The DataHub drift-canary and model-version policy** ([#29]), which governs
+  what a red run means — a four-branch triage (DataSwamp bug, server-derived
+  metadata, upstream DataHub change, infrastructure flake), each with a different
+  permitted response, and a rule that normalization is never widened merely to
+  turn the canary green. See
   [datahub.md](datahub.md#when-the-canary-goes-red) and
   [ADR 0006](adr/0006-compatibility-points-not-ranges.md).
-* OpenMetadata integration — **in progress, not shipped.** The deterministic
-  offline mapping and export have landed ([#33]): `dataswamp export-openmetadata`
-  emits an ordered, load-order-aware plan of whole-entity `Create<Entity>`
-  requests against OpenMetadata's **native** model — a `CustomStorage`
-  StorageService over a study → dataset → file Container hierarchy, plus Domains,
-  Data Products, Teams, Glossaries and a Classification — together with a
-  first-class `mapping-coverage.json` recording, per DataSwamp concept, how
-  faithfully it maps and what was deliberately dropped.
+* **The DataHub mapping-coverage contract** ([#41], [#42]). Every DataHub export,
+  in both modes, carries `mapping-coverage.json`: all 24 DataSwamp semantic
+  families, each with a semantic classification, an operational state, a
+  mandatory reason for anything non-exact, and reconciled source, emitted and
+  dropped counts — 4 exact, 9 reasonable, 4 lossy, 7 unsupported. It describes
+  the adapter rather than changing it: no MCP, URN or aspect payload moved. The
+  two adapters declare the same 24 families with deliberately different
+  classifications. See [datahub.md](datahub.md).
+* **The deterministic OpenMetadata export** ([#33]): `dataswamp
+  export-openmetadata` emits an ordered, load-order-aware plan of whole-entity
+  `Create<Entity>` requests against OpenMetadata's **native** model — a
+  `CustomStorage` StorageService over a study → dataset → file Container
+  hierarchy, plus Domains, Data Products, Teams, Glossaries and a Classification
+  — together with a first-class `mapping-coverage.json` recording, per DataSwamp
+  concept, how faithfully it maps and what was deliberately dropped.
 
   It is deliberately **not** a copy of the DataHub adapter's entity/aspect
   architecture, and no `adapters/common/` exists yet: with two adapters it is now
@@ -218,8 +232,7 @@ remain future work.
   distinction. Quality checks are classified **unsupported**, because
   OpenMetadata's `TestDefinition.entityType` admits only `TABLE` and `COLUMN` and
   emitting one for a Container would fabricate applicability.
-
-  **Live ingestion and round-trip validation have now landed too** ([#35]):
+* **OpenMetadata live ingestion and round-trip validation** ([#35]):
   `dataswamp ingest-openmetadata` replays the emitted export in its emitted order
   without remapping it, and `dataswamp verify-om-ingestion` reads the catalogue
   back by fully-qualified name and reports completeness, fidelity, containment and
@@ -228,25 +241,29 @@ remain future work.
   offline against a strict fake that validates requests against OpenMetadata's own
   vendored schemas rather than against the client. Still no catalogue-client
   dependency ([ADR 0007](adr/0007-no-catalogue-client-dependency.md)).
-
-  **The compatibility claim is now exactly one point.** A green canary loaded an
-  *observed* export into a real, pinned OpenMetadata `1.13.3`, so
+* **A verified OpenMetadata compatibility point: `1.13.3`, observed mode only**
+  ([#39]). The optional, non-blocking `live-openmetadata` canary stands up a
+  real, pinned, throwaway OpenMetadata `1.13.3` — upstream's own quickstart
+  compose, sanitized for CI, with no repository secret — and runs the whole
+  product path through it. A completely green run loaded an *observed* export
+  with zero discrepancies and zero leak findings, so
   `VERIFIED_OPENMETADATA_VERSION` names that release and nothing else, per
-  [ADR 0006](adr/0006-compatibility-points-not-ranges.md). Truth mode has not been
-  run against a server. The first canary is also what proved the point of the
-  rule: the offline fake was green while a real server disagreed 913 times.
+  [ADR 0006](adr/0006-compatibility-points-not-ranges.md). **Truth mode has not
+  been run against a real server.** The first canary is also what proved the
+  point of the rule: the offline fake was green while a real server disagreed
+  913 times. See [openmetadata.md](openmetadata.md).
 
-  The optional `live-openmetadata` canary ([#39]) now exists to earn that point:
-  it stands up a real, pinned, throwaway OpenMetadata `1.13.3` — upstream's own
-  quickstart compose, sanitized for CI, with no repository secret — and runs the
-  whole product path through it. It is non-blocking and never a required check.
-  **Implementing a canary is not running one**, so the constant is unchanged
-  until a completely green real-server run exists. See
-  [openmetadata.md](openmetadata.md).
+#### Remaining
+
 * OpenLineage event export
 * Neo4j graph export
 * Integration examples
 * Integration-specific validation reports
+
+Neither live compatibility point is a range: no DataHub release other than
+`v1.7.0` and no OpenMetadata release other than `1.13.3` is claimed, and
+OpenMetadata truth mode has no live evidence. Widening either needs its own green
+canary run.
 
 ### v0.3 — Scientific Domain Packs
 
